@@ -156,6 +156,7 @@ import pytest
 
 pytestmark = pytest.mark.vcr  # Module-level marker — all tests in this file use VCR
 
+
 async def test_basic_completion(real_pool):
     """Test basic text completion via native agent."""
     agent = real_pool.get_agent("test_agent")
@@ -297,6 +298,7 @@ Use `dirty-equals` for partial matching of event sequences:
 ```python
 from dirty_equals import IsStr, IsPartialDict, IsNow
 
+
 async def test_acp_streaming_events(acp_client, real_pool):
     """Verify ACP streaming event order and structure."""
     events = await acp_client.send_prompt("test_agent", "Say hello")
@@ -306,7 +308,7 @@ async def test_acp_streaming_events(acp_client, real_pool):
     assert event_types == [
         "run_started",
         "part_start",
-        "part_delta",   # may repeat
+        "part_delta",  # may repeat
         "part_delta",
         "part_end",
         "stream_complete",
@@ -373,6 +375,7 @@ async def test_acp():
 ```python
 # GOOD: Real pool + VCR cassette, tests actual event flow
 pytestmark = pytest.mark.vcr
+
 
 async def test_acp(real_pool):
     agent = real_pool.get_agent("test_agent")

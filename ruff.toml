@@ -94,6 +94,7 @@ ignore = [
   "PLC0415",
   "PLR0912",  # Too many branches
   "PLR0913",  # Too many arguments to function call
+  "PLR0917",  # Too many positional arguments
   # "PLR2004", # Magic values instead of named consts
   "SLF001",  # Private member accessed
   "TRY003",  # Avoid specifying long messages outside the exception class

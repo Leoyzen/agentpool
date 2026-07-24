@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai.tools import ToolReturn
+from pydantic_ai.messages import ToolReturn
 import pytest
 
 from agentpool.capabilities.file_team_state import FileTeamState

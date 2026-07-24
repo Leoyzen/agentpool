@@ -60,11 +60,8 @@ from typing import TYPE_CHECKING, Annotated, Any, cast, override
 import uuid
 
 from pydantic.fields import Field
-from pydantic_ai.tools import (
-    RunContext,
-    ToolDefinition,
-    ToolReturn,
-)
+from pydantic_ai.messages import ToolReturn
+from pydantic_ai.tools import RunContext  # noqa: TC002 - needed at runtime for get_type_hints()
 
 from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 from agentpool.log import get_logger
@@ -74,6 +71,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pydantic_ai.run import AgentRunResult
+    from pydantic_ai.tools import ToolDefinition
 
     from agentpool.capabilities.agent_context import AgentContext
     from agentpool.capabilities.file_team_state import FileTeamState
@@ -1026,8 +1024,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if total_lines == 0:
             return ToolReturn(
                 return_value=[
-                    f'<blackboard version="{version}" written_by="{written_by}" '
-                    f'written_at="{written_at}" total_lines="0">',
+                    (
+                        f'<blackboard version="{version}" written_by="{written_by}" '
+                        f'written_at="{written_at}" total_lines="0">'
+                    ),
                     "</blackboard>",
                 ],
             )
@@ -1952,7 +1952,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Auto-broadcast to existing members (excluding lead and new member).
         if self._config.broadcast_on_create:
-            roster_lines: list[str] = []
+            roster_lines = []
             for m_name, m_info in updated_members.items():
                 m_agent = m_info.get("agent", m_name)
                 role_tag = " (lead)" if m_name == lead_member_name else ""

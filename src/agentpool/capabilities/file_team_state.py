@@ -299,7 +299,7 @@ class FileTeamState:
             pid: str | None = t.get("parent_id")
             if pid is not None and pid in task_by_id:
                 parent = task_by_id[pid]
-                tid: str = t.get("task_id", "")
+                tid = t.get("task_id", "")
                 parent.setdefault("children", []).append(tid)
 
         for t in tasks:
