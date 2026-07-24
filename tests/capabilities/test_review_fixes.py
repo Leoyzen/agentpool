@@ -220,7 +220,7 @@ class TestMcpServerCapUriParsing:
 
 
 class TestMatcherFnBackwardCompat:
-    """SkillManagerCap.before_model_request should support 2-arg matcher_fn."""
+    """SkillManagerCap.get_instructions callable should support 2-arg matcher_fn."""
 
     @pytest.mark.asyncio
     async def test_two_arg_matcher_fn_receives_skill_names(self) -> None:
@@ -248,13 +248,17 @@ class TestMatcherFnBackwardCompat:
             matcher_fn=matcher_2arg,
         )
 
-        # Build a minimal request context
-        messages: list[Any] = []
-        request_ctx = MagicMock()
-        request_ctx.messages = messages
+        # get_instructions returns [metadata, callable]
+        result = cap.get_instructions()
+        assert result is not None
+        assert isinstance(result, list)
+        dynamic_fn = result[1]
 
+        # Call the dynamic callable with a mock RunContext
+        messages: list[Any] = []
         run_ctx = MagicMock()
-        await cap.before_model_request(run_ctx, request_ctx)
+        run_ctx.messages = messages
+        await dynamic_fn(run_ctx)
 
         # Verify matcher was called with 2 args
         assert len(received_args) == 1
@@ -285,12 +289,17 @@ class TestMatcherFnBackwardCompat:
             matcher_fn=matcher_1arg,
         )
 
-        messages: list[Any] = []
-        request_ctx = MagicMock()
-        request_ctx.messages = messages
+        # get_instructions returns [metadata, callable]
+        result = cap.get_instructions()
+        assert result is not None
+        assert isinstance(result, list)
+        dynamic_fn = result[1]
 
+        # Call the dynamic callable with a mock RunContext
+        messages: list[Any] = []
         run_ctx = MagicMock()
-        await cap.before_model_request(run_ctx, request_ctx)
+        run_ctx.messages = messages
+        await dynamic_fn(run_ctx)
 
         assert len(received_messages) == 1
         assert received_messages[0] is messages

@@ -25,6 +25,7 @@ Composition rules:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -34,8 +35,10 @@ from pydantic_ai.toolsets import AbstractToolset, AgentToolset, CombinedToolset
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator
     from types import TracebackType
+
+    from pydantic_ai.capabilities.abstract import AgentInstructions  # type: ignore[attr-defined]
 
     from agentpool.capabilities.change_event import ChangeEvent
     from agentpool.tools.base import Tool
@@ -162,21 +165,34 @@ class CombinedToolsetCapability(AbstractCapability[AgentDepsT]):
             return None
         return CombinedToolset(toolsets=toolsets)
 
-    def get_instructions(self) -> str | None:
+    def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
         r"""Return concatenated instructions from all children.
 
-        Collects non-``None`` instruction strings from all children and
-        joins them with ``"\n\n"``. Returns ``None`` if no child
-        provides instructions.
+        Collects non-``None`` instructions from all children. Handles
+        ``str``, callables, and sequences (lists/tuples) — previous
+        implementation silently dropped non-``str`` returns, which
+        prevented children from returning dynamic instruction callables.
+
+        When all parts are strings, joins them with ``"\n\n"`` and returns
+        a single ``str`` (backward compat). When any part is a callable,
+        returns the full list so pydantic-ai can mark callables as
+        ``dynamic=True``.
         """
-        parts: list[str] = []
+        parts: list[str | Any] = []
         for cap in self._capabilities:
             instr = cap.get_instructions()
-            if isinstance(instr, str):
+            if instr is None:
+                continue
+            if isinstance(instr, str) or callable(instr):
                 parts.append(instr)
+            elif isinstance(instr, Sequence):
+                parts.extend(instr)
         if not parts:
             return None
-        return "\n\n".join(parts)
+        # If all parts are strings, join for backward compat.
+        if all(isinstance(p, str) for p in parts):
+            return "\n\n".join(parts)
+        return parts
 
     # ---- Backward compat: tool collection ----
 

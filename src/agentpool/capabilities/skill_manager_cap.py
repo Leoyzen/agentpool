@@ -34,7 +34,6 @@ from pydantic_ai.toolsets import (
 )
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-from agentpool.capabilities.memory import _inject_into_system_prompt
 from agentpool.capabilities.resource_protocols import (
     ChangeObservable,
     CommandEntry,
@@ -50,7 +49,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from pydantic_ai.capabilities import AbstractCapability
-    from pydantic_ai.models import ModelRequestContext
+    from pydantic_ai.capabilities.abstract import AgentInstructions  # type: ignore[attr-defined]
 
     from agentpool.capabilities.mcp_server_cap import McpServerCap
     from agentpool.skills.skill import Skill
@@ -314,17 +313,34 @@ class SkillManagerCap(
 
     # ---- AbstractCapability: instructions ----
 
-    def get_instructions(self) -> str | None:
-        """Return metadata-only ``<available-skills>`` XML block.
+    def get_instructions(self) -> AgentInstructions[AgentDepsT] | None:
+        """Return metadata XML and a dynamic callable for skill content.
 
-        Implements progressive disclosure: metadata at compilation,
-        full instructions on demand via ``before_model_request``.
+        Implements progressive disclosure:
 
-        Returns:
-            XML string with skill names and descriptions, or ``None``.
+        - **Static metadata** (``<available-skills>`` XML): returned as a
+          plain ``str`` so pydantic-ai marks it ``dynamic=False`` — cacheable
+          by Anthropic prompt caching and OpenAI prefix caching.
+        - **Dynamic skill content** (``<skill_content>`` blocks): returned as
+          a callable that receives ``RunContext`` at run time. The callable
+          uses ``ctx.messages`` for matcher-based skill selection.
+          Pydantic-ai marks callable results ``dynamic=True`` — correct for
+          per-turn dynamic content.
+
+        This replaces the old ``before_model_request`` approach that mutated
+        ``SystemPromptPart.content`` in-place every turn (which invalidated
+        the prefix cache).
+
+        Returns ``None`` when there are no local skills.
         """
         if not self._local_skills:
             return None
+
+        metadata = self._build_metadata_xml()
+        return [metadata, self._build_dynamic_skill_content]
+
+    def _build_metadata_xml(self) -> str:
+        """Build the static ``<available-skills>`` XML block."""
         lines = ["<available-skills>"]
         for name, skill in self._local_skills.items():
             if skill.disable_model_invocation:
@@ -334,30 +350,17 @@ class SkillManagerCap(
         lines.append("</available-skills>")
         return "\n".join(lines)
 
-    # ---- AbstractCapability: before_model_request ----
+    async def _build_dynamic_skill_content(self, ctx: RunContext[AgentDepsT]) -> str | None:
+        """Build ``<skill_content>`` blocks for skills matched against the conversation.
 
-    async def before_model_request(
-        self,
-        ctx: RunContext[AgentDepsT],
-        request_context: ModelRequestContext,
-    ) -> ModelRequestContext:
-        """Inject full instructions for relevant skills.
-
-        When ``matcher_fn`` is set, calls it to select 2-3 relevant skills.
+        When ``matcher_fn`` is set, calls it to select relevant skills.
         When ``matcher_fn`` is ``None``, injects all skills (backward compat).
         Skills in ``_always_active`` bypass the matcher.
-
-        Args:
-            ctx: The pydantic-ai run context.
-            request_context: The model request context with messages.
-
-        Returns:
-            The (possibly modified) request context.
         """
         if not self._local_skills:
-            return request_context
+            return None
 
-        messages = request_context.messages
+        messages = ctx.messages
 
         # Determine which skills to inject.
         if self._matcher_fn is not None:
@@ -377,7 +380,7 @@ class SkillManagerCap(
         matched |= self._always_active & set(self._local_skills.keys())
 
         if not matched:
-            return request_context
+            return None
 
         # Build injection text.
         parts: list[str] = []
@@ -394,12 +397,7 @@ class SkillManagerCap(
                     f'<skill_content name="{escaped_name}">\n{instructions}\n</skill_content>'
                 )
 
-        if not parts:
-            return request_context
-
-        injected = "\n\n".join(parts)
-        _inject_into_system_prompt(messages, injected)
-        return request_context
+        return "\n\n".join(parts) if parts else None
 
     @property
     def has_wrap_node_run(self) -> bool:
