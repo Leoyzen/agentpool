@@ -21,6 +21,7 @@ from agentpool.agents.prompt_injection import PromptInjectionManager
 from agentpool.log import get_logger
 from agentpool.messaging.context import NodeContext
 from agentpool.tools import CallDeferred
+from agentpool.ui.elicitation import normalize_elicit_content
 
 
 if TYPE_CHECKING:
@@ -531,7 +532,10 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # ElicitationResumePayload path.
         match payload.action:
             case "accept":
-                return MCPElicitResult(action="accept", content=payload.content)
+                return MCPElicitResult(
+                    action="accept",
+                    content=normalize_elicit_content(payload.content),
+                )
             case "decline":
                 return MCPElicitResult(action="decline")
             case "cancel":
