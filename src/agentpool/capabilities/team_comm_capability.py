@@ -318,7 +318,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # creations 5-20ms apart. This prevents sort mismatches in OpenCode
         # TUI subagent numbering when multiple members are created in
         # rapid succession (team_create loop or sequential team_add_member).
-        await asyncio.sleep(random.uniform(0.005, 0.02))
+        await asyncio.sleep(random.uniform(0.015, 0.05))
 
         from agentpool.agents.events.events import SpawnSessionStart
 
