@@ -100,6 +100,14 @@ class EventProcessorContext:
     # user message sorts between the two assistant messages in the TUI.
     _steer_received: bool = field(default=False, init=False)
 
+    # Dedup set: message_ids already displayed as UserMessage.
+    # When steer()/followup() emits a fire-and-forget
+    # UserMessageInsertedEvent AND EnqueuedMessagesEvent also produces
+    # one with the same message_id (reused via
+    # _pending_enqueue_message_ids), the processor skips the second
+    # event. NOT cleared between turns — persists for the session.
+    displayed_message_ids: set[str] = field(default_factory=set, init=False)
+
     def __post_init__(self) -> None:
         from agentpool.utils.time_utils import now_ms
 

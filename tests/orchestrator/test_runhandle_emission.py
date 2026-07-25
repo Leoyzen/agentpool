@@ -1,14 +1,15 @@
-"""Tests for RunHandle steer/followup emission scope reduction.
+"""Tests for RunHandle steer/followup emission behavior.
 
 Verifies that:
-- ``steer()`` does NOT call ``_schedule_user_message_emission()`` when
-  ``_enqueued_messages_available=True`` and ``active_agent_run`` is not ``None``.
-- ``steer()`` DOES call ``_schedule_user_message_emission()`` as fallback
-  when ``active_agent_run`` is ``None`` (inter-turn).
-- ``followup()`` does NOT call ``_schedule_user_message_emission()`` when
-  ``_enqueued_messages_available=True`` and ``active_agent_run`` is not ``None``.
-- ``followup()`` DOES call ``_schedule_user_message_emission()`` as fallback
-  when ``active_agent_run`` is ``None`` (inter-turn).
+- ``steer()`` ALWAYS calls ``_schedule_user_message_emission()`` when
+  ``emit_user_message=True``, regardless of ``_enqueued_messages_available``
+  or ``active_agent_run`` state.
+- ``followup()`` ALWAYS calls ``_schedule_user_message_emission()`` when
+  ``emit_user_message=True``.
+- ``steer()`` appends ``message_id`` to ``_pending_enqueue_message_ids``
+  before calling ``agent_run.enqueue()``.
+- ``followup()`` appends ``message_id`` to ``_pending_enqueue_message_ids``
+  before calling ``agent_run.enqueue()``.
 - ``followup()`` uses ``agent_run.enqueue(content, priority='when_idle')``
   when ``active_agent_run`` is not ``None``.
 - ``followup()`` falls back to ``session.prompt_queue`` when
@@ -87,33 +88,43 @@ async def _drain_tasks() -> None:
 
 
 # ---------------------------------------------------------------------------
-# steer() emission scope tests
+# steer() emission tests — always emit when emit_user_message=True
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
-async def test_steer_skips_emission_when_enqueued_available_and_agent_run_active() -> None:
+async def test_steer_emits_when_enqueued_available_and_agent_run_active() -> None:
     """When EnqueuedMessagesEvent is available and active_agent_run is set,
-    steer() must NOT call _schedule_user_message_emission().
+    steer() STILL calls _schedule_user_message_emission() — the dedup is
+    handled at the converter level, not at the emission level.
     """  # noqa: D205
     agent_run = MagicMock()
+    event_bus = AsyncMock()
     handle = _make_handle(
+        event_bus=event_bus,
         enqueued_available=True,
         active_agent_run=agent_run,
     )
-    handle._schedule_user_message_emission = MagicMock()
 
     handle.steer("steer content")
 
-    handle._schedule_user_message_emission.assert_not_called()
+    await _drain_tasks()
+
+    user_msg_events = [
+        call
+        for call in event_bus.publish.call_args_list
+        if isinstance(call.args[1], UserMessageInsertedEvent)
+    ]
+    assert len(user_msg_events) == 1
+    assert user_msg_events[0].args[1].delivery == "steer"
     # Verify the actual enqueue happened.
     agent_run.enqueue.assert_called_once_with("steer content", priority="asap")
 
 
 @pytest.mark.unit
-async def test_steer_falls_back_to_emission_when_agent_run_is_none() -> None:
-    """When active_agent_run is None (inter-turn), steer() MUST call
-    _schedule_user_message_emission() even if EnqueuedMessagesEvent is available.
+async def test_steer_emits_when_agent_run_is_none() -> None:
+    """When active_agent_run is None (inter-turn), steer() calls
+    _schedule_user_message_emission().
     """  # noqa: D205
     event_bus = AsyncMock()
     handle = _make_handle(
@@ -126,7 +137,6 @@ async def test_steer_falls_back_to_emission_when_agent_run_is_none() -> None:
 
     await _drain_tasks()
 
-    # Emission should have been scheduled.
     user_msg_events = [
         call
         for call in event_bus.publish.call_args_list
@@ -137,9 +147,9 @@ async def test_steer_falls_back_to_emission_when_agent_run_is_none() -> None:
 
 
 @pytest.mark.unit
-async def test_steer_falls_back_to_emission_when_enqueued_unavailable() -> None:
-    """When EnqueuedMessagesEvent is NOT available, steer() must call
-    _schedule_user_message_emission() even if agent_run is active.
+async def test_steer_emits_when_enqueued_unavailable() -> None:
+    """When EnqueuedMessagesEvent is NOT available, steer() calls
+    _schedule_user_message_emission().
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()
@@ -161,34 +171,62 @@ async def test_steer_falls_back_to_emission_when_enqueued_unavailable() -> None:
     assert len(user_msg_events) == 1
 
 
-# ---------------------------------------------------------------------------
-# followup() emission scope tests
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.unit
-async def test_followup_skips_emission_when_enqueued_available_and_agent_run_active() -> None:
-    """When EnqueuedMessagesEvent is available and active_agent_run is set,
-    followup() must NOT call _schedule_user_message_emission().
+async def test_steer_appends_message_id_to_pending_queue() -> None:
+    """steer() appends message_id to _pending_enqueue_message_ids before
+    calling agent_run.enqueue().
     """  # noqa: D205
     agent_run = MagicMock()
     handle = _make_handle(
         enqueued_available=True,
         active_agent_run=agent_run,
     )
-    handle._schedule_user_message_emission = MagicMock()
+
+    result = handle.steer("steer content")
+
+    assert result is not None
+    assert result in handle.run_ctx._pending_enqueue_message_ids
+    assert len(handle.run_ctx._pending_enqueue_message_ids) == 1
+
+
+# ---------------------------------------------------------------------------
+# followup() emission tests — always emit when emit_user_message=True
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_followup_emits_when_enqueued_available_and_agent_run_active() -> None:
+    """When EnqueuedMessagesEvent is available and active_agent_run is set,
+    followup() STILL calls _schedule_user_message_emission() when
+    emit_user_message=True — the dedup is handled at the converter level.
+    """  # noqa: D205
+    agent_run = MagicMock()
+    event_bus = AsyncMock()
+    handle = _make_handle(
+        event_bus=event_bus,
+        enqueued_available=True,
+        active_agent_run=agent_run,
+    )
 
     handle.followup("followup content", emit_user_message=True)
 
-    handle._schedule_user_message_emission.assert_not_called()
+    await _drain_tasks()
+
+    user_msg_events = [
+        call
+        for call in event_bus.publish.call_args_list
+        if isinstance(call.args[1], UserMessageInsertedEvent)
+    ]
+    assert len(user_msg_events) == 1
+    assert user_msg_events[0].args[1].delivery == "followup"
     # Verify the enqueue happened with when_idle priority.
     agent_run.enqueue.assert_called_once_with("followup content", priority="when_idle")
 
 
 @pytest.mark.unit
-async def test_followup_falls_back_to_emission_when_agent_run_is_none() -> None:
-    """When active_agent_run is None (inter-turn), followup() MUST call
-    _schedule_user_message_emission() even if EnqueuedMessagesEvent is available.
+async def test_followup_emits_when_agent_run_is_none() -> None:
+    """When active_agent_run is None (inter-turn), followup() calls
+    _schedule_user_message_emission().
     """  # noqa: D205
     event_bus = AsyncMock()
     handle = _make_handle(
@@ -211,9 +249,9 @@ async def test_followup_falls_back_to_emission_when_agent_run_is_none() -> None:
 
 
 @pytest.mark.unit
-async def test_followup_falls_back_to_emission_when_enqueued_unavailable() -> None:
-    """When EnqueuedMessagesEvent is NOT available, followup() must call
-    _schedule_user_message_emission() even if agent_run is active.
+async def test_followup_emits_when_enqueued_unavailable() -> None:
+    """When EnqueuedMessagesEvent is NOT available, followup() calls
+    _schedule_user_message_emission().
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()
@@ -233,6 +271,24 @@ async def test_followup_falls_back_to_emission_when_enqueued_unavailable() -> No
         if isinstance(call.args[1], UserMessageInsertedEvent)
     ]
     assert len(user_msg_events) == 1
+
+
+@pytest.mark.unit
+async def test_followup_appends_message_id_to_pending_queue() -> None:
+    """followup() appends message_id to _pending_enqueue_message_ids before
+    calling agent_run.enqueue().
+    """  # noqa: D205
+    agent_run = MagicMock()
+    handle = _make_handle(
+        enqueued_available=True,
+        active_agent_run=agent_run,
+    )
+
+    result = handle.followup("followup content", emit_user_message=True)
+
+    assert result is not None
+    assert result in handle.run_ctx._pending_enqueue_message_ids
+    assert len(handle.run_ctx._pending_enqueue_message_ids) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +345,7 @@ async def test_followup_falls_back_to_prompt_queue_when_agent_run_none() -> None
 
 
 # ---------------------------------------------------------------------------
-# Inter-turn fallback test (Task 4.7)
+# Inter-turn fallback tests
 # ---------------------------------------------------------------------------
 
 

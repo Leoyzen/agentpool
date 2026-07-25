@@ -177,6 +177,7 @@ class NativeTurn(HookAwareTurn, Turn):
                 mapper = EventMapper(
                     agent_name=self._agent.name,
                     message_id=self._message_id,
+                    _enqueue_message_ids=self._run_ctx._pending_enqueue_message_ids,
                 )
 
                 terminal_tool_names: set[str] = set()

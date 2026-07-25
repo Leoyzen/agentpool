@@ -112,3 +112,73 @@ def test_enqueued_messages_no_user_prompt_part_returns_none() -> None:
     result = mapper.map_event(event, current_node_type="ModelRequestNode")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# FIFO message_id reuse tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_enqueued_messages_reuses_message_id_from_fifo_queue() -> None:
+    """handle_enqueued_messages() reuses message_id from _enqueue_message_ids
+    FIFO queue instead of generating a new UUID.
+    """  # noqa: D205
+    fifo: list[str] = ["steer-msg-123"]
+    mapper = EventMapper(
+        agent_name="test-agent",
+        message_id="msg-001",
+        _enqueue_message_ids=fifo,
+    )
+    event = _make_enqueued_event("Steer content")
+
+    result = mapper.map_event(event, current_node_type="ModelRequestNode")
+
+    assert result is not None
+    assert isinstance(result, UserMessageInsertedEvent)
+    assert result.message_id == "steer-msg-123"
+    # FIFO should be drained.
+    assert len(fifo) == 0
+
+
+@pytest.mark.unit
+def test_enqueued_messages_generates_uuid_when_fifo_empty() -> None:
+    """handle_enqueued_messages() generates a new UUID when the FIFO queue
+    is empty (no steer/followup preceded the enqueue).
+    """  # noqa: D205
+    mapper = EventMapper(
+        agent_name="test-agent",
+        message_id="msg-001",
+        _enqueue_message_ids=[],
+    )
+    event = _make_enqueued_event("Spontaneous enqueue")
+
+    result = mapper.map_event(event, current_node_type="ModelRequestNode")
+
+    assert result is not None
+    assert isinstance(result, UserMessageInsertedEvent)
+    assert result.message_id  # non-empty
+    assert result.message_id != "msg-001"  # not the mapper's internal ID
+
+
+@pytest.mark.unit
+def test_enqueued_messages_fifo_pop_order() -> None:
+    """Multiple message_ids in FIFO are popped in FIFO order (first in, first out)."""
+    fifo: list[str] = ["msg-a", "msg-b", "msg-c"]
+    mapper = EventMapper(
+        agent_name="test-agent",
+        message_id="msg-001",
+        _enqueue_message_ids=fifo,
+    )
+
+    result1 = mapper.map_event(_make_enqueued_event("first"), current_node_type="ModelRequestNode")
+    result2 = mapper.map_event(_make_enqueued_event("second"), current_node_type="ModelRequestNode")
+    result3 = mapper.map_event(_make_enqueued_event("third"), current_node_type="ModelRequestNode")
+
+    assert result1 is not None
+    assert result2 is not None
+    assert result3 is not None
+    assert result1.message_id == "msg-a"
+    assert result2.message_id == "msg-b"
+    assert result3.message_id == "msg-c"
+    assert len(fifo) == 0

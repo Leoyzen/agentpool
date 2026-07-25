@@ -73,12 +73,19 @@ class EventMapper:
             empty, in which case all tools receive ``"other"``.
     """
 
-    def __init__(self, agent_name: str, message_id: str) -> None:
+    def __init__(
+        self,
+        agent_name: str,
+        message_id: str,
+        *,
+        _enqueue_message_ids: list[str] | None = None,
+    ) -> None:
         self._agent_name = agent_name
         self._message_id = message_id
         self._pending_tool_calls: dict[str, str] = {}
         self._pending_tool_inputs: dict[str, dict[str, Any]] = {}
         self.tool_kind_map: dict[str, str] = {}
+        self._enqueue_message_ids = _enqueue_message_ids or []
 
     def map_event(  # noqa: PLR0911
         self,
@@ -236,9 +243,19 @@ class EventMapper:
         else:
             delivery = "steer"
 
+        # Reuse message_id from the FIFO queue (set by steer()/followup()
+        # before calling agent_run.enqueue()). This ensures the
+        # UserMessageInsertedEvent from EnqueuedMessagesEvent shares the
+        # same message_id as the fire-and-forget emission, enabling
+        # converter-level dedup.
+        if self._enqueue_message_ids:
+            message_id = self._enqueue_message_ids.pop(0)
+        else:
+            message_id = str(uuid.uuid4())
+
         return UserMessageInsertedEvent(
             session_id="",
-            message_id=str(uuid.uuid4()),
+            message_id=message_id,
             content=content,
             delivery=delivery,
             source="internal",

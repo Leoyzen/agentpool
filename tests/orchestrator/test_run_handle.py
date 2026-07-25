@@ -183,13 +183,13 @@ async def test_steer_while_running_with_agent_run() -> None:
 
 @pytest.mark.unit
 async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
-    """steer() with active agent_run: emission depends on EnqueuedMessagesEvent.
+    """steer() with active agent_run: always emits UserMessageInsertedEvent.
 
-    When ``EnqueuedMessagesEvent`` is available (pydantic-ai >= 2.18) and
-    ``active_agent_run`` is set, ``_schedule_user_message_emission()`` is
-    skipped because the stream itself emits the display event via
-    ``EnqueuedMessagesEvent``. When not available, the manual emission
-    fires as before.
+    The fire-and-forget emission always fires when ``emit_user_message=True``.
+    When ``EnqueuedMessagesEvent`` is also available, the converter-level
+    dedup (``_displayed_message_ids`` set) prevents duplicate display —
+    both events share the same ``message_id`` via the
+    ``_pending_enqueue_message_ids`` FIFO queue.
     """
     from agentpool.agents.events.events import UserMessageInsertedEvent
 
@@ -213,15 +213,12 @@ async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
         envelope = queue.get_nowait()
         received_events.append(envelope.event)
 
-    # When EnqueuedMessagesEvent is available, manual emission is skipped.
+    # Emission always fires when emit_user_message=True.
     user_msg_events = [e for e in received_events if isinstance(e, UserMessageInsertedEvent)]
-    if handle._enqueued_messages_available:
-        assert len(user_msg_events) == 0
-    else:
-        assert len(user_msg_events) == 1
-        assert user_msg_events[0].delivery == "steer"
-        assert user_msg_events[0].source == "internal"
-        assert user_msg_events[0].content == "inject me"
+    assert len(user_msg_events) == 1
+    assert user_msg_events[0].delivery == "steer"
+    assert user_msg_events[0].source == "internal"
+    assert user_msg_events[0].content == "inject me"
 
 
 @pytest.mark.unit

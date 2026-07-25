@@ -684,6 +684,9 @@ class RunHandle:
 
         agent_run = self.active_agent_run
         if agent_run is not None:
+            # Append message_id to FIFO queue BEFORE enqueue so
+            # handle_enqueued_messages() can reuse the same ID.
+            self.run_ctx._pending_enqueue_message_ids.append(fb.message_id)
             if fb.content_blocks is not None:
                 agent_run.enqueue(*fb.content_blocks, priority="asap")
             else:
@@ -703,11 +706,12 @@ class RunHandle:
             self.run_ctx.queued_steer_messages.append(fb.content)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        # When EnqueuedMessagesEvent is available AND an active agent_run
-        # exists, the stream itself emits the display event via
-        # EnqueuedMessagesEvent, so we skip the manual emission to avoid
-        # duplicate user message display in protocol frontends.
-        if emit_user_message and (not self._enqueued_messages_available or agent_run is None):
+        # Always emit when emit_user_message=True. The converter-level
+        # dedup (_displayed_message_ids set in ACPEventConverter and
+        # EventProcessorContext) skips the duplicate by message_id when
+        # EnqueuedMessagesEvent also produces a UserMessageInsertedEvent
+        # with the same ID (reused from _pending_enqueue_message_ids).
+        if emit_user_message:
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
@@ -782,6 +786,9 @@ class RunHandle:
             # PendingMessageDrainCapability fires EnqueuedMessagesEvent
             # for display. The prompt will be drained as a "when_idle"
             # message after the current node finishes.
+            # Append message_id to FIFO queue BEFORE enqueue so
+            # handle_enqueued_messages() can reuse the same ID.
+            self.run_ctx._pending_enqueue_message_ids.append(message_id)
             if isinstance(message, list):
                 agent_run.enqueue(*message, priority="when_idle")
             else:
@@ -792,10 +799,12 @@ class RunHandle:
             session.prompt_queue.put_nowait(message)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        # When EnqueuedMessagesEvent is available AND an active agent_run
-        # exists, the stream itself emits the display event, so we skip
-        # the manual emission to avoid duplicate display.
-        if emit_user_message and (not self._enqueued_messages_available or agent_run is None):
+        # Always emit when emit_user_message=True. The converter-level
+        # dedup (_displayed_message_ids set in ACPEventConverter and
+        # EventProcessorContext) skips the duplicate by message_id when
+        # EnqueuedMessagesEvent also produces a UserMessageInsertedEvent
+        # with the same ID (reused from _pending_enqueue_message_ids).
+        if emit_user_message:
             self._schedule_user_message_emission(message, "followup", message_id=message_id)
 
         return message_id
