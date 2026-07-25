@@ -15,6 +15,7 @@ import logfire
 from pydantic_ai import (
     Agent as PydanticAgent,
     AgentRetries,
+    UsageLimits,
 )
 from pydantic_ai.capabilities import NativeTool, ProcessHistory
 from pydantic_ai.models import Model
@@ -40,7 +41,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from exxec import ExecutionEnvironment
-    from pydantic_ai import AgentNativeTool as AgentBuiltinTool, UsageLimits, UserContent
+    from pydantic_ai import AgentNativeTool as AgentBuiltinTool, UserContent
     from pydantic_ai.capabilities import AbstractCapability
     from pydantic_ai.messages import ModelMessage
     from pydantic_ai.models import Model
@@ -317,7 +318,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             has_hooks=hooks is not None,
             hooks_repr=repr(hooks) if hooks else "None",
         )
-        self._default_usage_limits = usage_limits
+        self._default_usage_limits = usage_limits or UsageLimits(request_limit=None)
         self._providers = list(providers) if providers else None  # model discovery
         self._direct_history_processors = list(history_processors) if history_processors else None
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
