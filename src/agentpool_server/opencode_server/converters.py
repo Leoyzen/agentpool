@@ -575,6 +575,16 @@ def session_data_to_opencode(data: SessionData) -> Session:
     # Convert datetime to milliseconds timestamp
     created_ms = datetime_to_ms(data.created_at)
     updated_ms = datetime_to_ms(data.last_active)
+    # Override created_ms with the timestamp embedded in the session ID
+    # when available.  Old sessions persisted before the created_at_ns
+    # sync fix have stored created_at from get_now() (a separate wall-
+    # clock call), which can differ from the session ID's timestamp by
+    # milliseconds — enough to cause sort mismatches in the TUI.
+    from agentpool.utils.identifiers import extract_timestamp_ms
+
+    id_ts = extract_timestamp_ms(data.session_id)
+    if id_ts is not None:
+        created_ms = id_ts
     # Extract revert/share from metadata if present
     revert = None
     share = None
