@@ -84,11 +84,17 @@ def event_bus(bridged_state: ServerState) -> EventBus:
 
 
 @pytest.mark.anyio
-async def test_legacy_path_broadcasts_to_sse_only(
+async def test_legacy_path_no_event_push(
     tmp_project_dir: Path,
     mock_agent: Mock,
 ) -> None:
-    """Without a session_controller, events flow only to SSE subscribers."""
+    """Without a session_controller, broadcast_event is a no-op (no queue push).
+
+    The legacy path that pushed events directly to event_subscribers queues
+    has been removed. Event delivery now flows exclusively through the EventBus
+    via the event bridge. When no bridge is available, broadcast_event logs
+    a debug message and returns without pushing to any queues.
+    """
     state = ServerState(
         working_dir=str(tmp_project_dir),
         agent=mock_agent,
@@ -100,8 +106,8 @@ async def test_legacy_path_broadcasts_to_sse_only(
     event = SessionStatusEvent.create("sess-legacy", SessionStatus(type="busy"))
     await state.broadcast_event(event)
 
-    assert queue.qsize() == 1
-    assert queue.get_nowait() is event
+    # No events should be pushed to subscriber queues
+    assert queue.qsize() == 0
 
 
 @pytest.mark.anyio
@@ -124,18 +130,23 @@ async def test_legacy_path_no_bridge_created(
 
 
 @pytest.mark.anyio
-async def test_session_pool_path_broadcasts_to_sse(
+async def test_session_pool_path_does_not_push_to_sse_queues(
     bridged_state: ServerState,
 ) -> None:
-    """With the bridge active, events still reach SSE subscribers."""
+    """With the bridge active, events flow through EventBus only (not SSE queues).
+
+    The legacy event_subscribers queue push has been removed from
+    event_bridge.publish(). Events are delivered exclusively through
+    the EventBus subscription mechanism.
+    """
     queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
 
     event = SessionStatusEvent.create("sess-pool", SessionStatus(type="busy"))
     await bridged_state.broadcast_event(event)
 
-    assert queue.qsize() == 1
-    assert queue.get_nowait() is event
+    # SSE subscriber queues should NOT receive events (dead code removed)
+    assert queue.qsize() == 0
 
 
 @pytest.mark.anyio
@@ -207,11 +218,11 @@ async def test_global_event_not_republished_to_event_bus(
     with pytest.raises(asyncio.QueueEmpty):
         subscriber.get_nowait()
 
-    # But SSE subscribers should still receive it
+    # SSE subscriber queues also do NOT receive events (dead code removed)
     queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
     await bridged_state.broadcast_event(event)
-    assert queue.qsize() == 1
+    assert queue.qsize() == 0
 
 
 # =============================================================================
@@ -220,10 +231,14 @@ async def test_global_event_not_republished_to_event_bus(
 
 
 @pytest.mark.anyio
-async def test_bridge_publish_calls_original_broadcast(
+async def test_bridge_publish_does_not_push_to_sse_queues(
     bridged_state: ServerState,
 ) -> None:
-    """Bridge.publish invokes the original SSE broadcast implementation."""
+    """Bridge.publish does NOT push to SSE subscriber queues (dead code removed).
+
+    Event delivery flows exclusively through the EventBus. The legacy
+    event_subscribers queue push has been removed.
+    """
     queue: asyncio.Queue[Any] = asyncio.Queue()
     bridged_state.event_subscribers.append(queue)
 
@@ -231,8 +246,8 @@ async def test_bridge_publish_calls_original_broadcast(
     assert bridged_state.event_bridge is not None
     await bridged_state.event_bridge.publish(event)
 
-    assert queue.qsize() == 1
-    assert queue.get_nowait() is event
+    # SSE subscriber queues should NOT receive events
+    assert queue.qsize() == 0
 
 
 @pytest.mark.anyio

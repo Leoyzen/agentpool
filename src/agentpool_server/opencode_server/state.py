@@ -94,20 +94,6 @@ class ServerState:
     session_controller: SessionController | None = field(default=None)
     event_bridge: Any = field(default=None, repr=False)
     _shell_env: Any = field(default=None, repr=False)
-    _sse_event_counter: int = field(default=0, repr=False)
-
-    def get_next_event_id(self) -> int:
-        """Get the next monotonic SSE event ID.
-
-        Increments a global counter shared across all SSE connections.
-        This ensures event IDs are monotonically increasing even across
-        reconnects, allowing proper deduplication via ``last_event_id``.
-
-        Returns:
-            The next event ID (starts at 1).
-        """
-        self._sse_event_counter += 1
-        return self._sse_event_counter
 
     @staticmethod
     def parse_model_info(model_name: str | None) -> tuple[str, str]:
@@ -341,21 +327,19 @@ class ServerState:
         self.background_tasks.clear()
 
     async def broadcast_event(self, event: Event) -> None:
-        """Broadcast an event via the EventBus bridge and SSE subscribers.
+        """Broadcast an event via the EventBus bridge.
 
         When :attr:`event_bridge` is present, delegates to the bridge which
-        publishes the event to the SessionPool EventBus and SSE subscribers.
-        Otherwise, pushes directly to SSE subscribers for backward compatibility.
+        publishes the event to the SessionPool EventBus. Otherwise, the
+        event is silently dropped (no event delivery path available).
         """
         if self.event_bridge is not None:
             await self.event_bridge.publish(event)
         else:
-            # Legacy path: push to SSE subscribers directly
-            for subscriber in self.event_subscribers:
-                try:
-                    subscriber.put_nowait(event)
-                except asyncio.QueueFull:
-                    logger.debug("SSE subscriber queue full, dropping event")
+            logger.debug(
+                "broadcast_event: no event_bridge, skipping event",
+                event_type=getattr(event, "type", "unknown"),
+            )
 
     async def mark_session_idle(self, session_id: str) -> None:
         """Mark a session idle and broadcast the matching status events."""

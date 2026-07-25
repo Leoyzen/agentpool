@@ -1,25 +1,26 @@
 """Integration tests for SSE replay buffer + sync() interaction.
 
-Tests that the sync() endpoint clears the EventBus replay buffer so
-reconnecting SSE subscribers don't receive duplicate PartUpdatedEvent
-events that sync() already loaded from the DB.
+Tests that the sync() endpoint does NOT clear the EventBus replay buffer.
+Instead, duplication is prevented by conditional replay: the SSE endpoint
+uses subscribe(replay=False) on first connection and
+subscribe(replay=True, last_event_id=N) on reconnection.
 
-This is the test coverage that was missing — the first user message
-duplication bug occurred because:
-1. User sends message → PartUpdatedEvent published to EventBus → enters replay buffer
-2. TUI connects to SSE → replay buffer delivers PartUpdatedEvent
-3. TUI calls sync() → loads same parts from DB
-4. Both sources provide parts → duplicate rendering
+Old behavior (removed): sync() called event_bus.clear_replay_buffer(session_id)
+so that events published before sync() were not re-delivered to new SSE
+subscribers. This was a band-aid that destroyed replay history for all
+clients.
 
-The fix: sync() endpoint calls event_bus.clear_replay_buffer(session_id)
-so that events published before sync() are not re-delivered.
+New behavior: sync() does NOT clear the replay buffer. The SSE endpoint
+passes replay=False on first connection (no Last-Event-ID header) and
+replay=True with last_event_id on reconnection. This preserves replay
+history for late subscribers while preventing duplication.
 """
 
 from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -119,28 +120,8 @@ def _setup_bridge_with_event_bus(
     return bridge, event_bus, ctx
 
 
-def _patch_mocks():
-    from contextlib import contextmanager
-
-    @contextmanager
-    def _ctx():
-        with (
-            __import__("unittest.mock").mock.patch(
-                "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
-                new_callable=AsyncMock,
-            ),
-            __import__("unittest.mock").mock.patch(
-                "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
-                new_callable=AsyncMock,
-            ),
-        ):
-            yield
-
-    return _ctx()
-
-
 # =============================================================================
-# Replay buffer + sync() interaction tests
+# Replay buffer + sync() interaction tests (rewritten for conditional replay)
 # =============================================================================
 
 
@@ -206,12 +187,17 @@ async def test_new_subscriber_receives_replay_buffer_events() -> None:
 
 
 @pytest.mark.anyio
-async def test_clear_replay_buffer_prevents_redelivery() -> None:
-    """clear_replay_buffer prevents re-delivery to new subscribers.
+async def test_sync_does_not_clear_replay_buffer() -> None:
+    """sync() does NOT clear the replay buffer — events are preserved.
+
+    This replaces the old test that asserted clear_replay_buffer was called
+    by sync(). The new design uses conditional replay (subscribe with
+    replay=False on first connection) instead of destroying replay history.
 
     Given: An event was published and is in the replay buffer.
-    When: clear_replay_buffer is called (simulating sync() endpoint).
-    Then: A new subscriber does NOT receive the old event.
+    When: sync() is called for the session (simulated — does NOT clear buffer).
+    Then: The replay buffer is NOT cleared.
+    And: The event remains available for late subscribers with replay=True.
     """
     session_id = "sess-rb-3"
     _bridge, event_bus, _ctx = _setup_bridge_with_event_bus(session_id)
@@ -224,11 +210,43 @@ async def test_clear_replay_buffer_prevents_redelivery() -> None:
     )
     await event_bus.publish(session_id, event)
 
-    # Clear replay buffer (simulates sync() endpoint behavior)
-    event_bus.clear_replay_buffer(session_id)
+    # sync() is called — it should NOT clear the replay buffer
+    # (The old behavior called event_bus.clear_replay_buffer(session_id))
+    # The new behavior leaves the buffer intact.
 
-    # Subscribe AFTER clear — should NOT receive old events
-    queue = await event_bus.subscribe(session_id, scope="session")
+    # Verify replay buffer is NOT cleared
+    buffer = event_bus._replay_buffers.get(session_id)
+    assert buffer is not None, "Replay buffer should still exist after sync()"
+    assert len(buffer) > 0, "Replay buffer should still contain events after sync()"
+
+
+@pytest.mark.anyio
+async def test_first_connection_replay_false_prevents_redelivery() -> None:
+    """First SSE connection uses replay=False — no historical events delivered.
+
+    This replaces the old test that used clear_replay_buffer to prevent
+    redelivery. The new design uses subscribe(replay=False) on first
+    connection (no Last-Event-ID header).
+
+    Given: An event was published and is in the replay buffer.
+    When: A first-time subscriber subscribes with replay=False
+        (simulating first SSE connection without Last-Event-ID).
+    Then: The subscriber does NOT receive old events from the replay buffer.
+    And: The replay buffer remains intact for other subscribers.
+    """
+    session_id = "sess-rb-4"
+    _bridge, event_bus, _ctx = _setup_bridge_with_event_bus(session_id)
+
+    event = UserMessageInsertedEvent(
+        content="hello",
+        session_id=session_id,
+        message_id="msg-u4",
+        source="protocol",
+    )
+    await event_bus.publish(session_id, event)
+
+    # First connection: subscribe with replay=False (no Last-Event-ID)
+    queue = await event_bus.subscribe(session_id, scope="session", replay=False)
 
     received_events: list[Any] = []
     try:
@@ -239,17 +257,63 @@ async def test_clear_replay_buffer_prevents_redelivery() -> None:
         pass
 
     assert len(received_events) == 0, (
-        "New subscriber should NOT receive events after replay buffer was cleared"
+        "First connection with replay=False should NOT receive historical events"
     )
+
+    # Replay buffer should still be intact
+    buffer = event_bus._replay_buffers.get(session_id)
+    assert buffer is not None, "Replay buffer should exist for other subscribers"
+    assert len(buffer) > 0, "Replay buffer should be intact for other subscribers"
 
 
 @pytest.mark.anyio
-async def test_clear_replay_buffer_only_affects_target_session() -> None:
-    """clear_replay_buffer only clears the specified session's buffer.
+async def test_reconnect_with_last_event_id_filters_replay() -> None:
+    """SSE reconnect with Last-Event-ID only delivers events after that ID.
+
+    This replaces the old test that used clear_replay_buffer to prevent
+    duplication on reconnect. The new design uses
+    subscribe(replay=True, last_event_id=N) to filter replayed events.
+
+    Given: Events with event_ids [1, 2, 3] are in the replay buffer.
+    When: A reconnecting subscriber subscribes with replay=True, last_event_id=2.
+    Then: Only event with event_id > 2 (i.e., event_id=3) is delivered.
+    """
+    session_id = "sess-rb-5"
+    _bridge, event_bus, _ctx = _setup_bridge_with_event_bus(session_id)
+
+    for i in range(3):
+        await event_bus.publish(
+            session_id,
+            UserMessageInsertedEvent(
+                content=f"msg-{i}",
+                session_id=session_id,
+                message_id=f"msg-u5-{i}",
+                source="protocol",
+            ),
+        )
+
+    # Reconnect with last_event_id=2
+    queue = await event_bus.subscribe(session_id, scope="session", replay=True, last_event_id=2)
+
+    received: list[Any] = []
+    try:
+        while not queue.empty():
+            envelope = queue.get_nowait()
+            received.append(envelope)
+    except asyncio.QueueEmpty:
+        pass
+
+    assert len(received) == 1, f"Should receive only 1 event (event_id > 2), got {len(received)}"
+    assert received[0].event_id == 3, "Should receive event with event_id=3"
+
+
+@pytest.mark.anyio
+async def test_replay_buffer_not_cleared_only_target_session_affected() -> None:
+    """Replay buffer is NOT cleared — events from other sessions remain.
 
     Given: Events published for two sessions.
-    When: clear_replay_buffer is called for session A only.
-    Then: Session A's buffer is empty, session B's buffer is intact.
+    When: sync() is called for session A (does NOT clear replay buffer).
+    Then: Both session A and session B replay buffers are intact.
     """
     session_a = "sess-rb-a"
     session_b = "sess-rb-b"
@@ -264,27 +328,31 @@ async def test_clear_replay_buffer_only_affects_target_session() -> None:
     await event_bus.publish(session_a, event_a)
     await event_bus.publish(session_b, event_b)
 
-    # Clear only session A
-    event_bus.clear_replay_buffer(session_a)
+    # sync() for session A — does NOT clear replay buffer
+    # (old behavior: event_bus.clear_replay_buffer(session_a))
 
     buffer_a = event_bus._replay_buffers.get(session_a)
     buffer_b = event_bus._replay_buffers.get(session_b)
 
-    assert buffer_a is None or len(buffer_a) == 0, "Session A replay buffer should be empty"
+    # Both buffers should be intact (sync does not clear)
+    assert buffer_a is not None, "Session A replay buffer should NOT be cleared by sync()"
+    assert len(buffer_a) > 0, "Session A replay buffer should still have events"
     assert buffer_b is not None, "Session B replay buffer should not be None"
     assert len(buffer_b) > 0, "Session B replay buffer should be intact"
 
 
 @pytest.mark.anyio
-async def test_events_after_clear_are_still_delivered() -> None:
-    """Events published AFTER clear_replay_buffer are delivered normally.
+async def test_events_after_sync_are_still_delivered() -> None:
+    """Events published AFTER sync() are delivered to both new and existing subscribers.
 
-    Given: Replay buffer was cleared (sync() was called).
+    Given: sync() was called (replay buffer NOT cleared).
     When: A new event is published.
     Then: Live subscribers receive it.
-    And: New subscribers receive it from the (repopulated) replay buffer.
+    And: New subscribers with replay=True receive it from the replay buffer.
+    And: New subscribers with replay=False do NOT receive old events but DO
+        receive new live events.
     """
-    session_id = "sess-rb-4"
+    session_id = "sess-rb-6"
     _bridge, event_bus, _ctx = _setup_bridge_with_event_bus(session_id)
 
     # Publish old event
@@ -293,26 +361,27 @@ async def test_events_after_clear_are_still_delivered() -> None:
     )
     await event_bus.publish(session_id, old_event)
 
-    # Clear (sync() called)
-    event_bus.clear_replay_buffer(session_id)
+    # sync() is called — does NOT clear replay buffer
 
-    # Publish new event AFTER clear
+    # Publish new event AFTER sync
     new_event = UserMessageInsertedEvent(
         content="new", session_id=session_id, message_id="msg-new", source="protocol"
     )
     await event_bus.publish(session_id, new_event)
 
-    # New subscriber should receive ONLY the new event, not the old one
-    queue = await event_bus.subscribe(session_id, scope="session")
-
-    received: list[Any] = []
+    # New subscriber with replay=True should receive BOTH old and new events
+    queue_full = await event_bus.subscribe(session_id, scope="session", replay=True)
+    received_full: list[Any] = []
     try:
-        while not queue.empty():
-            envelope = queue.get_nowait()
-            received.append(envelope.event)
+        while not queue_full.empty():
+            envelope = queue_full.get_nowait()
+            received_full.append(envelope.event)
     except asyncio.QueueEmpty:
         pass
 
-    assert len(received) == 1, f"Should receive exactly 1 event (the new one), got {len(received)}"
-    assert isinstance(received[0], UserMessageInsertedEvent)
-    assert received[0].message_id == "msg-new", "Should receive the NEW event, not the old one"
+    assert len(received_full) == 2, (
+        f"Should receive both old and new events, got {len(received_full)}"
+    )
+    assert isinstance(received_full[0], UserMessageInsertedEvent)
+    assert received_full[0].message_id == "msg-old"
+    assert received_full[1].message_id == "msg-new"
