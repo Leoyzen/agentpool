@@ -65,6 +65,7 @@ from agentpool_server.opencode_server.models.parts import (
     FilePart,
     ReasoningPart,
     StepFinishPart,
+    StepStartPart,
     TextPart,
     TimeStart,
     TimeStartEnd,
@@ -897,6 +898,18 @@ class EventProcessor:
             reasoning=reasoning_tokens,
             total=total,
         )
+        # Emit a per-step StepStartPart so the client sees the step
+        # boundary.  The turn-level StepStartPart is emitted at turn
+        # start; per-step ones ensure each LLM call step gets a proper
+        # start marker that pairs with the StepFinishPart below.
+        step_start = StepStartPart(
+            id=identifier.ascending("part"),
+            message_id=ctx.assistant_msg_id,
+            session_id=ctx.session_id,
+        )
+        ctx.assistant_msg.parts.append(step_start)
+        yield PartUpdatedEvent.create(step_start)
+
         step_finish = StepFinishPart(
             id=identifier.ascending("part"),
             message_id=ctx.assistant_msg_id,
