@@ -183,11 +183,13 @@ async def test_steer_while_running_with_agent_run() -> None:
 
 @pytest.mark.unit
 async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
-    """steer() with active agent_run publishes UserMessageInsertedEvent to EventBus.
+    """steer() with active agent_run: emission depends on EnqueuedMessagesEvent.
 
-    Given: A RunHandle with a real EventBus and active agent_run.
-    When: steer() is called with emit_user_message=True (default).
-    Then: UserMessageInsertedEvent is published to EventBus with delivery="steer".
+    When ``EnqueuedMessagesEvent`` is available (pydantic-ai >= 2.18) and
+    ``active_agent_run`` is set, ``_schedule_user_message_emission()`` is
+    skipped because the stream itself emits the display event via
+    ``EnqueuedMessagesEvent``. When not available, the manual emission
+    fires as before.
     """
     from agentpool.agents.events.events import UserMessageInsertedEvent
 
@@ -211,12 +213,15 @@ async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
         envelope = queue.get_nowait()
         received_events.append(envelope.event)
 
-    # Verify UserMessageInsertedEvent was published
+    # When EnqueuedMessagesEvent is available, manual emission is skipped.
     user_msg_events = [e for e in received_events if isinstance(e, UserMessageInsertedEvent)]
-    assert len(user_msg_events) == 1
-    assert user_msg_events[0].delivery == "steer"
-    assert user_msg_events[0].source == "internal"
-    assert user_msg_events[0].content == "inject me"
+    if handle._enqueued_messages_available:
+        assert len(user_msg_events) == 0
+    else:
+        assert len(user_msg_events) == 1
+        assert user_msg_events[0].delivery == "steer"
+        assert user_msg_events[0].source == "internal"
+        assert user_msg_events[0].content == "inject me"
 
 
 @pytest.mark.unit

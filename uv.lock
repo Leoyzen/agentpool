@@ -248,8 +248,8 @@ requires-dist = [
     { name = "py-key-value-aio", extras = ["disk"] },
     { name = "pyarrow", marker = "python_full_version < '3.14' and extra == 'mcp-discovery'", specifier = ">=19.0.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
-    { name = "pydantic-ai-slim", extras = ["openai", "google", "anthropic", "mistral", "retries"], specifier = "==2.9.0" },
-    { name = "pydantic-graph" },
+    { name = "pydantic-ai-slim", extras = ["openai", "google", "anthropic", "mistral", "retries"], specifier = ">=2.12.0" },
+    { name = "pydantic-graph", specifier = ">=2.12.0" },
     { name = "pydantic-xml", specifier = ">=2.6.0" },
     { name = "pydocket", specifier = ">=0.16.1" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
@@ -3806,19 +3806,19 @@ email = [
 
 [[package]]
 name = "pydantic-ai"
-version = "2.9.0"
+version = "2.18.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "pydantic-ai-slim", extra = ["anthropic", "cli", "evals", "google", "logfire", "mcp", "openai", "retries", "web"] },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/2f/cb/1d5b06a9301b211c5dc4f705d82af1ed5ca3dfab59d55c590e5065ff09de/pydantic_ai-2.9.0.tar.gz", hash = "sha256:5b4a46bd717960272133a8ac46f5130f92723983bd8f3e861393a8fd1f507c93", size = 18520, upload-time = "2026-07-11T03:19:27.088Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/82/5b/426115bfb6bdb40f31a738a3dc13f235073f3a079fa58c0633636a5a942e/pydantic_ai-2.18.0.tar.gz", hash = "sha256:13a53a9b453136637ca59ad2d13ca59ab7ce4b9cf2d5c150602598824f034781", size = 18830, upload-time = "2026-07-25T01:21:03.232Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/0b/2d/dffa4f32729780a9d8bc74f1e0f77ef74f363a8bc5e46ec70ff8c0343ab1/pydantic_ai-2.9.0-py3-none-any.whl", hash = "sha256:e1470c69141d39d633ef0e0bf2b7e9f93a533f82d9e4a931e762f631b077b0e7", size = 7714, upload-time = "2026-07-11T03:19:18.439Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/84/2c/39217e550b21aa05e32f501ee56bb433dfdf6e39d2f577ceeda9a8bd4e66/pydantic_ai-2.18.0-py3-none-any.whl", hash = "sha256:8302e5f8f2b50f2cda71bd6a92cbc64762cf44e7bb50070e9668f19f7e03ee38", size = 7743, upload-time = "2026-07-25T01:20:53.852Z" },
 ]
 
 [[package]]
 name = "pydantic-ai-slim"
-version = "2.9.0"
+version = "2.18.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "genai-prices" },
@@ -3829,9 +3829,9 @@ dependencies = [
     { name = "pydantic-graph" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c3/4a/4461ff8c0f05864512ba1c6f3788e01afdf8f8aab73a460dd5b43942fd8b/pydantic_ai_slim-2.9.0.tar.gz", hash = "sha256:11b812833eb75cfcc31c86b6e2db75e28cade6bb746844e28a40eb51b04a09d3", size = 788767, upload-time = "2026-07-11T03:19:29.155Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4b/39/c3a941027be87f6bc07e50e1e72ae93e66a1b11b838e33ad5d135d2fe2f0/pydantic_ai_slim-2.18.0.tar.gz", hash = "sha256:dfe47a3602049f779223702a684ed8091b111cfae1851236616d6b0eb3b0b077", size = 902113, upload-time = "2026-07-25T01:21:05.614Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/80/a9/bea5cb793b4d6ea4d9763189f09c83334ca9d5dea6e4f2a0aa51bc714029/pydantic_ai_slim-2.9.0-py3-none-any.whl", hash = "sha256:560a860cb67cf7732b16fb40e1d9205d75c02934e75e41db7ccb104ebc9ea266", size = 965375, upload-time = "2026-07-11T03:19:21.493Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/bf/a0/a0619bddf602f69a754540cb82147f9b53dfa2d093e1fe7051c5e6a8eceb/pydantic_ai_slim-2.18.0-py3-none-any.whl", hash = "sha256:4c4076166a63ad96fe6ed5a517223c4a5aba6c9682a17d8d0ac42839cbc83622", size = 1091565, upload-time = "2026-07-25T01:20:57.323Z" },
 ]
 
 [package.optional-dependencies]
@@ -3901,7 +3901,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-evals"
-version = "2.9.0"
+version = "2.18.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "anyio" },
@@ -3911,14 +3911,14 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ad/51/53a8332aaa155da35c181da510616edbd806c0e2408f853309ca12d27492/pydantic_evals-2.9.0.tar.gz", hash = "sha256:2d2bcd5d8b8a71ad41dc73973bca4b7ec1be2b745457c355ee40f130cddc6a1b", size = 85016, upload-time = "2026-07-11T03:19:30.485Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/fd/4a/e2b629f4724a6026c792a5bd7ceb470bf38d48c6a2ebe8cec091ed85485f/pydantic_evals-2.18.0.tar.gz", hash = "sha256:d26ab006290564a5e56394b9033fbd5925e4a172d9e23be5f3c034ae3637eb18", size = 85222, upload-time = "2026-07-25T01:21:07.101Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d7/5a/731aae59b7a8d3f1cb78cba09b9c5f5bf961d7561874c22a511ce3dde957/pydantic_evals-2.9.0-py3-none-any.whl", hash = "sha256:54e56d4782b67e82a72fba856049ebd0f521bf7aa645bd98782c0b658c8d20ef", size = 100348, upload-time = "2026-07-11T03:19:23.322Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1c/8d/be8abc897f9cd9ef83e000bfaa8d9bec0d93fe2f59f219d2c3835d66b033/pydantic_evals-2.18.0-py3-none-any.whl", hash = "sha256:98d20973df83c3ca6d7341ce2f704ae59b53e02698b55df765f9a1cd5ec5ea1d", size = 100524, upload-time = "2026-07-25T01:20:59.284Z" },
 ]
 
 [[package]]
 name = "pydantic-graph"
-version = "2.9.0"
+version = "2.18.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3926,9 +3926,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "typing-inspection" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/05/23/fb107ccbcba5f96e0afed576def01b5c846ffd665ff9c885dbe77d5a551d/pydantic_graph-2.9.0.tar.gz", hash = "sha256:a6d146cfd97b086e4334afc6717b2d078a3f102631cfe05e421fda2ca5a7046f", size = 43907, upload-time = "2026-07-11T03:19:31.616Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e5/f9/1554e818e6d38bcb3f66ec7da7abe17c28dcd00caa1550b034e175b8841f/pydantic_graph-2.18.0.tar.gz", hash = "sha256:9423defa047b477a561a06eadfd37aaf101a2b690d044adb79de80d7ea203e4e", size = 44017, upload-time = "2026-07-25T01:21:08.152Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/db/d0/5070abd3b43f3e6f54019fe9bc225abab9dda922d40dff794f9872e0d507/pydantic_graph-2.9.0-py3-none-any.whl", hash = "sha256:0ee8ad7b69d628037f3194d506b6c7099e416f25e477f9590da110cdaf48c649", size = 51646, upload-time = "2026-07-11T03:19:24.877Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/2f/29/fd05a4a84db9dae16c0417d8bcd6847148439a55329d000ef101d7243ded/pydantic_graph-2.18.0-py3-none-any.whl", hash = "sha256:48df74e3ae12ca44f99890e9b4f7020ae70a5a38d20df02db7cb16b0db3c3711", size = 51662, upload-time = "2026-07-25T01:21:00.764Z" },
 ]
 
 [[package]]

@@ -121,6 +121,13 @@ class EventProcessor:
 
     def __init__(self) -> None:
         """Initialize the event processor."""
+        self._run_error_emitted: bool = False
+        """Guard flag: True after RunErrorEvent emits SessionErrorEvent.
+
+        When True, the subsequent StreamCompleteEvent skips its
+        SessionStatusEvent to avoid a double terminal signal.
+        Reset after StreamCompleteEvent processing.
+        """
 
     @staticmethod
     def create_mcp_tools_changed_event(server: str) -> McpToolsChangedEvent:
@@ -244,11 +251,16 @@ class EventProcessor:
             case StreamCompleteEvent(message=msg, cancelled=cancelled) if msg:
                 for e in self._process_stream_complete(ctx, msg):
                     yield e
-                status: SessionStatusType = "cancelled" if cancelled else "idle"
-                yield SessionStatusEvent.create(
-                    session_id=ctx.session_id,
-                    status_type=status,
-                )
+                # Skip SessionStatusEvent if RunErrorEvent already emitted
+                # SessionErrorEvent to avoid a double terminal signal.
+                if self._run_error_emitted:
+                    self._run_error_emitted = False
+                else:
+                    status: SessionStatusType = "cancelled" if cancelled else "idle"
+                    yield SessionStatusEvent.create(
+                        session_id=ctx.session_id,
+                        status_type=status,
+                    )
 
             case RunErrorEvent() as run_error_event:
                 yield SessionErrorEvent.create(
@@ -256,6 +268,9 @@ class EventProcessor:
                     error_name=run_error_event.code or "RunError",
                     error_message=run_error_event.message,
                 )
+                # Set guard so the following StreamCompleteEvent does not
+                # emit a second SessionStatusEvent.
+                self._run_error_emitted = True
 
             case UserMessageInsertedEvent(
                 message_id=mid,

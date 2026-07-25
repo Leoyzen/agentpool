@@ -45,6 +45,22 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Check if EnqueuedMessagesEvent is available in the installed pydantic-ai version.
+# When available, the stream itself emits display events for enqueued messages,
+# making the manual _schedule_user_message_emission() call redundant for
+# steer/followup when an active_agent_run exists.
+try:
+    from pydantic_ai.messages import EnqueuedMessagesEvent  # noqa: F401
+
+    ENQUEUED_MESSAGES_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    ENQUEUED_MESSAGES_AVAILABLE = False
+
+
+# Maximum number of events allowed after RunErrorEvent before the defensive
+# guard breaks the loop (waiting for a trailing StreamCompleteEvent).
+_MAX_EVENTS_AFTER_ERROR = 3
+
 
 def _has_invalid_json_args(part: Any) -> bool:
     """Check if a ToolCallPart has invalid JSON string arguments.
@@ -252,6 +268,16 @@ class RunHandle:
     """OTel Context containing ``_run_span``. Attached in ``_consume_run`` so
     all spans within the run (turn.native, tools, notifications) are children
     of ``run.message`` and share the same trace_id."""
+    _enqueued_messages_available: bool = field(default=False)
+    """Whether ``EnqueuedMessagesEvent`` is available in the installed
+    pydantic-ai version. When ``True`` and ``active_agent_run`` is not
+    ``None``, steer/followup skip ``_schedule_user_message_emission()``
+    because the stream itself emits the display event via
+    ``EnqueuedMessagesEvent``."""
+
+    def __post_init__(self) -> None:
+        """Initialize computed fields after dataclass construction."""
+        self._enqueued_messages_available = ENQUEUED_MESSAGES_AVAILABLE
 
     @property
     def is_running(self) -> bool:
@@ -524,6 +550,7 @@ class RunHandle:
         self._current_turn_failed = False
         turn_failed = False
         stream_complete_saved = False
+        events_since_error = 0
         with safe_span(
             "orchestration.run_handle.execute_turn",
             turn_id=turn_id,
@@ -548,7 +575,19 @@ class RunHandle:
                         yield event
                         if isinstance(event, RunErrorEvent):
                             turn_failed = True
-                            break
+                            events_since_error = 0
+                            # Do NOT break — continue consuming to get the
+                            # trailing StreamCompleteEvent that finalizes
+                            # the turn and sets complete_event.
+                        elif turn_failed:
+                            events_since_error += 1
+                            if events_since_error >= _MAX_EVENTS_AFTER_ERROR:
+                                logger.warning(
+                                    "RunErrorEvent not followed by "
+                                    "StreamCompleteEvent within 3 events, "
+                                    "breaking"
+                                )
+                                break
                         if isinstance(event, StreamCompleteEvent):
                             break
             except (GeneratorExit, asyncio.CancelledError):
@@ -664,7 +703,11 @@ class RunHandle:
             self.run_ctx.queued_steer_messages.append(fb.content)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND an active agent_run
+        # exists, the stream itself emits the display event via
+        # EnqueuedMessagesEvent, so we skip the manual emission to avoid
+        # duplicate user message display in protocol frontends.
+        if emit_user_message and (not self._enqueued_messages_available or agent_run is None):
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
@@ -733,10 +776,26 @@ class RunHandle:
         session = self.session
         if session is None:
             return None
-        session.prompt_queue.put_nowait(message)
+        agent_run = self.active_agent_run
+        if agent_run is not None:
+            # Enqueue directly to the active agent_run so
+            # PendingMessageDrainCapability fires EnqueuedMessagesEvent
+            # for display. The prompt will be drained as a "when_idle"
+            # message after the current node finishes.
+            if isinstance(message, list):
+                agent_run.enqueue(*message, priority="when_idle")
+            else:
+                agent_run.enqueue(message, priority="when_idle")
+        else:
+            # No active agent_run — fall back to session.prompt_queue.
+            # The next RunHandle's _consume_run() will drain this queue.
+            session.prompt_queue.put_nowait(message)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND an active agent_run
+        # exists, the stream itself emits the display event, so we skip
+        # the manual emission to avoid duplicate display.
+        if emit_user_message and (not self._enqueued_messages_available or agent_run is None):
             self._schedule_user_message_emission(message, "followup", message_id=message_id)
 
         return message_id

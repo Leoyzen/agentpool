@@ -113,6 +113,27 @@ class RunStartedEvent:
     """Event type identifier."""
 
 
+@dataclass(frozen=True, kw_only=True)
+class StepErrorMetadata:
+    """Diagnostic metadata for step-level errors.
+
+    Captures the pydantic-ai node context and exception details when
+    a step fails during ``NativeTurn.execute()``. Populated only at the
+    generic exception handler inside the while loop; the outer catch in
+    ``_execute_turn()`` leaves ``step_error`` as ``None`` because no
+    node context is available.
+    """
+
+    node_type: str
+    """Type name of the pydantic-ai node that was executing (e.g. ``ModelRequestNode``)."""
+
+    exception_type: str
+    """Type name of the exception that caused the error."""
+
+    exception_message: str
+    """Message from the exception that caused the error."""
+
+
 @dataclass(kw_only=True)
 class RunErrorEvent:
     """Signals an error during an agent run."""
@@ -125,6 +146,8 @@ class RunErrorEvent:
     """ID of the agent run that failed."""
     agent_name: str | None = None
     """Name of the agent that errored."""
+    step_error: StepErrorMetadata | None = None
+    """Diagnostic metadata from the step that failed, if available."""
     event_kind: Literal["run_error"] = "run_error"
     """Event type identifier."""
 

@@ -10,6 +10,7 @@ Mapping rules:
     - ``FunctionToolResultEvent`` → :class:`ToolCallCompleteEvent`
     - pydantic-ai ``PartDeltaEvent`` → AgentPool :class:`PartDeltaEvent` subclass
     - pydantic-ai ``PartStartEvent`` (non-tool) → AgentPool :class:`PartStartEvent` subclass
+    - ``EnqueuedMessagesEvent`` → :class:`UserMessageInsertedEvent`
     - Already-mapped :class:`RichAgentStreamEvent` instances pass through.
     - Unknown objects return ``None``.
 """
@@ -17,7 +18,9 @@ Mapping rules:
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import Any, Literal, cast
+import uuid
 
 from pydantic_ai import (
     BaseToolCallPart,
@@ -28,7 +31,18 @@ from pydantic_ai import (
     PartStartEvent as PyAIPartStartEvent,
     RetryPromptPart,
 )
-from pydantic_ai.messages import ThinkingPart, ThinkingPartDelta
+from pydantic_ai.messages import (
+    ModelRequest,
+    ThinkingPart,
+    ThinkingPartDelta,
+    UserPromptPart,
+)
+
+
+try:
+    from pydantic_ai.messages import EnqueuedMessagesEvent
+except ImportError:
+    EnqueuedMessagesEvent = None  # type: ignore[assignment,misc]
 
 from agentpool.agents.events.events import (
     PartDeltaEvent,
@@ -37,9 +51,13 @@ from agentpool.agents.events.events import (
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
     ToolCallStartEvent,
+    UserMessageInsertedEvent,
 )
 from agentpool.tools.base import ToolKind
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
+
+
+ENQUEUED_MESSAGES_AVAILABLE = EnqueuedMessagesEvent is not None
 
 
 class EventMapper:
@@ -62,42 +80,171 @@ class EventMapper:
         self._pending_tool_inputs: dict[str, dict[str, Any]] = {}
         self.tool_kind_map: dict[str, str] = {}
 
-    def map_event(self, event: Any) -> RichAgentStreamEvent[Any] | None:
+    def map_event(  # noqa: PLR0911
+        self,
+        event: Any,
+        *,
+        current_node_type: str = "unknown",
+    ) -> RichAgentStreamEvent[Any] | None:
         """Map a stream event to a RichAgentStreamEvent.
+
+        Dispatches to per-event-type ``handle_*`` methods, borrowed from
+        pydantic-ai's UIEventStream pattern.  Pre-mapped
+        :class:`RichAgentStreamEvent` instances pass through unchanged.
 
         Args:
             event: A PydanticAI stream event or an AgentPool event.
+            current_node_type: The pydantic-graph node type currently
+                executing (e.g. ``"ModelRequestNode"``,
+                ``"CallToolsNode"``).  Used by
+                :meth:`handle_enqueued_messages` to infer delivery mode.
 
         Returns:
             Mapped event, the original event if it is already a
             RichAgentStreamEvent, or ``None`` if the event is unrecognized.
         """
-        match event:
-            case FunctionToolCallEvent(part=tool_part) if isinstance(tool_part, BaseToolCallPart):
-                return self._emit_tool_call_start(tool_part)
-            case PyAIPartStartEvent(part=tool_part) if isinstance(tool_part, BaseToolCallPart):
-                return self._emit_tool_call_start(tool_part)
-            case FunctionToolResultEvent(part=tool_return):
-                return self._emit_tool_call_complete(tool_return)
-            case _:
-                # Convert pydantic-ai events to AgentPool subclasses so
-                # downstream isinstance checks (e.g. EventBus coalescing)
-                # work correctly.  Without this, pydantic-ai's base
-                # PartDeltaEvent / PartStartEvent bypass coalescing because
-                # ``isinstance(base, subclass)`` is False.
-                if isinstance(event, PyAIPartDeltaEvent) and not isinstance(event, PartDeltaEvent):
-                    return _normalize_thinking_event(
-                        PartDeltaEvent(
-                            index=event.index, delta=event.delta, message_id=self._message_id
-                        )
-                    )
-                if isinstance(event, PyAIPartStartEvent) and not isinstance(event, PartStartEvent):
-                    return _normalize_thinking_event(
-                        PartStartEvent(
-                            index=event.index, part=event.part, message_id=self._message_id
-                        )
-                    )
-                return event if self._is_rich_event(event) else None
+        if isinstance(event, FunctionToolCallEvent):
+            return self.handle_tool_call(event)
+        if isinstance(event, PyAIPartStartEvent):
+            return self.handle_part_start(event)
+        if isinstance(event, FunctionToolResultEvent):
+            return self.handle_tool_result(event)
+        if isinstance(event, PyAIPartDeltaEvent):
+            return self.handle_part_delta(event)
+        if EnqueuedMessagesEvent is not None and isinstance(event, EnqueuedMessagesEvent):
+            return self.handle_enqueued_messages(event, current_node_type=current_node_type)
+
+        # Pre-mapped RichAgentStreamEvent instances pass through unchanged.
+        if self._is_rich_event(event):
+            return event  # type: ignore[no-any-return]
+
+        return None
+
+    def handle_tool_call(
+        self,
+        event: FunctionToolCallEvent,
+    ) -> RichAgentStreamEvent[Any] | None:
+        """Handle a ``FunctionToolCallEvent``.
+
+        Delegates to :meth:`_emit_tool_call_start` which deduplicates
+        by ``tool_call_id`` and emits a :class:`ToolCallStartEvent`
+        (or :class:`ToolCallProgressEvent` for updated args).
+        """
+        tool_part = event.part
+        if isinstance(tool_part, BaseToolCallPart):
+            return self._emit_tool_call_start(tool_part)
+        return None
+
+    def handle_tool_result(
+        self,
+        event: FunctionToolResultEvent,
+    ) -> RichAgentStreamEvent[Any] | None:
+        """Handle a ``FunctionToolResultEvent``.
+
+        Delegates to :meth:`_emit_tool_call_complete` which correlates
+        with the originating tool call start by ``tool_call_id``.
+        """
+        return self._emit_tool_call_complete(event.part)
+
+    def handle_part_start(
+        self,
+        event: PyAIPartStartEvent,
+    ) -> RichAgentStreamEvent[Any] | None:
+        """Handle a pydantic-ai ``PartStartEvent``.
+
+        If the part is a ``BaseToolCallPart``, emits a
+        :class:`ToolCallStartEvent` (via :meth:`_emit_tool_call_start`).
+        Otherwise, converts the pydantic-ai ``PartStartEvent`` to the
+        AgentPool :class:`PartStartEvent` subclass so downstream
+        isinstance checks work correctly.
+        """
+        tool_part = event.part
+        if isinstance(tool_part, BaseToolCallPart):
+            return self._emit_tool_call_start(tool_part)
+        if isinstance(event, PartStartEvent):
+            return event
+        return _normalize_thinking_event(
+            PartStartEvent(
+                index=event.index,
+                part=event.part,
+                message_id=self._message_id,
+            )
+        )
+
+    def handle_part_delta(
+        self,
+        event: PyAIPartDeltaEvent,
+    ) -> RichAgentStreamEvent[Any] | None:
+        """Handle a pydantic-ai ``PartDeltaEvent``.
+
+        Converts the pydantic-ai ``PartDeltaEvent`` to the AgentPool
+        :class:`PartDeltaEvent` subclass so downstream isinstance checks
+        (e.g. EventBus coalescing) work correctly.
+        """
+        if isinstance(event, PartDeltaEvent):
+            return event
+        return _normalize_thinking_event(
+            PartDeltaEvent(
+                index=event.index,
+                delta=event.delta,
+                message_id=self._message_id,
+            )
+        )
+
+    def handle_enqueued_messages(
+        self,
+        event: Any,
+        *,
+        current_node_type: str,
+    ) -> RichAgentStreamEvent[Any] | None:
+        """Handle an ``EnqueuedMessagesEvent`` from pydantic-ai.
+
+        Maps to :class:`UserMessageInsertedEvent` with delivery inference
+        based on the current node type:
+
+        - ``"ModelRequestNode"`` → ``delivery="steer"`` (mid-model-request)
+        - ``"CallToolsNode"`` or ``"End"`` → ``delivery="followup"`` (between turns)
+        - Unknown node types default to ``"steer"``
+
+        Extracts text content from ``ModelRequest`` objects containing
+        ``UserPromptPart`` instances in ``event.messages``.
+
+        Returns ``None`` if no ``UserPromptPart`` is found.
+        """
+        messages: tuple[Any, ...] = event.messages
+        if not messages:
+            return None
+
+        content: str | list[Any] | None = None
+        for msg in messages:
+            if not isinstance(msg, ModelRequest):
+                continue
+            for part in msg.parts:
+                if isinstance(part, UserPromptPart):
+                    content = cast(str | list[Any], part.content)
+                    break
+            if content is not None:
+                break
+
+        if content is None:
+            return None
+
+        if current_node_type == "ModelRequestNode":
+            delivery: Literal["initial", "steer", "followup"] = "steer"
+        elif current_node_type in ("CallToolsNode", "End"):
+            delivery = "followup"
+        else:
+            delivery = "steer"
+
+        return UserMessageInsertedEvent(
+            session_id="",
+            message_id=str(uuid.uuid4()),
+            content=content,
+            delivery=delivery,
+            source="internal",
+            timestamp=datetime.now(UTC).timestamp(),
+            meta=None,
+        )
 
     def _emit_tool_call_start(
         self,
