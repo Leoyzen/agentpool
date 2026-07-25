@@ -232,7 +232,15 @@ async def pool(manifest):
 # Model override mapping for custom endpoints without gpt-4o access.
 # Tests that hardcode "openai:gpt-4o" or "openai:gpt-4o-mini" are
 # transparently remapped to a model available on the custom endpoint.
-_DEFAULT_REMAP = os.getenv("TEST_MODEL_OVERRIDE", "openai:gpt-5-nano")
+# Uses "openai-chat:" prefix so the remapped model uses OpenAIChatModel
+# (Chat Completions API /v1/chat/completions), matching existing VCR
+# cassettes which were all recorded against the chat completions endpoint.
+_raw_override = os.getenv("TEST_MODEL_OVERRIDE", "openai-chat:gpt-5-nano")
+# Ensure Chat Completions API for VCR cassette compatibility: convert
+# "openai:" prefix to "openai-chat:" so OpenAIChatModel is created.
+if _raw_override.startswith("openai:"):
+    _raw_override = "openai-chat:" + _raw_override[len("openai:") :]
+_DEFAULT_REMAP = _raw_override
 _MODEL_REMAP = {
     "openai:gpt-4o": _DEFAULT_REMAP,
     "openai:gpt-4o-mini": _DEFAULT_REMAP,
