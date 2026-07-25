@@ -235,3 +235,59 @@ async def test_zero_token_step_final_still_correct() -> None:
 
     # Final: cumulative = 300
     assert usage_updates[1].used == 300  # 200 + 100
+
+
+# ============================================================================
+# Test 4: Cache and reasoning tokens in field_meta
+# ============================================================================
+
+
+async def test_step_usage_cache_and_reasoning_tokens() -> None:
+    """StepUsageEvent with cache_read, cache_write, and reasoning tokens.
+
+    Verifies that ``cache_read_tokens``, ``cache_write_tokens``, and
+    ``details={"reasoning_tokens": N}`` are correctly propagated into
+    the ``field_meta["step_usage"]`` dict, and that ``used`` reflects
+    only the basic input + output total.
+    """
+    step_usage = RunUsage(
+        input_tokens=50,
+        output_tokens=30,
+        cache_read_tokens=10,
+        cache_write_tokens=5,
+        details={"reasoning_tokens": 15},
+    )
+    cumulative_usage = RunUsage(
+        input_tokens=50,
+        output_tokens=30,
+        cache_read_tokens=10,
+        cache_write_tokens=5,
+        details={"reasoning_tokens": 15},
+    )
+    event = StepUsageEvent(
+        step_index=0,
+        step_usage=step_usage,
+        cumulative_usage=cumulative_usage,
+    )
+
+    updates = await _convert(event)
+    assert len(updates) == 1
+
+    update = updates[0]
+    assert isinstance(update, UsageUpdate)
+    # used = input + output (basic total, excludes cache/reasoning)
+    assert update.used == 80  # 50 + 30
+    # size = cumulative total_tokens (same as used here, single step)
+    assert update.size == 80
+
+    # field_meta should contain step_usage with cache and reasoning tokens.
+    # The ACP Usage model maps reasoning_tokens → thought_tokens and
+    # cache_read/write_tokens → cached_read/write_tokens.
+    assert update.field_meta is not None
+    assert update.field_meta["step_index"] == 0
+    step_meta = update.field_meta["step_usage"]
+    assert step_meta["input_tokens"] == 50
+    assert step_meta["output_tokens"] == 30
+    assert step_meta["cached_read_tokens"] == 10
+    assert step_meta["cached_write_tokens"] == 5
+    assert step_meta["thought_tokens"] == 15

@@ -9,10 +9,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RunUsage
+from pydantic_ai import RequestUsage, RunUsage
 import pytest
 
-from agentpool.agents.events.events import StepUsageEvent
+from agentpool.agents.events.events import (
+    PartDeltaEvent,
+    PartStartEvent,
+    StepUsageEvent,
+    StreamCompleteEvent,
+)
+from agentpool.messaging import ChatMessage
 
 
 if TYPE_CHECKING:
@@ -159,3 +165,75 @@ async def test_openai_api_handles_step_usage_event() -> None:
 
     # The choices should be empty for usage-only chunks
     assert usage_chunks[0]["choices"] == []
+
+
+# =============================================================================
+# OpenAI API mixed content + usage chunks ordering test
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_openai_api_mixed_content_and_usage_chunks() -> None:
+    """Interleaved content and usage events produce correctly ordered SSE chunks.
+
+    Feeds PartStartEvent → PartDeltaEvent → StepUsageEvent → StreamCompleteEvent
+    through ``stream_response`` and verifies:
+    - Content chunks (non-empty ``choices``) appear before the usage chunk.
+    - The usage chunk has ``choices: []`` (usage-only, no content).
+    - The usage chunk appears before`` sentinel.
+    """
+    from agentpool_server.openai_api_server.completions.models import ChatCompletionRequest
+
+    step_usage = RunUsage(input_tokens=10, output_tokens=5)
+    cumulative = RunUsage(input_tokens=10, output_tokens=5)
+
+    async def event_stream() -> AsyncIterator[Any]:
+        yield PartStartEvent.text(index=0, content="Hello")
+        yield PartDeltaEvent.text(index=0, content=" world")
+        yield StepUsageEvent(
+            step_index=0,
+            step_usage=step_usage,
+            cumulative_usage=cumulative,
+        )
+        yield StreamCompleteEvent(
+            message=ChatMessage(
+                role="assistant",
+                content="Hello world",
+                usage=RequestUsage(input_tokens=10, output_tokens=5),
+            )
+        )
+
+    request = ChatCompletionRequest(model="test-model", messages=[])
+    chunks = await _collect_stream_chunks(event_stream(), request)
+
+    # Separate chunks into content chunks (with text delta) and usage chunks.
+    # The first chunk (role: assistant) and final chunk (finish_reason: stop)
+    # have non-empty choices but are not content chunks.
+    content_chunks = [
+        c for c in chunks if c.get("choices") and c["choices"][0].get("delta", {}).get("content")
+    ]
+    usage_chunks = [c for c in chunks if "usage" in c]
+
+    # Must have at least one content chunk (from PartDeltaEvent)
+    assert len(content_chunks) >= 1, (
+        f"Expected at least 1 content chunk, got {len(content_chunks)}. All chunks: {chunks}"
+    )
+
+    # Must have exactly one usage chunk (from StepUsageEvent)
+    assert len(usage_chunks) == 1, (
+        f"Expected 1 usage chunk, got {len(usage_chunks)}. All chunks: {chunks}"
+    )
+
+    # The usage chunk should have empty choices (usage-only, no content)
+    assert usage_chunks[0]["choices"] == [], (
+        "Usage chunk should have empty choices (usage-only, no content)"
+    )
+
+    # Verify ordering: all content chunks appear before the usage chunk
+    if content_chunks and usage_chunks:
+        content_last_idx = max(chunks.index(c) for c in content_chunks)
+        usage_idx = chunks.index(usage_chunks[0])
+        assert usage_idx > content_last_idx, (
+            f"Usage chunk (index {usage_idx}) should appear after all content chunks "
+            f"(last at index {content_last_idx})"
+        )

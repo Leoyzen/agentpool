@@ -3,9 +3,14 @@
 Tests that ``acp_to_native_event()`` correctly converts ACP ``UsageUpdate``
 session updates to native ``StepUsageEvent`` objects, and that non-usage
 session updates do not produce ``StepUsageEvent`` objects.
+
+Also tests that ``ACPTurn.execute()`` correctly maintains ``cumulative_usage``
+and ``step_index`` across multiple ``UsageUpdate`` events from the ACP stream.
 """
 
 from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import RunUsage
 import pytest
@@ -14,12 +19,21 @@ from acp.schema import (
     AgentMessageChunk,
     AgentPlanUpdate,
     AgentThoughtChunk,
+    PromptResponse,
     ToolCallProgress,
     ToolCallStart,
     UsageUpdate,
 )
 from agentpool.agents.acp_agent.acp_converters import acp_to_native_event
+from agentpool.agents.acp_agent.turn import ACPTurn
+from agentpool.agents.context import AgentRunContext
 from agentpool.agents.events import StepUsageEvent
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from acp.schema import ContentBlock, SessionUpdate
 
 
 pytestmark = pytest.mark.unit
@@ -144,3 +158,78 @@ def test_mixed_stream_with_step_index_progression() -> None:
     assert usage_events[1].step_usage.output_tokens == 150
     # Cumulative after first event (passed to second event's converter)
     assert usage_events[1].cumulative_usage.output_tokens == 100
+
+
+# ============================================================================
+# ACPTurn.execute() cumulative_usage tracking
+# ============================================================================
+
+
+class _MockACPClient:
+    """Mock ACP client that yields a predetermined sequence of session updates.
+
+    Implements the :class:`~agentpool.agents.acp_agent.turn.ACPClientProtocol`
+    with a fixed list of ``SessionUpdate`` objects for ``stream_events()`` and
+    an empty list for ``get_messages()``.
+    """
+
+    def __init__(self, updates: list[Any]) -> None:
+        self._updates = list(updates)
+
+    async def prompt(self, session_id: str, content: list[ContentBlock]) -> PromptResponse:
+        return PromptResponse(stop_reason="end_turn")
+
+    async def stream_events(self, response: PromptResponse) -> AsyncIterator[SessionUpdate]:
+        for update in self._updates:
+            yield update
+
+    async def get_messages(self, session_id: str) -> list[SessionUpdate]:
+        return []
+
+
+@pytest.mark.asyncio
+async def test_acp_turn_cumulative_usage_tracking() -> None:
+    """ACPTurn.execute() maintains cumulative_usage and step_index across UsageUpdates.
+
+    Feeds a mixed stream of session updates through ACPTurn.execute() and
+    verifies that:
+    - 2 StepUsageEvent instances are emitted (one per UsageUpdate).
+    - step_index values are 0 and 1.
+    - cumulative_usage on the second event reflects accumulation from the
+      first step (output_tokens == 100).
+    - step_usage.output_tokens on each event matches the UsageUpdate.used value.
+    """
+    updates: list[Any] = [
+        AgentMessageChunk.text("hello"),
+        UsageUpdate(used=100, size=4096),
+        AgentThoughtChunk.text("thinking"),
+        UsageUpdate(used=150, size=4096),
+        AgentMessageChunk.text("world"),
+    ]
+
+    client = _MockACPClient(updates)
+    run_ctx = AgentRunContext(session_id="test-acp-turn")
+    turn = ACPTurn(
+        acp_client=client,
+        prompts=["test prompt"],
+        run_ctx=run_ctx,
+        session_id="test-acp-turn",
+        agent_name="test-acp-agent",
+    )
+
+    events: list[Any] = [event async for event in turn.execute()]
+
+    step_events = [e for e in events if isinstance(e, StepUsageEvent)]
+    assert len(step_events) == 2, f"Expected 2 StepUsageEvent, got {len(step_events)}"
+
+    # Step 0: first UsageUpdate(used=100)
+    assert step_events[0].step_index == 0
+    assert step_events[0].step_usage.output_tokens == 100
+    # cumulative_usage is the accumulator BEFORE this step (empty)
+    assert step_events[0].cumulative_usage.output_tokens == 0
+
+    # Step 1: second UsageUpdate(used=150)
+    assert step_events[1].step_index == 1
+    assert step_events[1].step_usage.output_tokens == 150
+    # cumulative_usage reflects accumulation from the first step (100)
+    assert step_events[1].cumulative_usage.output_tokens == 100

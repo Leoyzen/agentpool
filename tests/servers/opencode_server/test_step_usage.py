@@ -512,3 +512,112 @@ async def test_step_finish_emitted_flag_edge_cases(
     assert final_finish_c[0].properties.part.step_index is None, (
         "(c) Final StepFinishPart should have step_index=None"
     )
+
+
+# =============================================================================
+# Task 5.9: Subagent session_id does not suppress parent finalize()
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_subagent_session_id_does_not_suppress_parent_finalize(
+    adapter_context: EventProcessorContext,
+) -> None:
+    """Child session StepFinishPart must not set parent's _step_finish_emitted.
+
+    The ``_step_finish_emitted`` guard in ``convert_event()`` checks
+    ``session_id == self.session_id`` to prevent child session events
+    from suppressing the parent's final ``StepFinishPart``.  This test
+    simulates a subagent by processing a ``StreamCompleteEvent`` through
+    a *child* context (different session_id), then verifying the parent
+    adapter's ``finalize()`` still emits its own ``StepFinishPart``.
+    """
+    from agentpool_server.opencode_server.event_processor import EventProcessor
+
+    # --- Create parent adapter ---
+    adapter = _make_stream_adapter(adapter_context)
+    parent_session_id = adapter.session_id
+
+    # --- Create a child context with a different session_id ---
+    child_session_id = "child-session"
+    child_msg_id = "msg-child"
+    child_msg = MessageWithParts.assistant(
+        message_id=child_msg_id,
+        session_id=child_session_id,
+        time=MessageTime(created=0),
+        agent_name="test-agent",
+        model_id="test-model",
+        provider_id="agentpool",
+        path=MessagePath(cwd="/tmp", root="/tmp"),
+        parent_id="msg-000",
+    )
+    child_state = Mock()
+    child_state.messages = {}
+    child_state.ensure_session = Mock()
+    child_state.storage = Mock()
+    child_state.storage.log_message = Mock()
+    child_ctx = EventProcessorContext(
+        session_id=child_session_id,
+        assistant_msg_id=child_msg_id,
+        assistant_msg=child_msg,
+        state=child_state,
+        working_dir="/tmp",
+    )
+
+    # --- Process StreamCompleteEvent through child context ---
+    # This produces a StepFinishPart with session_id="child-session"
+    # and step_index=None (a final, not per-step, finish).
+    processor = EventProcessor()
+    msg = Mock()
+    msg.content = "child done"
+    msg.usage = RequestUsage(input_tokens=10, output_tokens=5)
+    msg.cost_info = None
+    msg.model_name = None
+    msg.provider_name = None
+    child_events = await _collect_events(
+        processor.process(StreamCompleteEvent(message=msg), child_ctx)
+    )
+
+    # Verify the child produced a final StepFinishPart with child's session_id
+    child_finish_parts = [
+        e
+        for e in child_events
+        if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, StepFinishPart)
+    ]
+    assert len(child_finish_parts) == 1, "Child should produce one final StepFinishPart"
+    child_finish = child_finish_parts[0].properties.part
+    assert child_finish.session_id == child_session_id, (
+        "Child StepFinishPart should have child's session_id"
+    )
+    assert child_finish.step_index is None, "Child final StepFinishPart should have step_index=None"
+
+    # --- Verify the guard condition ---
+    # The parent adapter's guard checks:
+    #   session_id == self.session_id AND step_index is None
+    # The child's session_id != parent's session_id, so the guard
+    # should NOT set _step_finish_emitted.
+    assert child_finish.session_id != parent_session_id, (
+        "Child session_id must differ from parent session_id for this test"
+    )
+    assert adapter._step_finish_emitted is False, (
+        "Parent's _step_finish_emitted should be False — child event "
+        "with different session_id must not set the flag"
+    )
+
+    # --- finalize() must still emit a StepFinishPart for the parent ---
+    final_events = list(adapter.finalize())
+    final_finish = [
+        e
+        for e in final_events
+        if isinstance(e, PartUpdatedEvent) and isinstance(e.properties.part, StepFinishPart)
+    ]
+    assert len(final_finish) == 1, (
+        "finalize() must emit a final StepFinishPart even when child session "
+        "StepFinishPart events were produced with a different session_id"
+    )
+    assert final_finish[0].properties.part.session_id == parent_session_id, (
+        "Final StepFinishPart from finalize() should have parent's session_id"
+    )
+    assert final_finish[0].properties.part.step_index is None, (
+        "Final StepFinishPart from finalize() should have step_index=None"
+    )

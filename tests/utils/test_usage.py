@@ -133,6 +133,22 @@ def test_diff_usage_does_not_modify_inputs() -> None:
 
 
 @pytest.mark.unit
+def test_diff_usage_negative_values() -> None:
+    """Negative diff: curr < prev produces negative deltas.
+
+    This can happen if usage resets between runs (e.g., a new request
+    snapshot has fewer tokens than the previous one).
+    """
+    prev = RunUsage(input_tokens=200, output_tokens=100, requests=2)
+    curr = RunUsage(input_tokens=100, output_tokens=50, requests=1)
+    diff = diff_usage(curr, prev)
+
+    assert diff.input_tokens == -100
+    assert diff.output_tokens == -50
+    assert diff.requests == -1
+
+
+@pytest.mark.unit
 def test_diff_usage_requests_zero_for_tool_only() -> None:
     """When requests didn't change (tool-only iteration), diff.requests == 0.
 

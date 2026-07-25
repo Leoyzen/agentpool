@@ -150,29 +150,56 @@ async def test_tool_only_iterations_no_step_usage() -> None:
 async def test_error_preserves_emitted_step_usage() -> None:
     """StepUsageEvent emitted before an error is preserved in the event stream.
 
-    Uses a real Agent + TestModel. The single-step TestModel emits 1
-    StepUsageEvent during the turn. We verify the event was yielded
-    before the turn completes (normally or via error).
+    Uses a custom TestModel that succeeds on the first LLM call (producing
+    a tool call → StepUsageEvent(0)) but raises ``RuntimeError`` on the
+    second LLM call.  The turn should propagate the error, but
+    ``StepUsageEvent(0)`` should already be in the event stream.
     """
+
+    class _ErrorOnSecondRequest(TestModel):
+        """TestModel that raises RuntimeError on the second model request."""
+
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self._request_count = 0
+
+        def _request(self, *args: Any, **kwargs: Any) -> Any:
+            self._request_count += 1
+            if self._request_count >= 2:
+                raise RuntimeError("Simulated failure on second LLM call")
+            return super()._request(*args, **kwargs)
+
     agent = Agent(
         name="test-error-step",
-        model=TestModel(custom_output_text="hello"),
+        model=_ErrorOnSecondRequest(call_tools=["my_tool"], custom_output_text="done"),
+        tools=[my_tool],
     )
     async with agent:
         run_ctx = AgentRunContext(session_id="test-session")
         turn = NativeTurn(
             agent=agent,
-            prompts=["test"],
+            prompts=["Call the tool"],
             run_ctx=run_ctx,
             message_history=[],
         )
 
-        events: list[Any] = [event async for event in turn.execute()]
+        events: list[Any] = []
+        propagated_error: Exception | None = None
+        try:
+            async for event in turn.execute():
+                events.append(event)  # noqa: PERF401
+        except RuntimeError as exc:
+            propagated_error = exc
+
+        # The error should have been propagated from the generator.
+        assert propagated_error is not None, "Expected RuntimeError to be propagated"
+        assert "Simulated failure" in str(propagated_error)
 
         step_events = _step_usage_events(events)
-        # The single-step TestModel should have emitted exactly 1
-        # StepUsageEvent before StreamCompleteEvent.
-        assert len(step_events) == 1, f"Expected 1 StepUsageEvent, got {len(step_events)}"
+        # At least 1 StepUsageEvent should have been emitted before the error.
+        assert len(step_events) >= 1, (
+            f"Expected >= 1 StepUsageEvent before error, got {len(step_events)}"
+        )
         assert step_events[0].step_index == 0
 
 
