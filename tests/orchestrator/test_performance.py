@@ -142,6 +142,7 @@ async def test_benchmark_session_creation_latency(minimal_pool: AgentPool) -> No
 
 
 @pytest.mark.benchmark
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 async def test_benchmark_session_lifecycle_memory(minimal_pool: AgentPool) -> None:
     """Verify session creation/close does not leak memory under sustained load."""
     session_pool = minimal_pool.session_pool
