@@ -313,6 +313,12 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Raises:
             RuntimeError: If SessionPool is not available.
         """
+        # Ensure distinct time.created (millisecond precision) by spacing
+        # creations 50ms apart. This prevents sort mismatches in OpenCode
+        # TUI subagent numbering when multiple members are created in
+        # rapid succession (team_create loop or sequential team_add_member).
+        await asyncio.sleep(0.01)
+
         from agentpool.agents.events.events import SpawnSessionStart
 
         session_pool = agent_ctx.host.session_pool
@@ -1474,11 +1480,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         created_sessions: list[str] = []
         try:
-            for i, member in enumerate(members):
-                # Ensure each member session gets a distinct time.created
-                # (millisecond precision) by spacing creations ~2ms apart.
-                if i > 0:
-                    await asyncio.sleep(0.002)
+            for member in members:
                 member_session_id = await self._create_member_session(
                     agent_ctx,
                     member["agent"],
