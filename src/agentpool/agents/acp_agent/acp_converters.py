@@ -25,6 +25,7 @@ from pydantic_ai import (
     ImageUrl,
     ModelRequest,
     ModelResponse,
+    RunUsage,
     TextContent,
     TextPart,
     ThinkingPart,
@@ -51,6 +52,7 @@ from acp.schema import (
     TextContentBlock,
     ToolCallProgress,
     ToolCallStart,
+    UsageUpdate,
     UserMessageChunk,
 )
 from agentpool.agents.events import (
@@ -58,6 +60,7 @@ from agentpool.agents.events import (
     LocationContentItem,
     PartDeltaEvent,
     PlanUpdateEvent,
+    StepUsageEvent,
     TerminalContentItem,
     ToolCallCompleteEvent,
     ToolCallProgressEvent,
@@ -277,11 +280,20 @@ def convert_to_acp_content(prompts: Sequence[UserContent]) -> list[ContentBlock]
     return content_blocks
 
 
-def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | None:  # noqa: PLR0911
+def acp_to_native_event(  # noqa: PLR0911
+    update: SessionUpdate,
+    *,
+    step_index: int = 0,
+    cumulative_usage: RunUsage | None = None,
+) -> RichAgentStreamEvent[Any] | None:
     """Convert ACP session update to native streaming event.
 
     Args:
         update: ACP SessionUpdate from session/update notification
+        step_index: Zero-based LLM step index within the current turn (resets per turn).
+        cumulative_usage: Running cumulative usage for the turn. If ``None``, an empty
+            ``RunUsage`` is used. The caller (``ACPTurn.execute()``) is responsible for
+            maintaining and passing the correct accumulator.
 
     Returns:
         Corresponding native event, or None if no mapping exists
@@ -354,6 +366,18 @@ def acp_to_native_event(update: SessionUpdate) -> RichAgentStreamEvent[Any] | No
                 PlanEntry(content=e.content, priority=e.priority, status=e.status) for e in entries
             ]
             return PlanUpdateEvent(entries=native_entries)
+
+        # Usage update -> StepUsageEvent
+        # ACP's UsageUpdate.used is "tokens currently in context" — a best-effort
+        # cumulative measure with no input/output split. We map it to output_tokens
+        # and set input_tokens=0. The step_index and cumulative_usage are provided
+        # by the caller (ACPTurn.execute()); defaults are used when called standalone.
+        case UsageUpdate(used=used):
+            return StepUsageEvent(
+                step_index=step_index,
+                step_usage=RunUsage(output_tokens=used),
+                cumulative_usage=(cumulative_usage or RunUsage()),
+            )
 
         case _:
             return None

@@ -302,6 +302,14 @@ class StepFinishPart(PartBase):
     snapshot: str | None = None
     cost: float = 0.0
     tokens: Tokens = Field(default_factory=Tokens)
+    step_index: int | None = None
+    """Zero-based index of the step this finish part belongs to.
+
+    ``None`` for the final cumulative ``StepFinishPart`` emitted by
+    ``finalize()`` (backward-compatible default).  Set to the step
+    index for per-step ``StepFinishPart`` emitted from
+    ``StepUsageEvent``.
+    """
 
 
 Part = (

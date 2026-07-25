@@ -26,6 +26,7 @@ from agentpool.agents.events import (
     FileContentItem,
     LocationContentItem,
     RunErrorEvent,
+    StepUsageEvent,
     StreamCompleteEvent,
     TextContentItem,
     ToolCallCompleteEvent,
@@ -239,6 +240,10 @@ class EventProcessor:
                 metadata=event_metadata,
             ) if ctx.has_tool_part(tool_call_id):
                 for e in self._process_tool_complete(ctx, tool_call_id, result, event_metadata):
+                    yield e
+
+            case StepUsageEvent() as step_usage_event:
+                for e in self._process_step_usage(ctx, step_usage_event):
                     yield e
 
             case StreamCompleteEvent(message=msg, cancelled=cancelled) if msg:
@@ -847,6 +852,55 @@ class EventProcessor:
         ctx.add_tool_part(tool_call_id, updated)
         ctx.assistant_msg.update_part(updated)
         yield PartUpdatedEvent.create(updated)
+
+    def _process_step_usage(
+        self,
+        ctx: EventProcessorContext,
+        event: StepUsageEvent,
+    ) -> Iterator[Event]:
+        """Process a per-step usage event into a StepFinishPart.
+
+        Emits a ``StepFinishPart`` with token counts from ``step_usage``
+        and the ``step_index`` from the event.  This is distinct from the
+        final cumulative ``StepFinishPart`` emitted by
+        ``_process_stream_complete`` / ``finalize()`` — both are emitted
+        in a turn that has per-step usage.
+
+        Args:
+            ctx: The event processor context.
+            event: The step usage event with per-step and cumulative usage.
+
+        Yields:
+            ``PartUpdatedEvent`` for the created ``StepFinishPart``.
+        """
+        step_usage = event.step_usage
+        details = step_usage.details or {}
+        reasoning_tokens = details.get("reasoning_tokens", 0)
+
+        cache = TokenCache(
+            read=step_usage.cache_read_tokens or 0,
+            write=step_usage.cache_write_tokens or 0,
+        )
+        input_tokens = step_usage.input_tokens or 0
+        output_tokens = step_usage.output_tokens or 0
+        total = input_tokens + output_tokens + reasoning_tokens + cache.read + cache.write
+        tokens = Tokens(
+            cache=cache,
+            input=input_tokens,
+            output=output_tokens,
+            reasoning=reasoning_tokens,
+            total=total,
+        )
+        step_finish = StepFinishPart(
+            id=identifier.ascending("part"),
+            message_id=ctx.assistant_msg_id,
+            session_id=ctx.session_id,
+            tokens=tokens,
+            cost=0.0,
+            step_index=event.step_index,
+        )
+        ctx.assistant_msg.parts.append(step_finish)
+        yield PartUpdatedEvent.create(step_finish)
 
     def _process_stream_complete(
         self,
