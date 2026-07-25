@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
     CustomEvent,
-    PartStartEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
@@ -653,18 +652,22 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Steer split: When a steer UserMessageInsertedEvent was received
-            # during an active turn, the next PartStartEvent (from the new
-            # ModelRequestNode after steer drain) triggers a logical turn split.
-            # This finalizes the current assistant message (A1) and creates a
-            # new one (A2) with a fresh message ID, so the steer user message
-            # sorts between A1 and A2 in the TUI's lexicographic message ID
-            # ordering. Without this split, the steer user message would sort
-            # after the entire assistant message (which reuses one ID for both
-            # pre-steer and post-steer content).
+            # Steer split: When EnqueuedMessagesEvent fires (mapped to
+            # UserMessageInsertedEvent with source="internal"), the steer
+            # message has entered run history and the model is about to process
+            # it. This is the precise moment to split the logical turn:
+            # finalize the current assistant message (A1) and create a new one
+            # (A2) with a fresh message ID, so the steer user message sorts
+            # between A1 and A2 in the TUI's lexicographic message ID ordering.
+            #
+            # source="internal" means the event came from
+            # handle_enqueued_messages() → EnqueuedMessagesEvent → actual drain
+            # time. source="protocol" means it came from _route_message() →
+            # receive time (not a split trigger).
             if (
-                isinstance(event, PartStartEvent)
-                and ctx._steer_received
+                isinstance(event, UserMessageInsertedEvent)
+                and event.delivery == "steer"
+                and event.source == "internal"
                 and self._message_registered.get(session_id, False)
             ):
                 await self._finalize_assistant_time(session_id)
@@ -687,12 +690,6 @@ class OpenCodeEventBridgeMixin:
                 ctx.stream_start_ms = now_ms()
 
                 self._message_registered[session_id] = False
-                ctx._steer_received = False
-
-            # Set _steer_received flag when a steer user message arrives during
-            # an active turn. The next PartStartEvent will trigger the split.
-            if isinstance(event, UserMessageInsertedEvent) and event.delivery == "steer":
-                ctx._steer_received = True
 
             # Register assistant message on first non-spawn, non-custom,
             # non-user-message-inserted event.

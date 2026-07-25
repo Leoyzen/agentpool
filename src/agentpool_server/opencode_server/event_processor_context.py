@@ -94,12 +94,6 @@ class EventProcessorContext:
     # preventing a subsequent StreamCompleteEvent from overriding the error state.
     is_errored: bool = field(default=False, init=False)
 
-    # Steer split flag: set when UserMessageInsertedEvent(delivery="steer") arrives
-    # during an active turn. The next PartStartEvent triggers a logical turn split:
-    # finalize the current assistant message and create a new one, so the steer
-    # user message sorts between the two assistant messages in the TUI.
-    _steer_received: bool = field(default=False, init=False)
-
     # Dedup set: message_ids already displayed as UserMessage.
     # When steer()/followup() emits a fire-and-forget
     # UserMessageInsertedEvent AND EnqueuedMessagesEvent also produces
