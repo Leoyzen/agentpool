@@ -1028,16 +1028,19 @@ async def test_no_value_error_when_generator_abandoned_in_different_context() ->
 
 
 @pytest.mark.unit
-async def test_start_empty_prompt_terminates_immediately() -> None:
-    """start('') produces no events and terminates immediately.
+async def test_start_empty_prompt_no_staged_content_terminates_immediately() -> None:
+    """start('') with no staged_content produces no events and terminates.
 
-    In the per-prompt model, an empty prompt means no turn is executed
-    and the generator returns immediately.
+    In the per-prompt model, an empty prompt with no staged_content means
+    no turn is executed and the generator returns immediately.
     """
+    from agentpool.agents.staged_content import StagedContent
+
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=_StubTurn())
     agent.name = "test-agent"
     agent.conversation = MessageHistory()
+    agent.staged_content = StagedContent()  # empty
     handle = _make_run_handle(agent=agent)
     gen = handle.start("")
     events: list[Any] = []
@@ -1056,6 +1059,75 @@ async def test_start_empty_prompt_terminates_immediately() -> None:
     assert handle.complete_event.is_set()
     # No turn should have been created
     agent.create_turn.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_start_empty_list_no_staged_content_terminates_immediately() -> None:
+    """start([]) with no staged_content produces no events and terminates.
+
+    An empty list is falsy and should be treated the same as an empty
+    string — no turn executes.
+    """
+    from agentpool.agents.staged_content import StagedContent
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    agent.staged_content = StagedContent()  # empty
+    handle = _make_run_handle(agent=agent)
+    gen = handle.start([])
+    events: list[Any] = []
+    try:
+        async with asyncio.timeout(5):
+            events = [event async for event in gen]
+    except (TimeoutError, asyncio.CancelledError):
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    assert len(events) == 0
+    assert handle.complete_event.is_set()
+    agent.create_turn.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_start_empty_list_with_staged_content_executes_turn() -> None:
+    """start([]) with staged_content executes a turn to consume it.
+
+    When a skill command injects content into ``staged_content`` and the
+    user's entire message was a slash command (leaving non_command_content
+    empty), ``start([])`` must still execute a turn so ``NativeTurn`` can
+    consume the staged content. Without this, skill instructions are
+    silently discarded (issue #284).
+    """
+    from agentpool.agents.staged_content import StagedContent
+
+    staged = StagedContent()
+    staged.add_text("IMPORTANT_SKILL_DIRECTIVE")
+
+    agent = MagicMock()
+    agent.create_turn = MagicMock(return_value=_StubTurn())
+    agent.name = "test-agent"
+    agent.conversation = MessageHistory()
+    agent.staged_content = staged
+    handle = _make_run_handle(agent=agent)
+    gen = handle.start([])
+    try:
+        async with asyncio.timeout(5):
+            async for _ in gen:
+                pass
+    except (TimeoutError, asyncio.CancelledError):
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            await gen.aclose()
+
+    # A turn SHOULD have been created to consume staged_content
+    agent.create_turn.assert_called_once()
+    # complete_event should be set
+    assert handle.complete_event.is_set()
 
 
 # ---------------------------------------------------------------------------
@@ -1530,6 +1602,7 @@ async def test_empty_prompt_drains_feedback_queue_but_messages_unprocessed() -> 
     queued_steer_messages after start() returns and re-enqueue any
     unprocessed messages back to feedback_queue for the next RunHandle.
     """
+    from agentpool.agents.staged_content import StagedContent
     from agentpool.lifecycle import DirectChannel, Feedback, MemoryJournal
     from agentpool.orchestrator.session_controller import SessionState
 
@@ -1537,6 +1610,7 @@ async def test_empty_prompt_drains_feedback_queue_but_messages_unprocessed() -> 
     agent.create_turn = MagicMock(return_value=_StubTurn())
     agent.name = "test-agent"
     agent.conversation = MessageHistory()
+    agent.staged_content = StagedContent()  # empty — no staged content
 
     session = SessionState(session_id="test-empty-drain", agent_name="test-agent")
     session._comm_channel = DirectChannel(MemoryJournal())
