@@ -1474,7 +1474,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         created_sessions: list[str] = []
         try:
-            for member in members:
+            for i, member in enumerate(members):
+                # Ensure each member session gets a distinct time.created
+                # (millisecond precision) by spacing creations ~2ms apart.
+                if i > 0:
+                    await asyncio.sleep(0.002)
                 member_session_id = await self._create_member_session(
                     agent_ctx,
                     member["agent"],
