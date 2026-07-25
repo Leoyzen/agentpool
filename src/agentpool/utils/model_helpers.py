@@ -23,7 +23,7 @@ from pydantic_ai.models.function import (
     DeltaToolCalls,
     FunctionModel,
 )
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 
@@ -97,7 +97,12 @@ def _infer_single_model(model: str | Model) -> Model:  # noqa: PLR0911
             model, base_url="http://localhost:1234/v1/", api_key="lm-studio"
         )
     if model.startswith("openai:"):
-        return _get_openai_based_model(model)
+        # Use OpenAIResponsesModel (Responses API) to match pydantic-ai's default.
+        # Users who need the Chat Completions API can use the "openai-chat:" prefix,
+        # which falls through to pydantic-ai's built-in infer_model.
+        model_name = model.split(":", 1)[1]
+        openai_provider = OpenAIProvider()
+        return OpenAIResponsesModel(model_name=model_name, provider=openai_provider)
     if model.startswith("zen:"):
         return _get_openai_based_model(model)
     if model.startswith("anthropic-max:"):
@@ -111,8 +116,6 @@ def _infer_single_model(model: str | Model) -> Model:  # noqa: PLR0911
 
     if model.startswith("copilot:"):
         from httpx import AsyncClient
-        from pydantic_ai.models.openai import OpenAIChatModel
-        from pydantic_ai.providers.openai import OpenAIProvider
 
         token = os.getenv("GITHUB_COPILOT_API_KEY")
         headers = {
