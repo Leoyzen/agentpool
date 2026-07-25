@@ -243,6 +243,12 @@ class EventProcessor:
                     yield e
 
             case StepUsageEvent() as step_usage_event:
+                logger.info(
+                    "OpenCode event processor processing StepUsageEvent",
+                    step_index=step_usage_event.step_index,
+                    input=step_usage_event.step_usage.input_tokens,
+                    output=step_usage_event.step_usage.output_tokens,
+                )
                 for e in self._process_step_usage(ctx, step_usage_event):
                     yield e
 

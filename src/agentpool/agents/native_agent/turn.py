@@ -322,6 +322,15 @@ class NativeTurn(HookAwareTurn, Turn):
                             # without a new model request) are skipped.
                             step_diff = diff_usage(agent_run.usage, prev_usage)
                             if step_diff.requests > 0:
+                                logger.info(
+                                    "Emitting StepUsageEvent",
+                                    step_index=step_index,
+                                    step_usage_input=step_diff.input_tokens,
+                                    step_usage_output=step_diff.output_tokens,
+                                    step_usage_total=step_diff.total_tokens,
+                                    cumulative_input=agent_run.usage.input_tokens,
+                                    cumulative_output=agent_run.usage.output_tokens,
+                                )
                                 yield StepUsageEvent(
                                     step_index=step_index,
                                     step_usage=step_diff,

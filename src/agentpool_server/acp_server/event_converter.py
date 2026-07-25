@@ -844,6 +844,12 @@ class ACPEventConverter:
                 step_usage=step_usage,
                 cumulative_usage=cumulative_usage,
             ):
+                logger.info(
+                    "ACP converter emitting per-step UsageUpdate",
+                    step_index=step_index,
+                    used=step_usage.total_tokens,
+                    cumulative=cumulative_usage.total_tokens,
+                )
                 # Emit a per-step UsageUpdate with DELTA token values.
                 # ACP clients should accumulate these per-step deltas and
                 # then REPLACE the running total with the final
