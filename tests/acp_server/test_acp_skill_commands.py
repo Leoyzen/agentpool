@@ -181,6 +181,7 @@ def _make_minimal_session(
     session = MagicMock()
     session.host_context = host_context
     session._skill_bridge = skill_bridge
+    session._command_bridge = None  # No ExtensionRegistry in unit tests
     session.command_store = CommandStore()
     session.command_store._initialize_sync()
     session._notify_command_update = MagicMock()
@@ -190,10 +191,11 @@ def _make_minimal_session(
 
 def _call_register_skill_commands(session: MagicMock) -> None:
     """Invoke the real _register_skill_commands method on a mock session."""
-    # We need to call the unbound method from ACPSession on our mock
+    import asyncio
+
     from agentpool_server.acp_server.session import ACPSession
 
-    ACPSession._register_skill_commands(session)  # type: ignore[arg-type]
+    asyncio.run(ACPSession._register_skill_commands(session))  # type: ignore[arg-type]
 
 
 def _skill_commands_from_store(store: CommandStore) -> list[SlashedCommand]:

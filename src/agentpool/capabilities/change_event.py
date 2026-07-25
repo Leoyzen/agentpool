@@ -18,6 +18,7 @@ ChangeKind = Literal[
     "prompts_changed",
     "resources_changed",
     "skills_changed",
+    "commands_changed",
 ]
 """Discriminator for which resource type changed in a capability."""
 

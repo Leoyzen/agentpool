@@ -15,11 +15,12 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
     from pathlib import PurePosixPath
 
     from upath import UPath
 
+    from agentpool.capabilities.agent_context import AgentContext
     from agentpool.capabilities.change_event import ChangeEvent
 
 
@@ -100,12 +101,21 @@ class CommandEntry:
         description: Short description of what the command does.
         skill_uri: URI of the skill backing this command, if any.
         source: Where the command comes from — ``"local"`` or ``"remote"``.
+        handler: Optional async callable invoked with ``(input, ctx)`` to
+            execute the command. When ``None``, the command is display-only
+            and cannot be executed via ``CommandBridge.execute()``. Uses
+            ``compare=False`` to exclude the callable from equality/hash
+            comparisons, preserving existing ``CommandEntry`` comparison
+            semantics.
     """
 
     name: str
     description: str = ""
     skill_uri: str = ""
     source: str = "local"
+    handler: Callable[[str, AgentContext], Awaitable[str]] | None = field(
+        default=None, compare=False
+    )
 
 
 # ---- Protocols ----

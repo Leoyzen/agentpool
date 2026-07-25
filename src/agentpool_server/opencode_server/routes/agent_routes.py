@@ -207,32 +207,64 @@ async def list_skills(state: StateDep) -> list[SkillInfo]:
 
 
 @router.get("/command")
-async def list_commands(state: StateDep) -> list[Command]:
+async def list_commands(state: StateDep) -> list[Command]:  # noqa: PLR0915
     """List available slash commands.
 
     Commands include:
+    - Capability commands from OpenCodeCommandBridge (if available)
     - MCP prompts as commands
     - Skill commands from skill_bridge (if available) or skill_provider
+
+    De-duplication by name: if a command name exists in both the
+    OpenCodeCommandBridge and existing sources, the CommandBridge version
+    is preferred.
     """
     commands: list[Command] = []
+    seen_names: set[str] = set()
 
-    # Add MCP prompts as commands (source="mcp")
+    # 1. Add capability commands from OpenCodeCommandBridge (highest priority)
+    if state.command_bridge is not None:
+        try:
+            slashed_commands = await state.command_bridge.discover_commands()
+            for slashed in slashed_commands:
+                if slashed.name in seen_names:
+                    continue
+                seen_names.add(slashed.name)
+                commands.append(
+                    Command(
+                        name=slashed.name,
+                        description=slashed.description,
+                        source="command",
+                        template="",
+                        hints=[],
+                    )
+                )
+        except Exception:
+            logger.exception("Failed to discover capability commands")
+
+    # 2. Add MCP prompts as commands (source="mcp")
     try:
         prompts = await state.agent.list_prompts()
-        commands.extend([
-            Command(name=p.name, description=p.description, source="mcp", hints=[]) for p in prompts
-        ])
+        for p in prompts:
+            if p.name in seen_names:
+                continue
+            seen_names.add(p.name)
+            commands.append(Command(name=p.name, description=p.description, source="mcp", hints=[]))
     except Exception:  # noqa: BLE001
         pass
 
-    # Add skill commands from skill_bridge if available
+    # 3. Add skill commands from skill_bridge if available
     logger.debug(
         "list_commands debug",
         skill_bridge_exists=state.skill_bridge is not None,
         skill_provider_exists=state.pool.skill_provider is not None,
+        command_bridge_exists=state.command_bridge is not None,
     )
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():
+            if skill_cmd.name in seen_names:
+                continue
+            seen_names.add(skill_cmd.name)
             # For virtual skills (from MCP), fetch instructions from resolver
             template = ""
             if state.pool.skill_resolver is not None:
@@ -272,6 +304,9 @@ async def list_commands(state: StateDep) -> list[Command]:
                     skill_count=len(provider_skills),
                 )
                 for entry in provider_skills:
+                    if entry.name in seen_names:
+                        continue
+                    seen_names.add(entry.name)
                     # Use provider's read_skill for content
                     try:
                         template = await provider.read_skill(entry.name) or ""

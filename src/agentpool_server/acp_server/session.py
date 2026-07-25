@@ -236,6 +236,18 @@ class ACPSession(
         self._skill_change_task: asyncio.Task[None] | None = None
         self._skill_register_lock = asyncio.Lock()
 
+        # CommandBridge: discovers commands from all CommandResource capabilities
+        from agentpool.capabilities.command_bridge import CommandBridge
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+        self._command_bridge: CommandBridge | None = None
+        hctx = self.host_context
+        if hctx.extension_registry is not None:
+            self._command_bridge = CommandBridge(
+                registry=hctx.extension_registry,
+                scope=Scope(level=ScopeLevel.SESSION, session_id=self.session_id),
+            )
+
         # CRITICAL: Initialize requests and acp_env BEFORE agent mutation
         self.notifications = ACPNotifications(client=self.client, session_id=self.session_id)
         self.requests = ACPRequests(client=self.client, session_id=self.session_id)
@@ -278,8 +290,11 @@ class ACPSession(
         # Register global commands from manifest.commands (e.g., static commands like start_eval)
         self._register_manifest_commands()
 
-        # Register pool-level skills as slash commands
-        self._register_skill_commands()
+        # Register commands from CommandBridge + skills (async — scheduled as task
+        # because __post_init__ is synchronous but discover_commands() is async)
+        self._command_register_task: asyncio.Task[None] | None = asyncio.create_task(
+            self._register_skill_commands()
+        )
 
         # Subscribe to dynamic skill changes from ExtensionRegistry
         self._start_skill_change_watcher()

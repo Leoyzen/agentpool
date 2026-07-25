@@ -80,25 +80,35 @@ def _make_mock_acp_agent() -> MagicMock:
     return mock_acp_agent
 
 
-def _create_session(
+async def _create_session(
     pool: AgentPool,
     agent: Agent,
     *,
     mock_client: AsyncMock | None = None,
     mock_acp_agent: MagicMock | None = None,
 ) -> ACPSession:
-    """Create a real ACPSession with mocked transport layer."""
+    """Create a real ACPSession with mocked transport layer.
+
+    Awaits the async command registration task scheduled by __post_init__
+    so skill/CommandBridge commands are registered before the caller
+    inspects the session.
+    """
     if mock_client is None:
         mock_client = AsyncMock()
     if mock_acp_agent is None:
         mock_acp_agent = _make_mock_acp_agent()
-    return ACPSession(
+    session = ACPSession(
         session_id="test-session-e2e",
         agent=agent,
         cwd="/tmp",
         client=mock_client,
         acp_agent=mock_acp_agent,
     )
+    # Wait for the async _register_skill_commands task to complete
+    if session._command_register_task is not None:
+        with contextlib.suppress(Exception):
+            await session._command_register_task
+    return session
 
 
 def _skill_cmd_names(store: CommandStore) -> set[str]:
@@ -150,7 +160,9 @@ async def test_e2e_pool_skills_in_available_commands_update(
     skill_b = _make_skill(name="skill-b", description="Skill B")
     _mock_skills_on_pool(pool, [skill_a, skill_b])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     session.notifications.update_commands = AsyncMock()  # type: ignore[method-assign]
     await session.send_available_commands_update()
@@ -176,7 +188,9 @@ async def test_e2e_init_client_skills_sends_update(
     pool, agent = pool_and_agent
     _mock_skills_on_pool(pool, [])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Simulate client skills being discovered
     client_skill = _make_skill(name="client-skill", description="Client skill")
@@ -226,7 +240,9 @@ async def test_e2e_skills_changed_event_triggers_update(
     pool._host_context = None  # type: ignore[attr-defined]
     pool._extension_registry = mock_ext_registry  # type: ignore[attr-defined]
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Replace update mock BEFORE triggering the event
     session.notifications.update_commands = AsyncMock()  # type: ignore[method-assign]
@@ -288,7 +304,9 @@ async def test_e2e_execute_skill_command_injects_instructions(
     )
     _mock_skills_on_pool(pool, [skill])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Mock notifications to avoid real ACP communication
     session.notifications.send_agent_text = AsyncMock()  # type: ignore[method-assign]
@@ -329,7 +347,9 @@ async def test_e2e_session_close_cancels_watcher_task(
     mock_ext_registry.merge_change_streams.return_value = _empty_stream()
     pool._extension_registry = mock_ext_registry  # type: ignore[attr-defined]
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Verify watcher task was created
     assert session._skill_change_task is not None, "Skill change watcher task was not created"
@@ -358,7 +378,9 @@ async def test_e2e_non_invocable_skills_never_in_commands(
     )
     _mock_skills_on_pool(pool, [invocable, non_invocable])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Check command_store: non-invocable should not be registered
     store_names = _skill_cmd_names(session.command_store)
@@ -407,7 +429,9 @@ async def test_regression_manifest_commands_still_work(
         return_value={"manifest-cmd": manifest_cmd}
     )
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Both manifest and skill commands should be in the store
     all_names = _all_cmd_names(session.command_store)
@@ -425,7 +449,9 @@ async def test_regression_mcp_prompts_as_commands_still_works(
     pool, agent = pool_and_agent
     _mock_skills_on_pool(pool, [])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Mock agent.list_prompts to return a fake MCP prompt
     mock_prompt = MagicMock()
@@ -475,7 +501,9 @@ async def test_regression_send_update_includes_both_manifest_and_skill_commands(
         return_value={"manifest-cmd": manifest_cmd}
     )
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     session.notifications.update_commands = AsyncMock()  # type: ignore[method-assign]
     await session.send_available_commands_update()
@@ -515,7 +543,9 @@ async def test_regression_command_name_collision_last_registered_wins(
         return_value={shared_name: manifest_cmd}
     )
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # __post_init__ calls _register_manifest_commands() first,
     # then _register_skill_commands()
@@ -552,7 +582,9 @@ async def test_regression_load_skills_false_pool_skills_still_registered(
     pool_skill = _make_skill(name="pool-skill", description="A pool-level skill")
     _mock_skills_on_pool(pool, [pool_skill])
 
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
 
     # Pool skills should be registered (from __post_init__ -> _register_skill_commands)
     store_names = _skill_cmd_names(session.command_store)
@@ -591,7 +623,9 @@ async def test_regression_50_plus_skills_registration_performance(
     import time
 
     start = time.monotonic()
-    session = _create_session(pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent)
+    session = await _create_session(
+        pool, agent, mock_client=mock_client, mock_acp_agent=mock_acp_agent
+    )
     elapsed = time.monotonic() - start
 
     # All 50 skills should be registered
