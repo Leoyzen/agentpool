@@ -91,6 +91,30 @@ class BaseModelConfig(Schema):
     type: str = Field(init=False)
     """Type discriminator for model configs."""
 
+    provider: str | None = Field(
+        default=None,
+        examples=["openai", "anthropic", "azure", "myprivate"],
+        title="Provider name",
+    )
+    """Provider name (e.g., 'openai', 'anthropic', 'azure').
+
+    Used for protocol display grouping and tokonomics matching.
+    When not set, the provider is extracted from the model identifier string.
+    """
+
+    context_length: int | None = Field(
+        default=None,
+        ge=1,
+        examples=[128000, 200000, 32768],
+        title="Context length (tokens)",
+    )
+    """Maximum input context length in tokens.
+
+    Controls the model's context window for display in protocol UIs
+    (OpenCode, ACP) and compaction/truncation decisions.
+    When not set, falls back to tokonomics discovery or DEFAULT_MODEL_CONTEXT_LIMIT.
+    """
+
     def get_model(self) -> Model:
         """Create and return actual model instance."""
         msg = f"Model creation not implemented for {self.__class__.__name__}"
@@ -132,6 +156,27 @@ class StringModelConfig(BaseModelConfig):
         title="Model identifier",
     )
     """String identifier for the model."""
+
+    base_url: str | None = Field(
+        default=None,
+        examples=["https://api.myprovider.com/v1", "http://localhost:1234/v1"],
+        title="Base URL",
+    )
+    """Base URL for the model API endpoint.
+
+    When set, creates an OpenAI-compatible model pointed at this URL,
+    overriding the default provider endpoint. Use for custom/private models.
+    """
+
+    api_key: str | None = Field(
+        default=None,
+        title="API key",
+    )
+    """Optional API key for the model endpoint.
+
+    Falls back to standard environment variables (e.g. OPENAI_API_KEY)
+    if not set.
+    """
 
     max_tokens: int | None = Field(
         default=None,
@@ -245,8 +290,17 @@ class StringModelConfig(BaseModelConfig):
         return ModelSettings(**{k: v for k, v in settings.items() if v is not None})  # type: ignore[typeddict-item, no-any-return]
 
     def get_model(self) -> Model:
-        from agentpool.utils.model_helpers import infer_model
+        from agentpool.utils.model_helpers import _get_openai_based_model, infer_model
 
+        # If base_url is explicitly configured, create an OpenAI-compatible
+        # model pointing to that endpoint — this is the most common pattern
+        # for custom/private model providers.
+        if self.base_url:
+            return _get_openai_based_model(
+                str(self.identifier),
+                base_url=self.base_url,
+                api_key=self.api_key,
+            )
         return infer_model(self.identifier)
 
 
