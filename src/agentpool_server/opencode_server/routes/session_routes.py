@@ -949,6 +949,26 @@ async def get_session_messages(
     return messages
 
 
+@router.get("/{session_id}/sync")
+async def sync_session_messages(
+    session_id: str,
+    state: StateDep,
+    limit: int | None = None,
+) -> list[MessageWithParts]:
+    """Alias for ``GET /{session_id}/message``.
+
+    The OpenCode TUI (v1.18+) requests ``/session/{id}/sync`` to load
+    conversation history.  Without this route, the request falls through
+    to the catch-all web-UI proxy (which forwards to ``app.opencode.ai``)
+    and the TUI receives empty cloud data instead of local session
+    history.
+
+    This route simply delegates to :func:`get_session_messages` so both
+    ``/message`` and ``/sync`` return identical data.
+    """
+    return await get_session_messages(session_id, state, limit)
+
+
 @router.get("/{session_id}/children")
 async def get_session_children(
     session_id: str,

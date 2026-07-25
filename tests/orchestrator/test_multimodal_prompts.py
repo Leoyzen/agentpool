@@ -149,11 +149,14 @@ async def test_start_accepts_list_prompt() -> None:
 @pytest.mark.unit
 async def test_start_accepts_empty_string() -> None:
     """Empty string produces empty prompts list (no spurious turn)."""
+    from agentpool.agents.staged_content import StagedContent
+
     turn = _CapturingStubTurn([])
     agent = MagicMock()
     agent.create_turn = MagicMock(return_value=turn)
     agent.conversation = MagicMock()
     agent.conversation.add_chat_messages = MagicMock()
+    agent.staged_content = StagedContent()  # empty — no staged content
     handle = _make_run_handle(agent=agent)
 
     gen = handle.start("")
