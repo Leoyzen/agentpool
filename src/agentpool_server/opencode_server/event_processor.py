@@ -921,6 +921,26 @@ class EventProcessor:
         ctx.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
 
+        # Update the message-level `tokens` field with cumulative values.
+        # The TUI sidebar reads this field to show current token usage.
+        cumulative = event.cumulative_usage
+        cumul_input = cumulative.input_tokens or 0
+        cumul_output = cumulative.output_tokens or 0
+        cumul_details = cumulative.details or {}
+        cumul_reasoning = cumul_details.get("reasoning_tokens", 0)
+        ctx.update_tokens(cumul_input, cumul_output)
+        if isinstance(ctx.assistant_msg.info, AssistantMessage):
+            ctx.assistant_msg.info.tokens = Tokens(
+                cache=TokenCache(
+                    read=cumulative.cache_read_tokens or 0,
+                    write=cumulative.cache_write_tokens or 0,
+                ),
+                input=cumul_input,
+                output=cumul_output,
+                reasoning=cumul_reasoning,
+            )
+            yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
+
     def _process_stream_complete(
         self,
         ctx: EventProcessorContext,
