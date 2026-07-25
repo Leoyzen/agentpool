@@ -393,9 +393,14 @@ class RunHandle:
                     current_prompts: list[str | list[Any]] = (
                         [initial_prompt] if initial_prompt else []
                     )
-                    if not current_prompts:
-                        # No prompt — nothing to do, terminate immediately.
+                    if not current_prompts and (agent is None or not agent.staged_content):
+                        # No prompt and no staged_content — nothing to do.
+                        # (issue #284: staged_content may have been injected
+                        # by skill commands even when the prompt is empty)
                         return
+                    # If we reach here with empty current_prompts but
+                    # staged_content has content, execute a turn so
+                    # NativeTurn.execute() can consume staged_content.
 
                     try:
                         async with contextlib.aclosing(
@@ -505,20 +510,24 @@ class RunHandle:
         # Save user prompt to agent conversation before execution.
         # This ensures user messages are preserved even if the turn
         # fails or is cancelled.
-        from agentpool.agents.native_agent.helpers import _summarize_content_block
+        # Skip when current_prompts is empty — the real content comes from
+        # staged_content (consumed by NativeTurn), and saving an empty user
+        # message would pollute conversation history (issue #284).
+        if current_prompts:
+            from agentpool.agents.native_agent.helpers import _summarize_content_block
 
-        prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
-            for p in current_prompts
-        )
-        agent.conversation.add_chat_messages([
-            ChatMessage(
-                content=prompt_text,
-                role="user",
-                name=agent.name,
-                session_id=self.session_id,
-            ),
-        ])
+            prompt_text = "\n".join(
+                p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
+                for p in current_prompts
+            )
+            agent.conversation.add_chat_messages([
+                ChatMessage(
+                    content=prompt_text,
+                    role="user",
+                    name=agent.name,
+                    session_id=self.session_id,
+                ),
+            ])
         # Store turn state for downstream sub-methods.
         self._current_turn = turn
         self._current_turn_failed = False
