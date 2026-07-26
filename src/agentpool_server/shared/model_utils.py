@@ -55,12 +55,11 @@ def _extract_provider_from_identifier(identifier: str) -> str:
 def _extract_provider(config: AnyModelConfig) -> str:  # noqa: PLR0911
     """Extract provider name from AnyModelConfig.
 
-    Handles:
-    - StringModelConfig: Extract provider from identifier (e.g., "openai:gpt-4o" -> "openai")
-    - AnthropicModelConfig: Returns "anthropic"
-    - OpenAIModelConfig: Returns "openai"
-    - GeminiModelConfig: Returns "google"
-    - FallbackModelConfig: Returns provider of first model in chain
+    Priority:
+    1. Explicit ``config.provider`` field (set in YAML)
+    2. Known config types (Anthropic/OpenAI/Gemini)
+    3. StringModelConfig: Extract from identifier (e.g., "openai:gpt-4o" -> "openai")
+    4. FallbackModelConfig: Provider of first model in chain
 
     Args:
         config: Model configuration to extract provider from.
@@ -68,6 +67,10 @@ def _extract_provider(config: AnyModelConfig) -> str:  # noqa: PLR0911
     Returns:
         Provider name as a string.
     """
+    # Prefer explicit provider field when set
+    if config.provider:
+        return config.provider
+
     match config:
         case StringModelConfig(identifier=identifier):
             return _extract_provider_from_identifier(str(identifier))
@@ -210,12 +213,18 @@ def _apply_configured_variants(
 
         provider = provider_lookup[provider_name]
 
+        # Use configured context_length or fall back to defaults
+        ctx = variant_config.get("context_length")
+        context_limit = float(ctx) if ctx is not None else DEFAULT_MODEL_CONTEXT_LIMIT
+
         # Check if model with this ID already exists
         if variant_name in provider.models:
             # Override existing (configured takes precedence)
             existing = provider.models[variant_name]
             existing.name = variant_name
             existing.capabilities.attachment = True  # Enable multimodal support
+            if ctx is not None:
+                existing.limit.context = context_limit
             # Note: variant-specific settings (temp, thinking) not exposed to client
         else:
             # Add new model - use a minimal Model creation
@@ -228,7 +237,7 @@ def _apply_configured_variants(
                     output=DEFAULT_MODEL_OUTPUT_COST,
                 ),
                 limit=ModelLimit(
-                    context=DEFAULT_MODEL_CONTEXT_LIMIT,
+                    context=context_limit,
                     output=DEFAULT_MODEL_OUTPUT_LIMIT,
                 ),
             )

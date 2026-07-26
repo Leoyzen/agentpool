@@ -20,6 +20,7 @@ from platformdirs import user_log_path
 import typer as t
 
 from agentpool_cli import log
+from agentpool_cli.cli_types import LogLevel  # noqa: TC001
 
 
 logger = log.get_logger(__name__)
@@ -44,7 +45,7 @@ def _apply_config_file_path(manifest: Any, primary_path: str) -> Any:
 
 
 def _configure_observability_and_logging(
-    manifest: Any, host: str, port: int, resolved: Any
+    manifest: Any, host: str, port: int, resolved: Any, log_level: str = "info"
 ) -> None:
     """Initialize observability and configure file logging."""
     from agentpool import log as ap_log
@@ -55,10 +56,6 @@ def _configure_observability_and_logging(
     log_dir = user_log_path("agentpool", appauthor=False)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "opencode.log"
-    import click
-
-    ctx = click.get_current_context(silent=True)
-    log_level = (ctx.obj or {}).get("log_level", "info") if ctx else "info"
     ap_log.configure_logging(level=log_level.upper(), force=True, log_file=str(log_file))
     logger.info("Configured file logging with rollover", log_file=str(log_file))
 
@@ -95,6 +92,10 @@ def opencode_command(
             help="Working directory for file operations (defaults to current directory)",
         ),
     ] = None,
+    log_level: Annotated[
+        LogLevel,
+        t.Option("--log-level", "-l", help="Log level"),
+    ] = "info",
 ) -> None:
     """Run agents as an OpenCode-compatible HTTP server.
 
@@ -139,7 +140,7 @@ def opencode_command(
             if resolved.primary_path:
                 manifest = _apply_config_file_path(manifest, resolved.primary_path)
 
-            _configure_observability_and_logging(manifest, host, port, resolved)
+            _configure_observability_and_logging(manifest, host, port, resolved, log_level)
 
             # Load agent from merged manifest (needs config context for path resolution)
             pool = AgentPool(manifest, main_agent_name=agent)

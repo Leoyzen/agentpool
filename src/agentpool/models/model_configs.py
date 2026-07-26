@@ -25,7 +25,10 @@ if TYPE_CHECKING:
     from pydantic_ai.models.anthropic import AnthropicModelSettings
     from pydantic_ai.models.fallback import FallbackModel
     from pydantic_ai.models.google import GoogleModelSettings as GeminiModelSettings
-    from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+    from pydantic_ai.models.openai import (
+        OpenAIChatModelSettings,
+        OpenAIResponsesModelSettings,
+    )
 
 
 class _SlowTestModel(TestModel):
@@ -88,6 +91,30 @@ class BaseModelConfig(Schema):
     type: str = Field(init=False)
     """Type discriminator for model configs."""
 
+    provider: str | None = Field(
+        default=None,
+        examples=["openai", "anthropic", "azure", "myprivate"],
+        title="Provider name",
+    )
+    """Provider name (e.g., 'openai', 'anthropic', 'azure').
+
+    Used for protocol display grouping and tokonomics matching.
+    When not set, the provider is extracted from the model identifier string.
+    """
+
+    context_length: int | None = Field(
+        default=None,
+        ge=1,
+        examples=[128000, 200000, 32768],
+        title="Context length (tokens)",
+    )
+    """Maximum input context length in tokens.
+
+    Controls the model's context window for display in protocol UIs
+    (OpenCode, ACP) and compaction/truncation decisions.
+    When not set, falls back to tokonomics discovery or DEFAULT_MODEL_CONTEXT_LIMIT.
+    """
+
     def get_model(self) -> Model:
         """Create and return actual model instance."""
         msg = f"Model creation not implemented for {self.__class__.__name__}"
@@ -129,6 +156,27 @@ class StringModelConfig(BaseModelConfig):
         title="Model identifier",
     )
     """String identifier for the model."""
+
+    base_url: str | None = Field(
+        default=None,
+        examples=["https://api.myprovider.com/v1", "http://localhost:1234/v1"],
+        title="Base URL",
+    )
+    """Base URL for the model API endpoint.
+
+    When set, creates an OpenAI-compatible model pointed at this URL,
+    overriding the default provider endpoint. Use for custom/private models.
+    """
+
+    api_key: str | None = Field(
+        default=None,
+        title="API key",
+    )
+    """Optional API key for the model endpoint.
+
+    Falls back to standard environment variables (e.g. OPENAI_API_KEY)
+    if not set.
+    """
 
     max_tokens: int | None = Field(
         default=None,
@@ -242,8 +290,17 @@ class StringModelConfig(BaseModelConfig):
         return ModelSettings(**{k: v for k, v in settings.items() if v is not None})  # type: ignore[typeddict-item, no-any-return]
 
     def get_model(self) -> Model:
-        from agentpool.utils.model_helpers import infer_model
+        from agentpool.utils.model_helpers import _get_openai_based_model, infer_model
 
+        # If base_url is explicitly configured, create an OpenAI-compatible
+        # model pointing to that endpoint — this is the most common pattern
+        # for custom/private model providers.
+        if self.base_url:
+            return _get_openai_based_model(
+                str(self.identifier),
+                base_url=self.base_url,
+                api_key=self.api_key,
+            )
         return infer_model(self.identifier)
 
 
@@ -427,6 +484,15 @@ class OpenAIModelConfig(BaseModelConfig):
 
     identifier: OpenaiModelName = Field(examples=["gpt-4", "gpt-4-turbo"], title="Model identifier")
     """String identifier for the model."""
+
+    api_type: Literal["responses", "chat"] = Field(
+        default="responses",
+        title="API type",
+        description="'responses' uses the OpenAI Responses API (/v1/responses), "
+        "'chat' uses the Chat Completions API (/v1/chat/completions). "
+        "Defaults to 'responses' to match pydantic-ai's default behavior.",
+    )
+    """Which OpenAI API endpoint to use."""
 
     max_tokens: int | None = Field(
         default=None,
@@ -658,9 +724,17 @@ class OpenAIModelConfig(BaseModelConfig):
     )
     """Whether to include the file search results in the response."""
 
-    def get_model_settings(self) -> OpenAIResponsesModelSettings:
-        """Get model settings in pydantic-ai format."""
-        from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+    def get_model_settings(self) -> OpenAIResponsesModelSettings | OpenAIChatModelSettings:
+        """Get model settings in pydantic-ai format.
+
+        Returns ``OpenAIResponsesModelSettings`` when ``api_type`` is
+        ``'responses'`` (default), or ``OpenAIChatModelSettings`` when
+        ``api_type`` is ``'chat'``.
+        """
+        from pydantic_ai.models.openai import (
+            OpenAIChatModelSettings,
+            OpenAIResponsesModelSettings,
+        )
 
         settings = {
             # Base model settings
@@ -676,7 +750,7 @@ class OpenAIModelConfig(BaseModelConfig):
             "stop_sequences": self.stop_sequences,
             "extra_headers": self.extra_headers,
             "extra_body": self.extra_body,
-            # OpenAI Chat settings
+            # OpenAI Chat settings (shared by both API types)
             "openai_reasoning_effort": self.reasoning_effort,
             "openai_logprobs": self.logprobs,
             "openai_top_logprobs": self.top_logprobs,
@@ -685,7 +759,13 @@ class OpenAIModelConfig(BaseModelConfig):
             "openai_prompt_cache_key": self.prompt_cache_key,
             "openai_prompt_cache_retention": self.prompt_cache_retention,
             "openai_prediction": self.prediction,
-            # Responses API specific settings
+        }
+        filtered = {k: v for k, v in settings.items() if v is not None}
+        if self.api_type == "chat":
+            return OpenAIChatModelSettings(**filtered)  # type: ignore[typeddict-item, no-any-return]
+        # Responses API specific settings (only for responses API type)
+        responses_settings = {
+            **filtered,
             "openai_builtin_tools": self.builtin_tools,
             "openai_reasoning_summary": self.reasoning_summary,
             "openai_send_reasoning_ids": self.send_reasoning_ids,
@@ -696,12 +776,14 @@ class OpenAIModelConfig(BaseModelConfig):
             "openai_include_web_search_sources": self.include_web_search_sources,
             "openai_include_file_search_results": self.include_file_search_results,
         }
-        return OpenAIResponsesModelSettings(**{k: v for k, v in settings.items() if v is not None})  # type: ignore[typeddict-item, no-any-return]
+        filtered_responses = {k: v for k, v in responses_settings.items() if v is not None}
+        return OpenAIResponsesModelSettings(**filtered_responses)  # type: ignore[typeddict-item, no-any-return]
 
     def get_model(self) -> Any:
         from agentpool.utils.model_helpers import infer_model
 
-        return infer_model("openai:" + self.identifier)
+        prefix = "openai:" if self.api_type == "responses" else "openai-chat:"
+        return infer_model(prefix + self.identifier)
 
 
 class AnthropicModelConfig(BaseModelConfig):

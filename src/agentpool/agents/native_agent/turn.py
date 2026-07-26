@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -22,6 +23,7 @@ from pydantic_graph import End
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
+    StepUsageEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
 )
@@ -38,6 +40,7 @@ from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
 from agentpool.tools.base import is_terminal_tool
 from agentpool.utils.pydantic_ai_helpers import flatten_prompts
+from agentpool.utils.usage import diff_usage
 
 
 if TYPE_CHECKING:
@@ -249,6 +252,13 @@ class NativeTurn(HookAwareTurn, Turn):
 
                         node = agent_run.next_node
 
+                        # Track per-step token usage.  ``agent_run.usage``
+                        # is a live mutable ``RunUsage`` — snapshot with
+                        # ``copy.copy()`` (uses ``RunUsage.__copy__`` which
+                        # deep-copies the ``details`` dict).
+                        prev_usage = copy.copy(agent_run.usage)
+                        step_index = 0
+
                         while not isinstance(node, End):
                             if self._run_ctx.cancelled:
                                 break
@@ -303,6 +313,31 @@ class NativeTurn(HookAwareTurn, Turn):
                                 )
                             finally:
                                 self._agent._iteration_task = None
+
+                            # Emit per-step token usage after each
+                            # ``agent_run.next(node)`` call.  Only emit when
+                            # the step involved an LLM call
+                            # (``step_diff.requests > 0``); tool-only
+                            # iterations (e.g. CallToolsNode advancing
+                            # without a new model request) are skipped.
+                            step_diff = diff_usage(agent_run.usage, prev_usage)
+                            if step_diff.requests > 0:
+                                logger.info(
+                                    "Emitting StepUsageEvent",
+                                    step_index=step_index,
+                                    step_usage_input=step_diff.input_tokens,
+                                    step_usage_output=step_diff.output_tokens,
+                                    step_usage_total=step_diff.total_tokens,
+                                    cumulative_input=agent_run.usage.input_tokens,
+                                    cumulative_output=agent_run.usage.output_tokens,
+                                )
+                                yield StepUsageEvent(
+                                    step_index=step_index,
+                                    step_usage=step_diff,
+                                    cumulative_usage=copy.copy(agent_run.usage),
+                                )
+                                step_index += 1
+                            prev_usage = copy.copy(agent_run.usage)
 
                         self._set_message_history(agent_run.all_messages())
                         logger.info("After while loop — building final message")
