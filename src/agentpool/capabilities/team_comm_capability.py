@@ -314,11 +314,17 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Raises:
             RuntimeError: If SessionPool is not available.
         """
-        # Ensure distinct time.created (millisecond precision) by spacing
-        # creations 5-20ms apart. This prevents sort mismatches in OpenCode
+# Ensure distinct time.created (millisecond precision) by spacing
+        # creations 15-50ms apart. This prevents sort mismatches in OpenCode
         # TUI subagent numbering when multiple members are created in
         # rapid succession (team_create loop or sequential team_add_member).
-        await asyncio.sleep(random.uniform(0.015, 0.05))
+        delay = random.uniform(0.015, 0.05)
+        logger.info(
+            "_create_member_session delaying %dms",
+            int(delay * 1000),
+            agent_name=agent_name,
+        )
+        await asyncio.sleep(delay)
 
         from agentpool.agents.events.events import SpawnSessionStart
 
