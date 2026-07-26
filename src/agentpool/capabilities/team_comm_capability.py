@@ -55,7 +55,6 @@ import asyncio
 import contextlib
 import datetime
 import json
-import random
 import tempfile
 from typing import TYPE_CHECKING, Annotated, Any, cast, override
 import uuid
@@ -86,6 +85,13 @@ logger = get_logger(__name__)
 # Strong references to cleanup tasks so asyncio does not garbage-collect them
 # while they are awaiting ``RunHandle.complete_event``.
 _cleanup_tasks: set[asyncio.Task[Any]] = set()
+
+# Serialize _create_member_session calls so generate_session_id() runs
+# sequentially.  Concurrent tool invocations (PydanticAI can fire multiple
+# tool calls in parallel) would otherwise let two session creations share
+# the same millisecond, producing equal time.created values even with a
+# random delay.
+_create_session_lock = asyncio.Lock()
 
 
 class TeamCommCapability(FunctionToolsetCapability[Any]):
@@ -314,18 +320,6 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Raises:
             RuntimeError: If SessionPool is not available.
         """
-# Ensure distinct time.created (millisecond precision) by spacing
-        # creations 15-50ms apart. This prevents sort mismatches in OpenCode
-        # TUI subagent numbering when multiple members are created in
-        # rapid succession (team_create loop or sequential team_add_member).
-        delay = random.uniform(0.015, 0.05)
-        logger.info(
-            "_create_member_session delaying %dms",
-            int(delay * 1000),
-            agent_name=agent_name,
-        )
-        await asyncio.sleep(delay)
-
         from agentpool.agents.events.events import SpawnSessionStart
 
         session_pool = agent_ctx.host.session_pool
@@ -333,12 +327,16 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             msg = "SessionPool not available for member session creation"
             raise RuntimeError(msg)
 
-        state = await session_pool.create_child_session(
-            parent_session_id=parent_session_id,
-            agent_name=agent_name,
-            agent_type="native",
-            **metadata,
-        )
+        # Serialize session creation so generate_session_id() calls are
+        # sequential.  Concurrent tool invocations share the same millisecond,
+        # producing equal time.created values.
+        async with _create_session_lock:
+            state = await session_pool.create_child_session(
+                parent_session_id=parent_session_id,
+                agent_name=agent_name,
+                agent_type="native",
+                **metadata,
+            )
         child_sid = state.session_id
 
         # Eagerly register agent so receive_request / run_stream can
