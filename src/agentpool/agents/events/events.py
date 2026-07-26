@@ -25,6 +25,7 @@ from pydantic_ai import (
     AgentStreamEvent,
     PartDeltaEvent as PyAIPartDeltaEvent,
     PartStartEvent as PyAIPartStartEvent,
+    RunUsage,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentpool.lifecycle.types import RunState
+    from agentpool.messaging.messages import TokenCost
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
 
@@ -943,6 +945,32 @@ class UserMessageInsertedEvent[T]:
     """
 
 
+@dataclass(kw_only=True)
+class StepUsageEvent:
+    """Per-step token usage, emitted after each LLM call within a turn.
+
+    Emitted by ``NativeTurn.execute()`` after each ``agent_run.next(node)``
+    when the step involved an LLM call (``step_usage.requests > 0``).
+    Carries the per-step delta and the running cumulative total.
+    """
+
+    step_index: int
+    """Zero-based index of this LLM step within the current turn (resets per turn)."""
+
+    step_usage: RunUsage
+    """Per-step delta usage (difference from previous step). NOT ``RequestUsage``
+    because ``RequestUsage.requests`` is a read-only property returning 1."""
+
+    cumulative_usage: RunUsage
+    """Running cumulative usage for the entire turn (snapshot copy, not live reference)."""
+
+    cost_info: TokenCost | None = None
+    """Per-step cost. Always ``None`` — per-step cost calculation is a non-goal."""
+
+    event_kind: Literal["step_usage"] = "step_usage"
+    """Event type discriminator (all events use ``event_kind``, NOT ``event_type``)."""
+
+
 type RichAgentStreamEvent[OutputDataT] = (
     AgentStreamEvent
     | StreamCompleteEvent[OutputDataT]
@@ -965,6 +993,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | ToolCallUpdateEvent
     | MessageReplacementEvent
     | UserMessageInsertedEvent[Any]
+    | StepUsageEvent
 )
 
 

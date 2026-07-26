@@ -328,7 +328,9 @@ def _make_run_ctx() -> AgentRunContext:
 _original_acp_to_native_event: Any = None
 
 
-def _patched_acp_to_native_event(update: Any) -> Any:
+def _patched_acp_to_native_event(
+    update: Any, *, step_index: int = 0, cumulative_usage: Any = None
+) -> Any:
     """Patched converter that passes through ToolResultMetadataEvent.
 
     The real ``acp_to_native_event`` only handles ACP ``SessionUpdate``

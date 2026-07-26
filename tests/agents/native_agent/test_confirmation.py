@@ -16,6 +16,7 @@ from pydantic_ai.tools import (
     DeferredToolRequests,
     RunContext,
 )
+from pydantic_ai.usage import RunUsage
 from pydantic_graph import End
 import pytest
 
@@ -307,6 +308,7 @@ def _create_mock_agentlet_from_caps(
         class MockAgentRun:
             def __init__(self) -> None:
                 self.result = mock_result
+                self.usage = RunUsage()
                 self.ctx = RunContext(
                     deps=deps,
                     model=MagicMock(),

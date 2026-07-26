@@ -151,11 +151,17 @@ class ACPTurn(HookAwareTurn, Turn):
         Raises:
             asyncio.CancelledError: Re-raised if the turn is cancelled.
         """
+        from pydantic_ai import RunUsage
+
         from agentpool.agents.acp_agent.acp_converters import (
             acp_to_native_event,
             convert_to_acp_content,
         )
-        from agentpool.agents.events import ToolCallCompleteEvent, ToolCallStartEvent
+        from agentpool.agents.events import (
+            StepUsageEvent,
+            ToolCallCompleteEvent,
+            ToolCallStartEvent,
+        )
 
         run_id = self._run_ctx.run_id
 
@@ -214,9 +220,15 @@ class ACPTurn(HookAwareTurn, Turn):
                     return
 
                 # --- Phase 2: Stream events ---
+                step_index = 0
+                cumulative_usage = RunUsage()
                 try:
                     async for update in self._acp_client.stream_events(response):
-                        native_event = acp_to_native_event(update)
+                        native_event = acp_to_native_event(
+                            update,
+                            step_index=step_index,
+                            cumulative_usage=cumulative_usage,
+                        )
                         if native_event is not None:
                             # Fire advisory tool hooks for tool-related events.
                             # These are advisory — they log and augment but cannot
@@ -241,6 +253,14 @@ class ACPTurn(HookAwareTurn, Turn):
                                         0.0,
                                         tcid,
                                     )
+                                case StepUsageEvent(step_usage=su):
+                                    cumulative_usage = RunUsage(
+                                        input_tokens=cumulative_usage.input_tokens
+                                        + su.input_tokens,
+                                        output_tokens=cumulative_usage.output_tokens
+                                        + su.output_tokens,
+                                    )
+                                    step_index += 1
                                 case _:
                                     pass
                             yield native_event
