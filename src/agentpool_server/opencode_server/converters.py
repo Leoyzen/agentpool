@@ -329,7 +329,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                     case PydanticToolCallPart(tool_name=tool_name, tool_call_id=call_id):
                         tool_input = _convert_params_for_ui(safe_args_as_dict(p))
                         ts = TimeStart(start=created_ms)
-                        title = f"Running {tool_name}"
+                        title = "Running"
                         running_state = ToolStateRunning(time=ts, input=tool_input, title=title)
                         tool_part = result.add_tool_part(tool_name, call_id, state=running_state)
                         tool_calls[call_id] = tool_part
@@ -379,7 +379,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                     time=TimeStartEnd(start=created_ms, end=end_ms),
                                 )
                             else:
-                                title = f"Completed {tool_name}"
+                                title = "Completed"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                                 # Extract metadata from tool result if present
                                 # (e.g., subagent sessionId)
@@ -403,7 +403,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                 ts_end = TimeStartEnd(start=created_ms, end=end_ms)
                                 state = ToolStateError(error=err, time=ts_end)
                             else:
-                                title = f"Completed {tool_name}"
+                                title = "Completed"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                                 # Extract metadata for orphan returns too
                                 metadata = (

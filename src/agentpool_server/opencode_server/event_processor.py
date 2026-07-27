@@ -841,7 +841,7 @@ class EventProcessor:
             new_state = ToolStateError(error=error_string, input=tool_input, time=t)
         else:
             new_state = ToolStateCompleted(
-                title=f"Completed {existing.tool}",
+                title="Completed",
                 input=tool_input,
                 output=result_str,
                 metadata=event_metadata or {},
