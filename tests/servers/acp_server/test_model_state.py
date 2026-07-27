@@ -85,9 +85,9 @@ class TestBuildModelStateForAcp:
         assert state is not None
         assert isinstance(state, SessionModelState)
         model_ids = {m.model_id for m in state.available_models}
-        # model_id should be resolved identifiers, not variant names
-        assert "openai:gpt-4o-mini" in model_ids
-        assert "anthropic:claude-sonnet-4-5" in model_ids
+        # model_id should be variant names (aliases), not resolved identifiers
+        assert "fast_gpt" in model_ids
+        assert "smart" in model_ids
         # name should be the variant name (alias)
         names = {m.name for m in state.available_models}
         assert "fast_gpt" in names
@@ -163,7 +163,7 @@ class TestBuildModelStateForAcp:
         state = await build_model_state_for_acp(agent, router)  # type: ignore[arg-type]
 
         assert state is not None
-        assert state.current_model_id == "anthropic:claude-sonnet-4-5"
+        assert state.current_model_id == "smart"
 
     async def test_current_model_not_in_list(self, manifest_with_variants):
         """Current model is inserted when not in configured variants."""

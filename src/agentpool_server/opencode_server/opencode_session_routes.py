@@ -82,6 +82,7 @@ async def ensure_session(
     state: ServerState,
     session_id: str,
     parent_id: str | None = None,
+    title: str | None = None,
 ) -> Session:
     """Ensure a session exists with the given ID.
 
@@ -109,6 +110,7 @@ async def ensure_session(
         state: The OpenCode server state.
         session_id: Unique identifier for the session
         parent_id: Optional parent session ID for fork relationships
+        title: Optional session title. Defaults to "New Session" when None.
 
     Returns:
         The Session object (existing or newly created)
@@ -180,7 +182,7 @@ async def ensure_session(
                 return session
 
             # --- Store-miss fallback: create new session -------------------
-            return await _create_and_persist_session(state, session_id, parent_id)
+            return await _create_and_persist_session(state, session_id, parent_id, title=title)
     finally:
         state.session_locks.pop(session_id, None)
 
@@ -189,6 +191,7 @@ async def _create_and_persist_session(
     state: ServerState,
     session_id: str,
     parent_id: str | None,
+    title: str | None = None,
 ) -> Session:
     """Create a brand-new session and persist it (store-miss fallback).
 
@@ -196,6 +199,7 @@ async def _create_and_persist_session(
         state: The OpenCode server state.
         session_id: Unique identifier for the session.
         parent_id: Optional parent session ID.
+        title: Optional session title. Defaults to "New Session" when None.
 
     Returns:
         The newly created and persisted ``Session``.
@@ -224,7 +228,7 @@ async def _create_and_persist_session(
         id=session_id,
         project_id=project_id,
         directory=directory,
-        title="New Session",
+        title=title or "New Session",
         version="1",
         time=TimeCreatedUpdated(created=now, updated=now),
         parent_id=parent_id,

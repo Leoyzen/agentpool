@@ -413,10 +413,13 @@ class OpenCodeEventBridgeMixin:
         user message here would cause double-rendering in the TUI.
         """
         child_session_id = spawn_event.child_session_id
+        display_name = spawn_event.display_name or spawn_event.source_name
+        title = f"(@{display_name} subagent)"
         await ensure_session(
             self.server_state,
             child_session_id,
             parent_id=parent_session_id,
+            title=title,
         )
 
     async def _handle_event(  # noqa: PLR0915

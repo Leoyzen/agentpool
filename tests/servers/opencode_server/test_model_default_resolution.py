@@ -21,6 +21,8 @@ def _make_server_state(model_name: str | None) -> ServerState:
     agent = Mock()
     # model_name is a property on BaseAgent, so we need to set it on the class mock
     type(agent).model_name = PropertyMock(return_value=model_name)
+    # model_variants must be a dict (not a Mock) so _find_variant_name can iterate
+    agent._agent_pool.manifest.model_variants = {}
     return ServerState(working_dir="/tmp", agent=agent)
 
 
