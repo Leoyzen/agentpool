@@ -728,6 +728,11 @@ class SpawnSessionStart:
     """How the subagent was created: 'task' for task-based, 'spawn' for direct spawn."""
     source_name: str
     """Name of the agent or team being spawned."""
+    display_name: str | None = None
+    """Display name for the subagent, if different from source_name.
+
+    Falls back to source_name when None.
+    """
     source_type: Literal["agent", "team_parallel", "team_sequential"]
     """Type of source being spawned: agent, parallel team, or sequential team."""
     depth: int = 1

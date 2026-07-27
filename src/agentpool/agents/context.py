@@ -736,12 +736,24 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             event_spawn_mechanism: Literal["task", "spawn"] = (
                 "task" if spawn_mechanism == "task" else "spawn"
             )
+            # Resolve display_name from manifest config when available.
+            child_display_name: str | None = None
+            if pool is not None:
+                child_config = pool.manifest.agents.get(agent_name)
+                if child_config is not None and child_config.display_name is not None:
+                    child_display_name = (
+                        child_config.display_name
+                        if child_config.display_name != agent_name
+                        else None
+                    )
+
             spawn_event = SpawnSessionStart(
                 child_session_id=child_sid,
                 parent_session_id=self.run_ctx.session_id,
                 tool_call_id=tool_call_id or self.tool_call_id,
                 spawn_mechanism=event_spawn_mechanism,
                 source_name=agent_name,
+                display_name=child_display_name,
                 source_type="agent",
                 depth=child_depth,
                 description=description,

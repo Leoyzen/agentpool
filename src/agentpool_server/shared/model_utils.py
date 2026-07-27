@@ -131,6 +131,32 @@ def _resolve_variant_identifier(config: AnyModelConfig, variant_name: str) -> st
     return variant_name
 
 
+def _find_variant_name(
+    model_variants: dict[str, AnyModelConfig],
+    resolved_model_name: str,
+) -> str | None:
+    """Find the variant name matching a resolved agent model name.
+
+    Reverse-maps the pydantic-ai model identifier (e.g., ``"openai-chat:svc-v1"``)
+    back to the configured variant name (e.g., ``"my_custom"``).
+
+    Args:
+        model_variants: Dict of variant name → config from manifest.
+        resolved_model_name: The agent's model_name (pydantic-ai resolved identifier).
+
+    Returns:
+        Variant name if found, ``None`` otherwise.
+    """
+    for variant_name, config in model_variants.items():
+        try:
+            resolved = _resolve_variant_identifier(config, variant_name)
+            if resolved == resolved_model_name:
+                return variant_name
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
 def _build_providers_from_tokonomics(toko_models: list[TokoModelInfo]) -> list[Provider]:
     """Build providers list from tokonomics discovery results.
 
@@ -278,29 +304,31 @@ async def build_model_state_for_acp(
             if provider_router and provider_router.is_provider_disabled(provider_name):
                 continue
 
-            # Resolve the actual model identifier for the model_id field,
-            # using variant name as the display name (alias).
-            model_id = _resolve_variant_identifier(config, variant_name)
             configured_models.append(
                 ACPModelInfo(
-                    model_id=model_id,
+                    model_id=variant_name,
                     name=variant_name,
                 )
             )
 
     if configured_models:
         current_model = agent.model_name
-        all_ids = [m.model_id for m in configured_models]
-        if current_model and current_model in all_ids:
-            current_model_id = current_model
-        elif current_model:
-            # Current model is not among configured variants — add it
-            desc = "Currently configured model"
-            model_info = ACPModelInfo(model_id=current_model, name=current_model, description=desc)
-            configured_models.insert(0, model_info)
-            current_model_id = current_model
+        # Reverse-map agent's resolved pydantic-ai name to variant name
+        if current_model and manifest:
+            matched = _find_variant_name(manifest.model_variants, current_model)
+            if matched:
+                current_model_id = matched
+            else:
+                # Not a configured variant — add as standalone
+                model_info = ACPModelInfo(
+                    model_id=current_model,
+                    name=current_model,
+                    description="Currently configured model",
+                )
+                configured_models.insert(0, model_info)
+                current_model_id = current_model
         else:
-            current_model_id = all_ids[0]
+            current_model_id = configured_models[0].model_id
         return SessionModelState(
             available_models=configured_models,
             current_model_id=current_model_id,
