@@ -424,12 +424,20 @@ class OpenCodeEventBridgeMixin:
             title = f"{team_prefix}(@{display_name} subagent)"
         else:
             title = f"(@{display_name} subagent)"
-        await ensure_session(
+        session = await ensure_session(
             self.server_state,
             child_session_id,
             parent_id=parent_session_id,
             title=title,
         )
+        # ensure_session does not update the title if the session already
+        # exists (fast path / store-first path). Update it explicitly so the
+        # TUI shows the enriched title (e.g. "Team 'X' · Member (@Y subagent)").
+        if title is not None and session.title != title:
+            session.title = title
+            from agentpool_server.opencode_server.models import SessionUpdatedEvent
+
+            await self.server_state.broadcast_event(SessionUpdatedEvent.create(session))
 
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
