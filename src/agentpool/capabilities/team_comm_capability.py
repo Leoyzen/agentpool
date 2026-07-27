@@ -347,18 +347,48 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             agent_name,
         )
 
+        # Resolve display_name: prefer team_member_name (the member's display
+        # name within the team), fall back to manifest config display_name.
+        team_member_name: str | None = metadata.get("team_member_name")  # type: ignore[assignment]
+        child_display_name: str | None = None
+        if team_member_name is not None and team_member_name != agent_name:
+            child_display_name = team_member_name
+        else:
+            child_config = session_pool.pool.manifest.agents.get(agent_name)
+            if child_config is not None and child_config.display_name is not None:
+                child_display_name = (
+                    child_config.display_name if child_config.display_name != agent_name else None
+                )
+
         # Emit SpawnSessionStart so protocol servers discover the child.
         event_bus = session_pool.event_bus
         if event_bus is not None:
+            # Build metadata with team context for protocol display enrichment.
+            spawn_metadata: dict[str, Any] = {"prompt": ""}
+            team_id_meta: str | None = metadata.get("team_id")  # type: ignore[assignment]
+            team_role_meta: str | None = metadata.get("team_role")  # type: ignore[assignment]
+            team_member_name_meta: str | None = metadata.get("team_member_name")  # type: ignore[assignment]
+            team_name_meta: str | None = metadata.get("team_name")  # type: ignore[assignment]
+            if team_id_meta is not None:
+                spawn_metadata["team_id"] = team_id_meta
+            if team_name_meta is not None:
+                spawn_metadata["team_name"] = team_name_meta
+            if team_role_meta is not None:
+                spawn_metadata["team_role"] = team_role_meta
+            if team_member_name_meta is not None:
+                spawn_metadata["team_member_name"] = team_member_name_meta
+
             spawn_event = SpawnSessionStart(
                 child_session_id=child_sid,
                 parent_session_id=parent_session_id,
                 tool_call_id="",
                 spawn_mechanism="spawn",
                 source_name=agent_name,
+                display_name=child_display_name,
                 source_type="agent",
                 depth=1,
                 description=description,
+                metadata=spawn_metadata,
             )
             await event_bus.publish(parent_session_id, spawn_event)
 
@@ -1743,6 +1773,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     parent_session_id=lead_session_id,
                     description=f"Team member: {member['name']}",
                     team_id=team_id,
+                    team_name=name,
                     team_role="member",
                     team_member_name=member["name"],
                     team_member_instructions=member_instructions,
@@ -1802,6 +1833,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_ctx.session.metadata["team_id"] = team_id
         agent_ctx.session.metadata["team_name"] = name
         agent_ctx.session.metadata["team_base_dir"] = base_dir
+        agent_ctx.session.metadata["team_role"] = "lead"
         # Store member session IDs so the auto-cleanup callback (and
         # team_delete) can close them without re-reading team state.
         agent_ctx.session.metadata["team_member_sessions"] = list(created_sessions)
@@ -2137,6 +2169,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 parent_session_id=lead_session_id,
                 description=f"Team member: {name}",
                 team_id=team_id,
+                team_name=agent_ctx.session.metadata.get("team_name"),
                 team_role="member",
                 team_member_name=name,
                 team_member_instructions=instructions,

@@ -414,7 +414,16 @@ class OpenCodeEventBridgeMixin:
         """
         child_session_id = spawn_event.child_session_id
         display_name = spawn_event.display_name or spawn_event.source_name
-        title = f"(@{display_name} subagent)"
+        # Team members get a richer title with team name and role
+        team_id = spawn_event.metadata.get("team_id")
+        if team_id is not None:
+            team_name = spawn_event.metadata.get("team_name", "")
+            team_role = spawn_event.metadata.get("team_role", "member")
+            role_label = "Lead" if team_role == "lead" else "Member"
+            team_prefix = f"Team '{team_name}' · {role_label} " if team_name else ""
+            title = f"{team_prefix}(@{display_name} subagent)"
+        else:
+            title = f"(@{display_name} subagent)"
         await ensure_session(
             self.server_state,
             child_session_id,

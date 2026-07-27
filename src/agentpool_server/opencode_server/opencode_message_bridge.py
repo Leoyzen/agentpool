@@ -427,12 +427,23 @@ class OpenCodeMessageBridgeMixin:
                 return None
 
         display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
-        tool_title = display_name
+        # Team members get a "Team ·" prefix to distinguish from regular subagents
+        team_id = spawn_event.metadata.get("team_id")
+        if team_id is not None:
+            tool_title = f"Team · {display_name}"
+            team_name = spawn_event.metadata.get("team_name", "")
+            team_role = spawn_event.metadata.get("team_role", "member")
+            role_label = "Lead" if team_role == "lead" else "Member"
+            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
+            card_description = f"{team_context}{spawn_event.description or display_name}"
+        else:
+            tool_title = display_name
+            card_description = spawn_event.description or tool_title
         ts = TimeStart(start=now_ms())
         running_state = ToolStateRunning(
             time=ts,
             input={
-                "description": spawn_event.description or tool_title,
+                "description": card_description,
                 "subagent_type": tool_title,
                 "prompt": spawn_event.metadata.get("prompt", ""),
             },
