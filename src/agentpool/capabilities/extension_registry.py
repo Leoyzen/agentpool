@@ -450,7 +450,7 @@ class ExtensionRegistry:
                         skill_path=entry.skill_path or PurePosixPath(uri),
                         instructions=content,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to resolve skill URI %r via %s",
                         uri,
@@ -466,7 +466,7 @@ class ExtensionRegistry:
                         mcp_content: str | bytes | None = await mcp_cap.read_resource(uri)
                         if mcp_content is not None:
                             return mcp_content
-                except Exception:  # noqa: BLE001  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to resolve MCP URI %r via %s",
                         uri,
@@ -539,7 +539,7 @@ class ExtensionRegistry:
             try:
                 async for event in stream:
                     await queue.put(event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Change stream consumer encountered an error",
                     exc_info=True,

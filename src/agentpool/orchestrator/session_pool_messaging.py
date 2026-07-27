@@ -458,7 +458,7 @@ class SessionPoolMessagingMixin:
                         source="background_task",
                     )
                     await event_bus.publish(session_id, event)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to emit UserMessageInsertedEvent from background task",
                         exc_info=True,

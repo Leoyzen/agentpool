@@ -123,7 +123,7 @@ class BaseServer:
             _, real_errors = eg.split(lambda e: isinstance(e, asyncio.CancelledError))
             if real_errors is not None:
                 self.log.warning("Errors during task group shutdown", exc_info=real_errors)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.log.warning("Unexpected error closing task group", exc_info=e)
 
     async def shutdown(self) -> None:

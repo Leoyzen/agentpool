@@ -672,7 +672,7 @@ class AgentPool[TPoolDeps = None]:
                 # Close child McpServerCap instances to release MCP connections.
                 try:
                     await existing_cap.__aexit__(None, None, None)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning("Error closing old SkillManagerCap", exc_info=True)
 
         # Create a single SkillManagerCap holding all local skills + MCP children.

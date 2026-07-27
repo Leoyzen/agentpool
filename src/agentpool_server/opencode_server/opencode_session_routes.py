@@ -250,7 +250,7 @@ async def _create_and_persist_session(
             )
         else:
             await state.pool.storage.save_session(session_data)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning(
             "Failed to persist session to storage, degrading to in-memory",
             session_id=session_id,

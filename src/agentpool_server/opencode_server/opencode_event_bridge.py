@@ -355,7 +355,7 @@ class OpenCodeEventBridgeMixin:
             # block ToolPart creation or assistant message registration.
             try:
                 await self._ensure_child_session_visible(session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to ensure child session visible",
                     session_id=session_id,

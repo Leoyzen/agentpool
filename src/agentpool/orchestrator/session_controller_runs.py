@@ -131,7 +131,7 @@ class SessionControllerRunsMixin:
                 # Fall back: direct EventBus publish (idle session or
                 # non-protocol source).
                 await self._event_bus.publish(session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,
@@ -311,7 +311,7 @@ class SessionControllerRunsMixin:
                 priority="when_idle",
                 source="team",
             )
-        except Exception:  # noqa: BLE001 - best-effort notification, must never mask original error
+        except Exception:
             logger.warning(
                 "Failed to notify lead session %s of member %s abnormal exit",
                 parent_session_id,

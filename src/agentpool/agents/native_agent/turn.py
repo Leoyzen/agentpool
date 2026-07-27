@@ -201,7 +201,7 @@ class NativeTurn(HookAwareTurn, Turn):
                         "get_tools() timed out after 5s, skipping tool kind map",
                         agent=self._agent.name,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Failed to build tool kind map", exc_info=True)
 
                 agent_deps = self._agent.get_context(
@@ -505,7 +505,7 @@ class NativeTurn(HookAwareTurn, Turn):
                                 structured = getattr(run_result, "output", None)
                                 if structured is not None and not isinstance(structured, str):
                                     content = structured
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug(
                                 "Failed to extract structured result from agent run",
                                 exc_info=True,
@@ -531,7 +531,7 @@ class NativeTurn(HookAwareTurn, Turn):
                             if isinstance(msg, ModelResponse):
                                 request_usage = msg.usage
                                 break
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.debug("Failed to extract usage from agent run", exc_info=True)
 
                 self._final_message = ChatMessage(

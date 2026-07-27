@@ -782,7 +782,7 @@ async def _wait_and_finalize(  # noqa: PLR0915
             if ctx.event_stream is not None:
                 try:
                     await session_pool.event_bus.unsubscribe(session_id, ctx.event_stream)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to unsubscribe from event bus during cleanup",
                         session_id=session_id,

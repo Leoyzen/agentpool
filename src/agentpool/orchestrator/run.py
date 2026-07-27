@@ -822,7 +822,7 @@ class RunHandle:
                 )
                 if self.event_bus is not None:
                     await self.event_bus.publish(self.session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,

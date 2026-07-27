@@ -571,7 +571,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
         try:
             logfire.instrument_fastapi(app)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)
     return app
 

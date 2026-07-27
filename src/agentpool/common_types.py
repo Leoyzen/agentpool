@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     type ImportPathString = str
     type ToolType = ImportPathString | AnyCallable | Tool
     # Define what we consider JSON-serializable
-    type JsonPrimitive = None | bool | int | float | str
+    type JsonPrimitive = bool | int | float | str | None
     type SessionIdType = str | UUID | None
     type ProcessorCallback[TResult] = Callable[..., TResult | Awaitable[TResult]]
 
