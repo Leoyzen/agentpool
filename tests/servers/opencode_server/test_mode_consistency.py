@@ -44,8 +44,10 @@ async def test_agent_endpoint_mode_is_primary_for_all_agents() -> None:
 
     agent1 = MagicMock()
     agent1.description = "Agent 1"
+    agent1.display_name = None
     agent2 = MagicMock()
     agent2.description = "Agent 2"
+    agent2.display_name = None
 
     ctx = MagicMock()
     ctx.main_agent_name = "agent1"

@@ -426,17 +426,23 @@ class OpenCodeMessageBridgeMixin:
                 logger.debug("ToolPart already exists for child session %s", child_session_id)
                 return None
 
-        source_name = spawn_event.source_name or "subagent"
-        tool_title = source_name
+        display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
+        tool_title = display_name
         ts = TimeStart(start=now_ms())
         running_state = ToolStateRunning(
             time=ts,
             input={
-                "description": tool_title,
+                "description": spawn_event.description or tool_title,
                 "subagent_type": tool_title,
                 "prompt": spawn_event.metadata.get("prompt", ""),
             },
-            metadata={"sessionId": child_session_id, "title": tool_title},
+            metadata={
+                "sessionId": child_session_id,
+                "title": tool_title,
+                "model_id": spawn_event.model_id,
+                "mode": spawn_event.mode,
+                "source_type": spawn_event.source_type,
+            },
             title=tool_title,
         )
         tool_part = ToolPart(
