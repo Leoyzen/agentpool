@@ -94,7 +94,7 @@ async def test_full_lifecycle_with_per_member_instructions(tmp_path: Path) -> No
     assert "instr_team" in status.return_value
 
     # Turn 3: task_create.
-    task_result = await cap.task_create(ctx_factory(), "Integration task")
+    task_result = await cap.task_create(ctx_factory(), "Integration task", owner="translator_agent")
     assert task_result.return_value.startswith("Task created: ")
 
     # Turn 4: task_list.
@@ -290,7 +290,7 @@ async def test_progress_tracking_lifecycle(tmp_path: Path) -> None:
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata(team_id="team_123"))
 
     # Create task.
-    create_result = await cap.task_create(ctx, "Long-running task")
+    create_result = await cap.task_create(ctx, "Long-running task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     # Set progress_total.
@@ -336,7 +336,7 @@ async def test_ownership_enforcement_with_send_message_suggestion(
     lead_cap = TeamCommCapability(config, "coordinator", make_lead_metadata(team_id="team_123"))
 
     # Lead creates a task and assigns to reviewer_agent.
-    create_result = await lead_cap.task_create(lead_ctx, "Review task")
+    create_result = await lead_cap.task_create(lead_ctx, "Review task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await lead_cap.task_update(lead_ctx, task_id, owner="reviewer_agent")
 
@@ -382,7 +382,7 @@ async def test_handoff_and_dependency_to_same_member(tmp_path: Path) -> None:
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata(team_id="team_123"))
 
     # Create task A (no deps).
-    a_result = await cap.task_create(ctx, "Phase 1")
+    a_result = await cap.task_create(ctx, "Phase 1", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     # Create task B (blocked by A, owned by reviewer_agent).

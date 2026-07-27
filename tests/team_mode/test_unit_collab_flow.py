@@ -131,7 +131,7 @@ async def test_task_update_technical_note_stored_as_last_note(tmp_path: Path) ->
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task X")
+    create_result = await cap.task_create(ctx, "Task X", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     update_result = await cap.task_update(ctx, task_id, technical_note="Important finding")
@@ -154,7 +154,7 @@ async def test_task_list_xml_includes_note_content(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task X")
+    create_result = await cap.task_create(ctx, "Task X", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, technical_note="Found issue in line 42")
 
@@ -178,7 +178,7 @@ async def test_task_get_xml_includes_note_content(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task Y")
+    create_result = await cap.task_create(ctx, "Task Y", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, technical_note="Resolved via patch ABC")
 
@@ -248,7 +248,7 @@ async def test_handoff_without_context_keys(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Simple task")
+    create_result = await cap.task_create(ctx, "Simple task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -281,7 +281,7 @@ async def test_handoff_to_nonexistent_member(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task Z")
+    create_result = await cap.task_create(ctx, "Task Z", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -311,7 +311,7 @@ async def test_handoff_without_completing_task_no_notification(tmp_path: Path) -
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task W")
+    create_result = await cap.task_create(ctx, "Task W", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -342,7 +342,7 @@ async def test_handoff_with_technical_note(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Annotated task")
+    create_result = await cap.task_create(ctx, "Annotated task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -383,7 +383,7 @@ async def test_handoff_notification_delivery_failure(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Failing handoff task")
+    create_result = await cap.task_create(ctx, "Failing handoff task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -416,7 +416,7 @@ async def test_handoff_references_blackboard_key_not_yet_written(tmp_path: Path)
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Future context task")
+    create_result = await cap.task_create(ctx, "Future context task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -456,7 +456,7 @@ async def test_dependency_notification_sent_on_completion(tmp_path: Path) -> Non
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
     # Create task A (the dependency).
-    a_result = await cap.task_create(ctx, "Task A")
+    a_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     # Create task B (blocked by A, owned by reviewer_agent).
@@ -498,7 +498,7 @@ async def test_dependency_notification_multiple_dependents(tmp_path: Path) -> No
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    a_result = await cap.task_create(ctx, "Task A")
+    a_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     await cap.task_create(ctx, "Task B", blocked_by=[a_id], owner="translator_agent")
@@ -529,7 +529,7 @@ async def test_dependency_no_notification_when_no_dependents(tmp_path: Path) -> 
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    a_result = await cap.task_create(ctx, "Lone task")
+    a_result = await cap.task_create(ctx, "Lone task", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     send_count_before = mock_pool.send_message.await_count
@@ -556,11 +556,11 @@ async def test_dependency_dependent_with_no_owner_skipped(tmp_path: Path) -> Non
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    a_result = await cap.task_create(ctx, "Task A")
+    a_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     # Task B has no owner.
-    await cap.task_create(ctx, "Task B", blocked_by=[a_id])
+    await cap.task_create(ctx, "Task B", blocked_by=[a_id], owner="")
 
     send_count_before = mock_pool.send_message.await_count
     await cap.task_update(ctx, a_id, status="completed")
@@ -635,7 +635,7 @@ async def test_handoff_and_dependency_to_same_member_both_sent(
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    a_result = await cap.task_create(ctx, "Task A")
+    a_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     a_id = a_result.return_value.replace("Task created: ", "")
 
     await cap.task_create(ctx, "Task B", blocked_by=[a_id], owner="reviewer_agent")
@@ -765,7 +765,7 @@ async def test_task_update_set_progress(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Long task")
+    create_result = await cap.task_create(ctx, "Long task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -798,7 +798,7 @@ async def test_task_update_progress_current_only_preserves_total(
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Step task")
+    create_result = await cap.task_create(ctx, "Step task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     # Set initial progress.
@@ -828,7 +828,7 @@ async def test_task_update_progress_current_exceeds_total_error(
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Bad progress task")
+    create_result = await cap.task_create(ctx, "Bad progress task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(
@@ -856,7 +856,7 @@ async def test_task_update_negative_progress_error(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Negative task")
+    create_result = await cap.task_create(ctx, "Negative task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_update(ctx, task_id, progress_current=-1, progress_total=10)
@@ -879,7 +879,7 @@ async def test_progress_in_task_list_output(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Tracked task")
+    create_result = await cap.task_create(ctx, "Tracked task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, progress_current=3, progress_total=10)
 
@@ -903,7 +903,7 @@ async def test_progress_with_explicit_completion(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Completable task")
+    create_result = await cap.task_create(ctx, "Completable task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, progress_total=10)
 
@@ -935,7 +935,7 @@ async def test_auto_complete_on_status_completed(tmp_path: Path) -> None:
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Auto-complete task")
+    create_result = await cap.task_create(ctx, "Auto-complete task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, progress_current=5, progress_total=10)
 
@@ -963,7 +963,7 @@ async def test_no_auto_complete_when_progress_total_not_set(
     config = make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "No-progress task")
+    create_result = await cap.task_create(ctx, "No-progress task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     await cap.task_update(ctx, task_id, status="completed")
@@ -1086,7 +1086,7 @@ async def test_ownership_error_includes_owner_and_suggestion(
     config = make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await lead_cap.task_create(ctx_lead, "Protected task")
+    create_result = await lead_cap.task_create(ctx_lead, "Protected task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await lead_cap.task_update(ctx_lead, task_id, owner="reviewer_agent")
 
@@ -1120,7 +1120,7 @@ async def test_unowned_task_can_be_updated_by_any_member(
     config = make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", make_lead_metadata())
 
-    create_result = await lead_cap.task_create(ctx_lead, "Unclaimed task")
+    create_result = await lead_cap.task_create(ctx_lead, "Unclaimed task", owner="")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     member_ctx = make_run_context(

@@ -900,7 +900,9 @@ async def test_task_create_happy_path(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    result = await cap.task_create(ctx, "Translate docs", "Translate API docs to French")
+    result = await cap.task_create(
+        ctx, "Translate docs", owner="translator_agent", description="Translate API docs to French"
+    )
 
     assert result.return_value.startswith("Task created: ")
 
@@ -921,7 +923,7 @@ async def test_task_create_with_owner(tmp_path: Any) -> None:
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
     result = await cap.task_create(
-        ctx, "Translate docs", "Translate API docs to French", owner="translator_agent"
+        ctx, "Translate docs", owner="translator_agent", description="Translate API docs to French"
     )
 
     assert result.return_value.startswith("Task created: ")
@@ -947,7 +949,7 @@ async def test_task_create_no_team_id() -> None:
         {"team_name": "foo", "team_role": "lead"},
     )
 
-    result = await cap.task_create(ctx, "Task")
+    result = await cap.task_create(ctx, "Task", owner="translator_agent")
 
     assert result.return_value == "Not in a team session"
 
@@ -967,8 +969,8 @@ async def test_task_list_returns_tasks(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    await cap.task_create(ctx, "Task A")
-    await cap.task_create(ctx, "Task B")
+    await cap.task_create(ctx, "Task A", owner="translator_agent")
+    await cap.task_create(ctx, "Task B", owner="translator_agent")
 
     result = await cap.task_list(ctx)
 
@@ -992,7 +994,7 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task X")
+    create_result = await cap.task_create(ctx, "Task X", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     update_result = await cap.task_update(ctx, task_id, status="completed")
@@ -1014,7 +1016,7 @@ async def test_task_update_no_updates_specified(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", lead_meta)
 
-    create_result = await cap.task_create(ctx, "Test task")
+    create_result = await cap.task_create(ctx, "Test task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     result = await cap.task_update(ctx, task_id)
 
@@ -2733,7 +2735,7 @@ async def test_list_blackboard_watch_task_ids_timeout(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task A")
+    create_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.write_blackboard(ctx, "key1", "val1")
 
@@ -2758,7 +2760,7 @@ async def test_list_blackboard_watch_task_ids_detects_change(tmp_path: Any) -> N
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task A")
+    create_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.write_blackboard(ctx, "key1", "val1")
 
@@ -2791,9 +2793,9 @@ async def test_list_blackboard_watch_task_ids_ignores_unrelated_change(
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_a = await cap.task_create(ctx, "Task A")
+    create_a = await cap.task_create(ctx, "Task A", owner="translator_agent")
     task_a_id = create_a.return_value.replace("Task created: ", "")
-    create_b = await cap.task_create(ctx, "Task B")
+    create_b = await cap.task_create(ctx, "Task B", owner="translator_agent")
     task_b_id = create_b.return_value.replace("Task created: ", "")
 
     async def _delayed_update() -> None:
@@ -2823,7 +2825,7 @@ async def test_team_status_watch_task_ids_timeout(tmp_path: Any) -> None:
     )
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task A")
+    create_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.team_status(ctx, watch=True, timeout=1, watch_task_ids=[task_id])
@@ -2846,7 +2848,7 @@ async def test_team_status_watch_task_ids_detects_change(tmp_path: Any) -> None:
     )
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task A")
+    create_result = await cap.task_create(ctx, "Task A", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     async def _delayed_update() -> None:
@@ -2963,7 +2965,7 @@ async def test_member_can_create_subtask(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    parent_result = await lead_cap.task_create(lead_ctx, "Parent task")
+    parent_result = await lead_cap.task_create(lead_ctx, "Parent task", owner="translator_agent")
     parent_id = parent_result.return_value.replace("Task created: ", "")
 
     member_ctx = _make_run_context(
@@ -2972,7 +2974,9 @@ async def test_member_can_create_subtask(tmp_path: Any) -> None:
     )
     member_cap = TeamCommCapability(config, "worker", _make_member_metadata())
 
-    result = await member_cap.task_create(member_ctx, "Subtask", parent_id=parent_id)
+    result = await member_cap.task_create(
+        member_ctx, "Subtask", parent_id=parent_id, owner="translator_agent"
+    )
 
     assert result.return_value.startswith("Task created: ")
 
@@ -2992,7 +2996,7 @@ async def test_member_cannot_create_top_level_task(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "worker", _make_member_metadata())
 
-    result = await cap.task_create(ctx, "Top-level task")
+    result = await cap.task_create(ctx, "Top-level task", owner="translator_agent")
 
     assert result.return_value == "Only lead can use task_create"
 
@@ -3012,11 +3016,13 @@ async def test_lead_can_create_top_level_and_subtask(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    top_result = await cap.task_create(ctx, "Top task")
+    top_result = await cap.task_create(ctx, "Top task", owner="translator_agent")
     assert top_result.return_value.startswith("Task created: ")
     parent_id = top_result.return_value.replace("Task created: ", "")
 
-    sub_result = await cap.task_create(ctx, "Sub task", parent_id=parent_id)
+    sub_result = await cap.task_create(
+        ctx, "Sub task", parent_id=parent_id, owner="translator_agent"
+    )
     assert sub_result.return_value.startswith("Task created: ")
 
 
@@ -3035,7 +3041,9 @@ async def test_subtask_with_invalid_parent_id(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "worker", _make_member_metadata())
 
-    result = await cap.task_create(ctx, "Orphan subtask", parent_id="task_fake123")
+    result = await cap.task_create(
+        ctx, "Orphan subtask", parent_id="task_fake123", owner="translator_agent"
+    )
 
     assert "Parent task not found" in result.return_value
 
@@ -3055,9 +3063,9 @@ async def test_task_list_default_shows_only_top_level(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    top_result = await cap.task_create(ctx, "Top task")
+    top_result = await cap.task_create(ctx, "Top task", owner="translator_agent")
     top_id = top_result.return_value.replace("Task created: ", "")
-    await cap.task_create(ctx, "Sub task", parent_id=top_id)
+    await cap.task_create(ctx, "Sub task", parent_id=top_id, owner="translator_agent")
 
     result = await cap.task_list(ctx)
 
@@ -3080,9 +3088,9 @@ async def test_task_list_include_children_nests_subtasks(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    top_result = await cap.task_create(ctx, "Top task")
+    top_result = await cap.task_create(ctx, "Top task", owner="translator_agent")
     top_id = top_result.return_value.replace("Task created: ", "")
-    await cap.task_create(ctx, "Sub task", parent_id=top_id)
+    await cap.task_create(ctx, "Sub task", parent_id=top_id, owner="translator_agent")
 
     result = await cap.task_list(ctx, include_children=True)
 
@@ -3108,10 +3116,10 @@ async def test_task_list_parent_id_filter(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    top_result = await cap.task_create(ctx, "Top task")
+    top_result = await cap.task_create(ctx, "Top task", owner="translator_agent")
     top_id = top_result.return_value.replace("Task created: ", "")
-    await cap.task_create(ctx, "Child A", parent_id=top_id)
-    await cap.task_create(ctx, "Child B", parent_id=top_id)
+    await cap.task_create(ctx, "Child A", parent_id=top_id, owner="translator_agent")
+    await cap.task_create(ctx, "Child B", parent_id=top_id, owner="translator_agent")
 
     result = await cap.task_list(ctx, parent_id=top_id)
 
@@ -3136,7 +3144,9 @@ async def test_member_can_update_own_task(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await lead_cap.task_create(lead_ctx, "Task for member")
+    create_result = await lead_cap.task_create(
+        lead_ctx, "Task for member", owner="translator_agent"
+    )
     task_id = create_result.return_value.replace("Task created: ", "")
 
     # Lead assigns the task to the member (using member name from metadata).
@@ -3169,7 +3179,7 @@ async def test_member_cannot_update_other_member_task(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await lead_cap.task_create(lead_ctx, "Owned task")
+    create_result = await lead_cap.task_create(lead_ctx, "Owned task", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     # Lead assigns to "reviewer_agent".
@@ -3203,7 +3213,7 @@ async def test_member_can_claim_unclaimed_task(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     lead_cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await lead_cap.task_create(lead_ctx, "Unclaimed task")
+    create_result = await lead_cap.task_create(lead_ctx, "Unclaimed task", owner="")
     task_id = create_result.return_value.replace("Task created: ", "")
 
     member_ctx = _make_run_context(
@@ -3232,7 +3242,7 @@ async def test_lead_can_update_any_task(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Task owned by someone")
+    create_result = await cap.task_create(ctx, "Task owned by someone", owner="translator_agent")
     task_id = create_result.return_value.replace("Task created: ", "")
     await cap.task_update(ctx, task_id, owner="reviewer_agent")
 
@@ -3256,7 +3266,9 @@ async def test_task_get_returns_task_details(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    create_result = await cap.task_create(ctx, "Get me", "Detailed description")
+    create_result = await cap.task_create(
+        ctx, "Get me", owner="translator_agent", description="Detailed description"
+    )
     task_id = create_result.return_value.replace("Task created: ", "")
 
     result = await cap.task_get(ctx, task_id)
@@ -3301,9 +3313,9 @@ async def test_task_get_with_include_children(tmp_path: Any) -> None:
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "coordinator", _make_lead_metadata())
 
-    top_result = await cap.task_create(ctx, "Parent task")
+    top_result = await cap.task_create(ctx, "Parent task", owner="translator_agent")
     top_id = top_result.return_value.replace("Task created: ", "")
-    await cap.task_create(ctx, "Child task", parent_id=top_id)
+    await cap.task_create(ctx, "Child task", parent_id=top_id, owner="translator_agent")
 
     result = await cap.task_get(ctx, top_id, include_children=True)
 

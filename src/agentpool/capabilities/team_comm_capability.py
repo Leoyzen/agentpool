@@ -299,6 +299,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         agent_name: str,
         parent_session_id: str,
         description: str,
+        *,
+        tool_call_id: str | None = None,
         **metadata: Any,
     ) -> str:
         """Create a child session for a team member via SessionPool.
@@ -313,6 +315,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             agent_name: Name of the agent for the child session.
             parent_session_id: Parent session ID.
             description: Human-readable description.
+            tool_call_id: ID of the tool call that triggered member creation,
+                passed to ``SpawnSessionStart`` for protocol correlation.
             **metadata: Additional metadata (team_id, team_role, etc.).
 
         Returns:
@@ -381,8 +385,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             spawn_event = SpawnSessionStart(
                 child_session_id=child_sid,
                 parent_session_id=parent_session_id,
-                tool_call_id="",
-                spawn_mechanism="spawn",
+                tool_call_id=tool_call_id or "",
+                spawn_mechanism="task",
                 source_name=agent_name,
                 display_name=child_display_name,
                 source_type="agent",
@@ -485,6 +489,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         ] = None,
     ) -> ToolReturn:
         """Send a message to a teammate's inbox.
+
+        Use this for communication and coordination.  For assigning work
+        to a team member, use ``task_create`` instead.
 
         Returns:
             Success or error message string.
@@ -662,6 +669,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         self,
         ctx: RunContext[Any],
         subject: Annotated[str, Field(description="Short task title")],
+        owner: Annotated[
+            str,
+            Field(
+                description="Team member name responsible for this task. "
+                'Use empty string "" for unassigned tasks that can be claimed later. '
+                "As lead, assign to the responsible agent — not yourself."
+            ),
+        ],
         description: Annotated[str, Field(description="Optional longer description")] = "",
         blocked_by: Annotated[
             list[str] | None,
@@ -675,15 +690,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "When None (top-level), only lead can create"
             ),
         ] = None,
-        owner: Annotated[
-            str | None,
-            Field(
-                description="Optional team member name to assign as task owner. "
-                "If not set, the task is unassigned and can be claimed later"
-            ),
-        ] = None,
     ) -> ToolReturn:
-        """Create a task on the shared task board.
+        """Assign work to a team member by creating a task on the shared task board.
 
         Top-level tasks (``parent_id=None``) are lead-only.  Subtasks
         (``parent_id`` set) can be created by any team member.
@@ -715,31 +723,45 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         }
         if parent_id is not None:
             task_dict["parent_id"] = parent_id
-        if owner is not None:
+        if owner:
             task_dict["owner"] = owner
 
         try:
             task_id = team_state.create_task(team_id, task_dict)
         except ValueError as exc:
             return ToolReturn(return_value=str(exc))
-        # Notify the assigned member about the new task.
-        if owner is not None:
-            current_member: str = agent_ctx.session.metadata.get(
-                "team_member_name",
-                self._agent_name,
+
+        current_member: str = agent_ctx.session.metadata.get(
+            "team_member_name",
+            self._agent_name,
+        )
+
+        # Warn lead when assigning a task to itself.
+        warnings: list[str] = []
+        if owner and owner == current_member and role == "lead":
+            warnings.append(
+                f"Warning: task assigned to yourself ('{owner}'). "
+                "As lead, you should assign work to other team members, "
+                "not yourself. Use send_message only for coordination."
             )
-            if owner != current_member:
-                blocked_str = ""
-                if blocked_by:
-                    blocked_str = f" (blocked by: {', '.join(blocked_by)})"
-                notif_body = (
-                    f"New task assigned to you:\n"
-                    f"- [{task_id}] {subject}{blocked_str}\n"
-                    f"Use task_list to see details and task_get to read "
-                    f"full description."
-                )
-                await self._notify_member(agent_ctx, team_id, owner, notif_body)
-        return ToolReturn(return_value=f"Task created: {task_id}")
+
+        # Notify the assigned member about the new task.
+        if owner != current_member:
+            blocked_str = ""
+            if blocked_by:
+                blocked_str = f" (blocked by: {', '.join(blocked_by)})"
+            notif_body = (
+                f"New task assigned to you:\n"
+                f"- [{task_id}] {subject}{blocked_str}\n"
+                f"Use task_list to see details and task_get to read "
+                f"full description."
+            )
+            await self._notify_member(agent_ctx, team_id, owner, notif_body)
+
+        result = f"Task created: {task_id}"
+        if warnings:
+            result += "\n" + "\n".join(warnings)
+        return ToolReturn(return_value=result)
 
     async def task_create_batch(
         self,
@@ -1772,6 +1794,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     member["agent"],
                     parent_session_id=lead_session_id,
                     description=f"Team member: {member['name']}",
+                    tool_call_id=ctx.tool_call_id,
                     team_id=team_id,
                     team_name=name,
                     team_role="member",
@@ -2168,6 +2191,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 agent,
                 parent_session_id=lead_session_id,
                 description=f"Team member: {name}",
+                tool_call_id=ctx.tool_call_id,
                 team_id=team_id,
                 team_name=agent_ctx.session.metadata.get("team_name"),
                 team_role="member",

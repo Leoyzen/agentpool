@@ -430,12 +430,11 @@ class OpenCodeMessageBridgeMixin:
         # Team members get a "Team ·" prefix to distinguish from regular subagents
         team_id = spawn_event.metadata.get("team_id")
         if team_id is not None:
-            tool_title = f"Team · {display_name}"
             team_name = spawn_event.metadata.get("team_name", "")
             team_role = spawn_event.metadata.get("team_role", "member")
             role_label = "Lead" if team_role == "lead" else "Member"
-            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
-            card_description = f"{team_context}{spawn_event.description or display_name}"
+            tool_title = f"Team · {display_name}"
+            card_description = f"{role_label} in '{team_name}'" if team_name else role_label
         else:
             tool_title = display_name
             card_description = spawn_event.description or tool_title
@@ -453,6 +452,7 @@ class OpenCodeMessageBridgeMixin:
                 "model_id": spawn_event.model_id,
                 "mode": spawn_event.mode,
                 "source_type": spawn_event.source_type,
+                "background": spawn_event.spawn_mechanism == "task",
             },
             title=tool_title,
         )
@@ -527,12 +527,11 @@ class OpenCodeMessageBridgeMixin:
         display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
         team_id = spawn_event.metadata.get("team_id")
         if team_id is not None:
-            tool_title = f"Team · {display_name}"
             team_name = spawn_event.metadata.get("team_name", "")
             team_role = spawn_event.metadata.get("team_role", "member")
             role_label = "Lead" if team_role == "lead" else "Member"
-            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
-            card_description = f"{team_context}{spawn_event.description or display_name}"
+            tool_title = f"Team · {display_name}"
+            card_description = f"{role_label} in '{team_name}'" if team_name else role_label
         else:
             tool_title = display_name
             card_description = spawn_event.description or tool_title
@@ -558,6 +557,7 @@ class OpenCodeMessageBridgeMixin:
                 "model_id": spawn_event.model_id,
                 "mode": spawn_event.mode,
                 "source_type": spawn_event.source_type,
+                "background": spawn_event.spawn_mechanism == "task",
             },
             time=TimeStartEndCompacted(start=start_time, end=now_ms()),
         )
@@ -630,12 +630,11 @@ class OpenCodeMessageBridgeMixin:
         display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
         team_id = spawn_event.metadata.get("team_id")
         if team_id is not None:
-            tool_title = f"Team · {display_name}"
             team_name = spawn_event.metadata.get("team_name", "")
             team_role = spawn_event.metadata.get("team_role", "member")
             role_label = "Lead" if team_role == "lead" else "Member"
-            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
-            card_description = f"{team_context}{spawn_event.description or display_name}"
+            tool_title = f"Team · {display_name}"
+            card_description = f"{role_label} in '{team_name}'" if team_name else role_label
         else:
             tool_title = display_name
             card_description = spawn_event.description or tool_title
@@ -659,6 +658,7 @@ class OpenCodeMessageBridgeMixin:
                 "model_id": spawn_event.model_id,
                 "mode": spawn_event.mode,
                 "source_type": spawn_event.source_type,
+                "background": spawn_event.spawn_mechanism == "task",
             },
             time=TimeStartEnd(start=start_time, end=now_ms()),
         )

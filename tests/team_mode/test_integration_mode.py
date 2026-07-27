@@ -232,7 +232,9 @@ async def test_e2e_lifecycle_create_message_task_blackboard_delete(
     assert msg_result.return_value == "Message sent to translator_agent"
 
     # --- Step 3: Create a task ---
-    task_result = await cap.task_create(ctx, "Translate docs", "Translate API docs")
+    task_result = await cap.task_create(
+        ctx, "Translate docs", owner="translator_agent", description="Translate API docs"
+    )
     assert task_result.return_value.startswith("Task created: ")
     task_id = task_result.return_value.replace("Task created: ", "")
 
@@ -600,7 +602,9 @@ async def test_e2e_task_and_blackboard_lifecycle(tmp_path: Any) -> None:
     cap = TeamCommCapability(config, "coordinator", metadata)
 
     # Create a task
-    create_result = await cap.task_create(ctx, "Review PR", "Review PR #42")
+    create_result = await cap.task_create(
+        ctx, "Review PR", owner="translator_agent", description="Review PR #42"
+    )
     assert create_result.return_value.startswith("Task created: ")
     task_id = create_result.return_value.replace("Task created: ", "")
 

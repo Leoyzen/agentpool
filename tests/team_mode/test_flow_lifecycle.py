@@ -286,7 +286,8 @@ async def _dispatch_tool(  # noqa: PLR0911
             return await cap.task_create(
                 ctx,
                 args["subject"],
-                args.get("description", ""),
+                owner=args.get("owner", "translator_agent"),
+                description=args.get("description", ""),
                 blocked_by=args.get("blocked_by"),
             )
         case "task_list":
