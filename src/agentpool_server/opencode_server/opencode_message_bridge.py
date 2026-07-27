@@ -524,8 +524,18 @@ class OpenCodeMessageBridgeMixin:
             )
             return
 
-        source_name = spawn_event.source_name or "subagent"
-        tool_title = source_name
+        display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
+        team_id = spawn_event.metadata.get("team_id")
+        if team_id is not None:
+            tool_title = f"Team · {display_name}"
+            team_name = spawn_event.metadata.get("team_name", "")
+            team_role = spawn_event.metadata.get("team_role", "member")
+            role_label = "Lead" if team_role == "lead" else "Member"
+            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
+            card_description = f"{team_context}{spawn_event.description or display_name}"
+        else:
+            tool_title = display_name
+            card_description = spawn_event.description or tool_title
         complete_msg = event.message
         content = str(complete_msg.content) if complete_msg.content else "(no output)"
 
@@ -536,13 +546,19 @@ class OpenCodeMessageBridgeMixin:
         )
         completed_state = ToolStateCompleted(
             input={
-                "description": tool_title,
+                "description": card_description,
                 "subagent_type": tool_title,
                 "prompt": spawn_event.metadata.get("prompt", ""),
             },
             output=content,
             title=tool_title,
-            metadata={"sessionId": child_session_id, "title": tool_title},
+            metadata={
+                "sessionId": child_session_id,
+                "title": tool_title,
+                "model_id": spawn_event.model_id,
+                "mode": spawn_event.mode,
+                "source_type": spawn_event.source_type,
+            },
             time=TimeStartEndCompacted(start=start_time, end=now_ms()),
         )
         updated = ToolPart(
@@ -611,8 +627,18 @@ class OpenCodeMessageBridgeMixin:
         if tool_part is None or assistant_msg is None:
             return
 
-        source_name = spawn_event.source_name or "subagent"
-        tool_title = source_name
+        display_name = spawn_event.display_name or spawn_event.source_name or "subagent"
+        team_id = spawn_event.metadata.get("team_id")
+        if team_id is not None:
+            tool_title = f"Team · {display_name}"
+            team_name = spawn_event.metadata.get("team_name", "")
+            team_role = spawn_event.metadata.get("team_role", "member")
+            role_label = "Lead" if team_role == "lead" else "Member"
+            team_context = f"{role_label} in team '{team_name}' — " if team_name else ""
+            card_description = f"{team_context}{spawn_event.description or display_name}"
+        else:
+            tool_title = display_name
+            card_description = spawn_event.description or tool_title
         error_msg = event.message or "Unknown error"
 
         start_time = (
@@ -623,11 +649,17 @@ class OpenCodeMessageBridgeMixin:
         error_state = ToolStateError(
             error=error_msg,
             input={
-                "description": tool_title,
+                "description": card_description,
                 "subagent_type": tool_title,
                 "prompt": spawn_event.metadata.get("prompt", ""),
             },
-            metadata={"sessionId": child_session_id, "title": tool_title},
+            metadata={
+                "sessionId": child_session_id,
+                "title": tool_title,
+                "model_id": spawn_event.model_id,
+                "mode": spawn_event.mode,
+                "source_type": spawn_event.source_type,
+            },
             time=TimeStartEnd(start=start_time, end=now_ms()),
         )
         updated = ToolPart(
