@@ -138,14 +138,15 @@ def test_skeleton_get_instructions_returns_none_when_empty_metadata() -> None:
 
 
 @pytest.mark.unit
-async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
-    """Given: enabled config with T7 universal tools + T8 lead-only tools.
+async def test_skeleton_get_tools_returns_15_tools_when_enabled() -> None:
+    """Given: enabled config with T9 universal tools + T6 lead-only tools.
 
     When: get_tools() is called.
-    Then: returns 14 tools (send_message, task_create, task_list,
+    Then: returns 15 tools (send_message, task_create, task_list,
         task_update, task_get, read_blackboard, write_blackboard,
         list_blackboard, team_status, team_create, team_delete,
-        delete_blackboard, shutdown_request, team_add_member).
+        delete_blackboard, shutdown_request, team_add_member,
+        task_create_batch).
     """
     config = _make_enabled_config()
     cap = TeamCommCapability(config, "worker", _make_session_metadata())
@@ -168,6 +169,7 @@ async def test_skeleton_get_tools_returns_14_tools_when_enabled() -> None:
         "delete_blackboard",
         "shutdown_request",
         "team_add_member",
+        "task_create_batch",
     }
 
 
@@ -1001,17 +1003,20 @@ async def test_task_update_changes_status(tmp_path: Any) -> None:
 
 @pytest.mark.unit
 async def test_task_update_no_updates_specified(tmp_path: Any) -> None:
-    """Given: team session.
+    """Given: team session with a task.
 
     When: task_update called with empty status and owner.
     Then: returns "No updates specified".
     """
     _init_team(str(tmp_path))
-    ctx = _make_run_context(base_dir=str(tmp_path))
+    lead_meta = _make_lead_metadata()
+    ctx = _make_run_context(metadata=lead_meta, base_dir=str(tmp_path))
     config = _make_enabled_config(base_dir=str(tmp_path))
-    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+    cap = TeamCommCapability(config, "coordinator", lead_meta)
 
-    result = await cap.task_update(ctx, "some_id")
+    create_result = await cap.task_create(ctx, "Test task")
+    task_id = create_result.return_value.replace("Task created: ", "")
+    result = await cap.task_update(ctx, task_id)
 
     assert result.return_value == "No updates specified"
 
@@ -3179,7 +3184,8 @@ async def test_member_cannot_update_other_member_task(tmp_path: Any) -> None:
 
     result = await member_cap.task_update(member_ctx, task_id, status="completed")
 
-    assert "Permission denied" in result.return_value
+    assert "owned by 'reviewer_agent'" in result.return_value
+    assert "send_message(to='reviewer_agent'" in result.return_value
 
 
 @pytest.mark.unit

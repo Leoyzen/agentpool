@@ -40,10 +40,13 @@ team_mode:
     members:
       - name: "lead"
         agent: "sales_lead"
+        instructions: "You coordinate the sales team. Create tasks for each team member and track progress."
       - name: "analyst"
         agent: "research_analyst"
+        instructions: "You research prospects and write findings to blackboard key 'prospect_data'."
       - name: "writer"
         agent: "proposal_writer"
+        instructions: "You review prospect data from blackboard key 'prospect_data' and craft outreach messages."
   blackboard:
     write_policy: "lead_only"
     max_size_mb: 50

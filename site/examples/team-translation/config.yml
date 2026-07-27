@@ -33,8 +33,10 @@ team_mode:
     members:
       - name: "translator"
         agent: "lead_translator"
+        instructions: "You translate text from source to target language. Write translations to blackboard key 'translations'."
       - name: "reviewer"
         agent: "reviewer"
+        instructions: "You review translations from blackboard key 'translations'. Report issues via send_message to the translator."
   bounds:
     max_members: 5
     max_member_turns: 30

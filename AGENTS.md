@@ -441,8 +441,10 @@ team_mode:
     members:
       - name: "lead"
         agent: "coordinator"
+        instructions: "You coordinate the team. Assign tasks and track progress."
       - name: "researcher"
         agent: "researcher"
+        instructions: "You gather data and write findings to blackboard key 'raw_data'."
   bounds:                                    # Optional: resource constraints
     max_members: 6
     max_parallel_members: 3
@@ -456,23 +458,31 @@ team_mode:
     - pricing_approval
 ```
 
-**12 Team Mode Tools**: Once team mode is enabled, the lead agent gets these tools:
+**15 Team Mode Tools**: Once team mode is enabled, the lead agent receives these tools. Tools are split into two scopes: Universal (available to all team members) and Lead-only (available only to the team lead).
 
-| Tool | Description |
-|---|---|
-| `team_create` | Create a new team with members from eligible agents |
-| `team_delete` | Dissolve a team and release its resources |
-| `send_message` | Send a message to a specific team member |
-| `task_create` | Assign a task to a team member |
-| `task_list` | List all tasks and their statuses |
-| `task_update` | Update a task's status or description |
-| `read_blackboard` | Read the team's shared blackboard (persistent across turns) |
-| `write_blackboard` | Write to the shared blackboard |
-| `list_blackboard` | List keys on the shared blackboard |
-| `delete_blackboard` | Delete a key from the shared blackboard |
-| `shutdown_request` | Shut down (remove) a team member and release its resources |
-| `team_add_member` | Add a new member to an existing team |
-| `team_status` | Check team health, member status, and resource usage |
+| Tool | Scope | Description |
+|---|---|---|
+| `send_message` | Universal | Send a message to a specific team member. Supports `persist_to_blackboard` to auto-save the message body to a blackboard key. |
+| `task_create` | Universal | Assign a task to a team member |
+| `task_list` | Universal | List all tasks and their statuses. Supports `mine_only` to filter tasks assigned to the caller. |
+| `task_update` | Universal | Update a task's status, `technical_note`, `handoff_to`, `handoff_context_keys`, `progress_current`, or `progress_total`. |
+| `task_get` | Universal | Get the details of a single task |
+| `read_blackboard` | Universal | Read the team's shared blackboard (persistent across turns) |
+| `write_blackboard` | Universal | Write to the shared blackboard |
+| `list_blackboard` | Universal | List keys on the shared blackboard |
+| `team_status` | Universal | Check team health, member status, and resource usage |
+| `team_create` | Lead-only | Create a new team with members from eligible agents |
+| `team_delete` | Lead-only | Dissolve a team and release its resources |
+| `delete_blackboard` | Lead-only | Delete a key from the shared blackboard |
+| `shutdown_request` | Lead-only | Remove a team member and release its resources |
+| `team_add_member` | Lead-only | Add a new member to an existing team |
+| `task_create_batch` | Lead-only | Create multiple tasks atomically with inter-task dependencies using `#N` or symbolic `id` references |
+
+**Channel Boundaries**: The protocol template defines three distinct channels for team coordination. **Tasks** (task_create, task_get, task_list, task_update, task_create_batch) provide structured work tracking with status, progress, and dependencies. **Blackboard** (read_blackboard, write_blackboard, list_blackboard, delete_blackboard) provides persistent shared state accessible across members and turns. **Messages** (send_message) provide ephemeral communication between members.
+
+**Auto-complete Progress**: When `task_update(status="completed")` is called and `progress_total` is set but `progress_current` is not provided, the system auto-sets `progress_current = progress_total`.
+
+**Handoff Semantics**: `task_update(status="completed", handoff_to="member")` sends a notification to the target member with blackboard context from `handoff_context_keys`. Dependency-resolved notifications are sent automatically when blocking tasks complete.
 
 **Default Members**: When `defaults:` is configured, `team_create` uses these members when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly.
 

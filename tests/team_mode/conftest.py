@@ -5,6 +5,7 @@ Provides:
 - Message inspection helpers (ported from pydantic-ai-harness patterns)
 - ``build_agent_context`` helper for direct capability testing
 - ``FunctionModel`` factory helpers for scripted multi-turn flows
+- Team-mode test helpers: config builders, metadata factories, mock builders
 
 See ``tests/AGENTS.md`` for the L1-L4 testing guide.
 """
@@ -12,7 +13,7 @@ See ``tests/AGENTS.md`` for the L1-L4 testing guide.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 # Re-export fixtures so tests in this directory can use them directly.
 from tests.fixtures.team_mode_pool import (  # noqa: F401
@@ -146,10 +147,14 @@ def make_lifecycle_model(steps: list[tuple[str, dict[str, Any]]]) -> Any:
             tool calls are issued, the model returns a final text response.
 
     Returns:
-        A ``FunctionModel`` instance.
+        A ``FunctionModel`` instance with both ``function`` and
+        ``stream_function`` set, so it works with both ``Agent.run()``
+        and ``Agent.run_stream()``.
     """
+    import json
+
     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.models.function import DeltaToolCall, FunctionModel
 
     calls: dict[str, int] = {"n": 0}
 
@@ -163,4 +168,156 @@ def make_lifecycle_model(steps: list[tuple[str, dict[str, Any]]]) -> Any:
             )
         return ModelResponse(parts=[TextPart(content="done")])
 
-    return FunctionModel(model_fn)
+    async def stream_fn(messages: list[Any], info: Any) -> Any:
+        """Stream function yielding DeltaToolCalls then text."""
+        calls["n"] += 1
+        idx = calls["n"] - 1
+        if idx < len(steps):
+            tool_name, args = steps[idx]
+            yield {
+                0: DeltaToolCall(
+                    name=tool_name,
+                    json_args=json.dumps(args),
+                    tool_call_id=f"call_{idx}",
+                ),
+            }
+        else:
+            yield "done"
+
+    return FunctionModel(function=model_fn, stream_function=stream_fn)
+
+
+# ---------------------------------------------------------------------------
+# Team-mode test helpers (shared across unit + integration test files)
+# ---------------------------------------------------------------------------
+
+
+def make_enabled_config(
+    *,
+    member_eligible: list[str] | None = None,
+    lead_eligible: list[str] | None = None,
+    base_dir: str | None = None,
+    notice_delivery_mode: str = "steer",
+) -> TeamModeConfig:
+    """Create an enabled TeamModeConfig for testing."""
+    from agentpool_config.team_mode import TeamModeConfig
+
+    return TeamModeConfig(
+        enabled=True,
+        member_eligible=member_eligible or ["worker", "reviewer"],
+        lead_eligible=lead_eligible or ["coordinator"],
+        base_dir=base_dir,
+        notice_delivery_mode=notice_delivery_mode,
+    )
+
+
+def make_lead_metadata(team_id: str = "team_123") -> dict[str, Any]:
+    """Create session metadata for a lead agent."""
+    meta: dict[str, Any] = {
+        "team_role": "lead",
+        "team_member_name": "coordinator",
+    }
+    if team_id:
+        meta["team_id"] = team_id
+        meta["team_name"] = "alpha_team"
+    return meta
+
+
+def make_member_metadata(
+    team_id: str = "team_123",
+    member_name: str = "translator_agent",
+) -> dict[str, Any]:
+    """Create session metadata for a team member."""
+    return {
+        "team_id": team_id,
+        "team_name": "alpha_team",
+        "team_role": "member",
+        "team_member_name": member_name,
+    }
+
+
+def make_run_context(
+    metadata: dict[str, Any] | None = None,
+    session_pool: MagicMock | None = None,
+    config: TeamModeConfig | None = None,
+    base_dir: str | None = None,
+    agent_registry: MagicMock | None = None,
+    session_id: str = "lead_session_001",
+    delegation: MagicMock | None = None,
+) -> MagicMock:
+    """Create a mock RunContext with AgentContext deps.
+
+    If ``session_pool`` is provided, ensures its async methods and
+    sub-attributes are properly mocked for team tool operations.
+    """
+    from agentpool.capabilities.agent_context import AgentContext
+
+    cfg = config or make_enabled_config(base_dir=base_dir)
+
+    if session_pool is not None:
+        if not isinstance(session_pool.create_child_session, AsyncMock):
+            child_state: Any = MagicMock()
+            child_state.session_id = "child_session"
+            session_pool.create_child_session = AsyncMock(return_value=child_state)
+        if not isinstance(
+            getattr(session_pool.sessions, "get_or_create_session_agent", None),
+            AsyncMock,
+        ):
+            session_pool.sessions = MagicMock()
+            session_pool.sessions.get_or_create_session_agent = AsyncMock()
+        eb: Any = session_pool.event_bus
+        if not (isinstance(eb, MagicMock) and isinstance(getattr(eb, "publish", None), AsyncMock)):
+            session_pool.event_bus = None
+
+    agent_ctx: Any = MagicMock(spec=AgentContext)
+    agent_ctx.session.metadata = metadata if metadata is not None else make_lead_metadata()
+    agent_ctx.host.session_pool = session_pool
+    agent_ctx.team_mode_config = cfg
+    agent_ctx.agent_registry = agent_registry or MagicMock()
+    agent_ctx.session.session_id = session_id
+    agent_ctx.delegation = delegation or MagicMock()
+
+    ctx: Any = MagicMock()
+    ctx.deps = agent_ctx
+    return ctx
+
+
+def init_team(
+    base_dir: str,
+    team_id: str = "team_123",
+    team_name: str = "alpha_team",
+    members: list[dict[str, str]] | None = None,
+) -> None:
+    """Initialize a real FileTeamState with a team and registered members."""
+    from agentpool.capabilities.file_team_state import FileTeamState
+
+    if members is None:
+        members = [
+            {"name": "translator_agent", "agent": "worker"},
+            {"name": "reviewer_agent", "agent": "reviewer"},
+        ]
+    state = FileTeamState(base_dir)
+    state.init(team_id, team_name, members)
+    for m in members:
+        state.register_member(team_id, m["name"], f"sess_{m['name']}")
+
+
+def make_mock_pool() -> MagicMock:
+    """Create a mock SessionPool with async send_message and close_session."""
+    pool = MagicMock()
+    pool.send_message = AsyncMock(return_value="msg_id_001")
+    pool.close_session = AsyncMock()
+    mock_child_state: Any = MagicMock()
+    mock_child_state.session_id = "child_session_001"
+    pool.create_child_session = AsyncMock(return_value=mock_child_state)
+    pool.sessions = MagicMock()
+    pool.sessions.get_or_create_session_agent = AsyncMock()
+    pool.event_bus = None
+    return pool
+
+
+def make_mock_registry() -> MagicMock:
+    """Create a mock AgentRegistry."""
+    registry = MagicMock()
+    registry.exists = MagicMock(return_value=True)
+    return registry

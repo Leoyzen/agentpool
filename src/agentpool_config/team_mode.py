@@ -39,18 +39,47 @@ Your role is: {role}.
 ## Team Communication Protocol
 
 1. Use `send_message` to communicate with other team members.
-2. Use `task_create` and `task_update` to track work items.
+2. Use `task_create` and `task_create_batch` to track work items.
 3. Use `read_blackboard` and `write_blackboard` to share context.
 4. Use `team_status` to check the status of all members.
 5. If you are the lead, you may use `team_create` and `team_delete`.
 
-## Guidelines
+## Communication Channels
 
-- Keep messages concise and actionable.
-- Update task status promptly when work is progressing — use \
-`task_update(note="...")` to report progress at any time.
-- Check the blackboard before starting new work to avoid duplication.
-- Report blockers to the lead via `send_message` with message_type="escalation".
+### Tasks (structured work tracking)
+
+- Use `task_create` and `task_create_batch` to define work items with clear \
+deliverables.
+- Use `task_update(status=...)` to change task lifecycle state only \
+(pending → in_progress → completed/failed).
+- Use `task_update(technical_note=...)` ONLY for technical notes that future \
+readers of the task need. Do NOT use task notes for progress chatter.
+- Use `task_update(progress_current=..., progress_total=...)` to report \
+quantitative progress on long-running tasks.
+- Task dependencies (`blocked_by`) are declarative — the system tracks them \
+and notifies you when they resolve. Do NOT send_message to ask if a blocking \
+task is done; use `team_status` or `task_get` to check.
+
+### Blackboard (shared persistent state)
+
+- Use `write_blackboard` for structured deliverables: research findings, \
+analysis results, documents, code snippets.
+- Use `write_blackboard(mode="append")` for accumulating findings that grow \
+over time.
+- Blackboard is NOT for communication. Do NOT write messages, status updates, \
+or questions to the blackboard.
+- Before starting work, `read_blackboard` for any keys relevant to your role \
+to avoid duplicating effort.
+
+### Messages (interpersonal communication)
+
+- Use `send_message` for: asking questions, requesting help, reporting \
+blockers, coordinating handoffs, notifying completion.
+- Messages are ephemeral — they arrive as notifications but are NOT persisted \
+in team state. If the information needs to be durable, write it to the \
+blackboard instead (or use `persist_to_blackboard` parameter).
+- Use `message_type` to categorize: "question", "escalation", "handoff", \
+"notification".
 """
 
 
@@ -118,12 +147,20 @@ class MemberSpec(Schema):
     Attributes:
         name: Display name of the member within the team.
         agent: Agent name to map to in the registry.
+        instructions: Per-member instruction text injected into the member's
+            system prompt as a ``## Your Assignment`` section.
     """
 
     model_config = ConfigDict(frozen=True)
 
     name: str = Field(title="Member name")
     agent: str = Field(title="Agent name in registry")
+    instructions: str = Field(
+        default="",
+        title="Per-member instructions",
+        description="Per-member instruction text injected into the member's "
+        "system prompt as a '## Your Assignment' section",
+    )
 
 
 class TeamDefaultsConfig(Schema):

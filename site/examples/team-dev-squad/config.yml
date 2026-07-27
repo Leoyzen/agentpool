@@ -35,6 +35,17 @@ team_mode:
     - tech_lead
     - frontend_dev
     - backend_dev
+  defaults:
+    members:
+      - name: "tech_lead"
+        agent: "tech_lead"
+        instructions: "You break down the project into tasks using task_create_batch. Coordinate handoffs between members."
+      - name: "frontend_dev"
+        agent: "frontend_dev"
+        instructions: "You implement frontend components. Write code summaries to blackboard key 'frontend_changes'."
+      - name: "backend_dev"
+        agent: "backend_dev"
+        instructions: "You implement backend APIs. Write API specs to blackboard key 'api_specs'."
   bounds:
     max_members: 8
     max_wall_clock_minutes: 120

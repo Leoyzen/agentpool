@@ -9,7 +9,7 @@ reviewers:
   - name: Metis (Plan Consultant)
     status: approved
 created: 2026-07-14
-last_updated: 2026-07-15
+last_updated: 2026-07-27
 decision_date:
 related_rfcs:
   - RFC-0054 (V2 Message ID Infrastructure — provides SessionPool public API: send_message, run_agent, DeliveryMode, revoke_message)
@@ -160,17 +160,25 @@ This workflow cannot be expressed as a static DAG because:
 
 ### Success Criteria
 
-- [ ] LLM can call `team_create(name, members)` to spawn a team with persistent members
-- [ ] LLM can call `send_message(to, body, urgent)` to deliver messages between members
-- [ ] LLM can call `task_create/list/update` to manage shared tasks with dependency tracking
-- [ ] LLM can call `read_blackboard/write_blackboard` to share structured state
-- [ ] Team state persists to filesystem and survives process restart within TTL window
-- [ ] `team_delete` cleanly closes all member sessions and removes file state
-- [ ] Existing static team mechanisms (`graph:`, `teams:`) continue to work unchanged
-- [ ] `defaults` config provides default members when `team_create` is called with empty members
-- [ ] With `defaults`, lead agent can call `team_create` with empty members and get the pre-configured team
-- [ ] `defaults` team can be dissolved by LLM calling `team_delete`, and a new team created via `team_create`
-- [ ] Total changes to existing files: ≤ 5 lines across ≤ 3 files
+- [x] LLM can call `team_create(name, members)` to spawn a team with persistent members
+- [x] LLM can call `send_message(to, body)` to deliver messages between members
+- [x] LLM can call `task_create/list/update` to manage shared tasks with dependency tracking
+- [x] LLM can call `read_blackboard/write_blackboard` to share structured state
+- [x] Team state persists to filesystem and survives process restart within TTL window
+- [x] `team_delete` cleanly closes all member sessions and removes file state
+- [x] Existing static team mechanisms (`graph:`, `teams:`) continue to work unchanged
+- [x] `defaults` config provides default members when `team_create` is called with empty members
+- [x] With `defaults`, lead agent can call `team_create` with empty members and get the pre-configured team
+- [x] `defaults` team can be dissolved by LLM calling `team_delete`, and a new team created via `team_create`
+- [x] Per-member `instructions` field injects role-specific guidance into member system prompts
+- [x] Protocol template defines explicit channel boundaries (Tasks/Blackboard/Messages)
+- [x] `task_update(handoff_to=...)` sends handoff notification with blackboard context keys
+- [x] Dependency-resolved notifications sent automatically when blocking tasks complete
+- [x] `task_create_batch` creates multiple tasks atomically with `#N` and symbolic `id` references
+- [x] `task_update(progress_current=..., progress_total=...)` tracks quantitative progress
+- [x] `task_list(mine_only=True)` filters to caller's tasks with owner summary
+- [x] `send_message(persist_to_blackboard=...)` writes message body to blackboard
+- [x] Ownership error includes current owner's name and `send_message` suggestion
 
 ---
 
@@ -879,75 +887,99 @@ ctx = AgentContext(
 }
 ```
 
+### Collab-Flow Improvements (2026-07-27)
+
+The initial implementation revealed three collaboration pain points that were addressed in a follow-up change (`team-mode-collab-flow`):
+
+1. **Per-member instructions**: `MemberSpec` gained an `instructions` field. `team_create` and `team_add_member` accept per-member instruction text injected as a `## Your Assignment` section in each member's system prompt — enabling structured role assignment at team creation time.
+
+2. **Channel boundary protocol**: `_DEFAULT_PROTOCOL_TEMPLATE` was rewritten with explicit `## Communication Channels` section defining clear boundaries:
+   - **Tasks**: structured work tracking only (status, dependencies, progress)
+   - **Blackboard**: persistent shared state only (findings, documents, code)
+   - **Messages**: ephemeral interpersonal communication only (questions, escalations, handoffs)
+
+3. **Task handoff semantics**: `task_update` gained `handoff_to` and `handoff_context_keys` parameters. When `status="completed"` and `handoff_to` is set, the system sends a `<team-message type="handoff">` notification to the target member with blackboard context references — replacing the previous three-step pattern (update status + write blackboard + send message).
+
+4. **Enhanced dependency notifications**: The existing dependency notification logic was enhanced to use `<team-message type="dependency_resolved">` format and skip self-notifications when the dependent task owner is the same as the completing member.
+
+5. **Batch task creation**: New `task_create_batch` tool (lead-only, 15th tool) accepts a list of task definitions with inter-task dependencies using `#N` index notation or symbolic `id` names. All tasks are created atomically under a `FileLock`.
+
+6. **Progress tracking**: `task_update` gained `progress_current` and `progress_total` parameters. When `status="completed"` is set and `progress_total` exists but `progress_current` is not provided, the system auto-sets `progress_current = progress_total`.
+
+7. **Owner visibility**: `task_list` gained `mine_only` filter and owner summary line. `task_update` returns an actionable error with the current owner's name and `send_message` suggestion when a non-lead member attempts to update another member's task.
+
+8. **Message persistence**: `send_message` gained `persist_to_blackboard` parameter — when set, the message body is also written to a blackboard key, eliminating the "send message or write blackboard" dilemma.
+
+9. **Technical note disambiguation**: `task_update`'s `note` parameter was renamed to `technical_note` with description "NOT for communication — use send_message for that."
+
+Tool count increased from 14 to 15 with the addition of `task_create_batch`.
+
 ### Tool API
 
 #### Universal Tools (all team members)
 
 ```python
-send_message(to: str, body: str, urgent: bool = False, message_type: str = "message") -> str
-    """Send a message to a teammate. urgent=True interrupts current turn."""
-    # to: teammate name or "*" (broadcast, lead-only)
+send_message(to: str, body: str, message_type: str = "", persist_to_blackboard: str | None = None) -> str
+    """Send a message to a teammate. to="*" broadcasts (lead-only)."""
+    # persist_to_blackboard: if set, also writes body to this blackboard key
     # Returns: "Message delivered to {to}" or error string
-    #
-    # **`message_type`**: Optional categorization of the message (default: `"message"`). When `message_type` matches an entry in the `auto_urgent` config list, `urgent` is automatically set to `True` unless explicitly overridden by the caller.
 
-task_create(subject: str, description: str, blocked_by: list[str] | None = None) -> str
+task_create(subject: str, description: str = "", blocked_by: list[str] | None = None, parent_id: str | None = None, owner: str | None = None) -> str
     """Create a task on the shared task board."""
     # Returns: "Task created: {task_id}"
 
-task_list() -> str
-    """List all tasks with their status and dependencies."""
-    # Returns: JSON array of tasks
+task_list(parent_id: str | None = None, include_children: bool = False, mine_only: bool = False) -> str
+    """List tasks. mine_only=True filters to caller's tasks."""
+    # Returns: XML task list with owner summary
 
-task_update(task_id: str, status: str | None = None, owner: str | None = None) -> str
-    """Update a task. Members can claim (set owner + status=claimed) or complete tasks."""
-    # status: pending | claimed | in_progress | completed | failed
-    # Returns: "Task {task_id} updated"
+task_update(task_id: str, status: str = "", owner: str = "", technical_note: str = "", handoff_to: str | None = None, handoff_context_keys: list[str] | None = None, progress_current: int | None = None, progress_total: int | None = None) -> str
+    """Update a task. handoff_to sends notification when status='completed'."""
+    # technical_note: audit trail only, NOT for communication
+    # progress auto-completes: if status='completed' and progress_total set, progress_current=progress_total
+    # Returns: Updated task XML or error
 
-read_blackboard(key: str) -> str
-    """Read a value from the shared blackboard. Supports '/' for hierarchical keys."""
-    # Returns: JSON {"value": ..., "version": N, "written_by": "..."} or "Key not found"
+task_get(task_id: str, include_children: bool = False) -> str
+    """Get a single task by ID."""
+    # Returns: Task XML or error
 
-write_blackboard(key: str, value: str, expected_version: int | None = None) -> str
-    """Write a value to the shared blackboard. Returns new version number."""
-    # expected_version: optimistic concurrency check (None = force overwrite)
-    # Returns: "Written, version={N}" or "Conflict: current version is {N}"
+read_blackboard(key: str, limit: int = 200, offset: int = 0, context: int | None = None) -> str
+    """Read a key from the shared blackboard with line-based pagination."""
 
-list_blackboard(prefix: str = "") -> str
-    """List blackboard keys under a prefix."""
-    # Returns: JSON array of key strings
+write_blackboard(key: str, value: str, expected_version: int | None = None, mode: str = "overwrite") -> str
+    """Write a key to the shared blackboard with pessimistic locking."""
 
-team_status() -> str
-    """Show team status: members, their session status, task summary."""
-    # Returns: JSON with members array and task counts
+list_blackboard(watch: bool = False, timeout: int = 300, watch_task_ids: list[str] | None = None) -> str
+    """List all keys on the shared blackboard. watch=True blocks until changes."""
+
+team_status(watch: bool = False, timeout: int = 300, watch_task_ids: list[str] | None = None) -> str
+    """Get the current status of the team. watch=True blocks until changes."""
 ```
 
 #### Lead-Only Tools
 
 ```python
-team_create(name: str, members: list[dict]) -> str
-    """Create a team. members: [{"role": "researcher", "agent": "researcher"}, ...]"""
-    # agent names reference agents defined in YAML agents: section
+team_create(name: str, members: list[dict], prompt: str = "") -> str
+    """Create a team. members: [{"agent": "...", "name": "...", "instructions": "..."}]"""
+    # instructions: per-member role text injected as ## Your Assignment section
     # Returns: "Team '{name}' created with {N} members. team_id={id}"
 
 team_delete() -> str
     """Delete the current team. Closes all member sessions and removes file state."""
-    # Returns: "Team deleted"
-    # **Cancellation semantics**: `team_delete` calls `SessionPool.close_session()` for each member,
-    # which calls `RunHandle.cancel()` (hard cancel). Member agents mid-turn are immediately
-    # cancelled — they do NOT finish their current turn. This is intentional: `team_delete`
-    # is an emergency operation.
 
 delete_blackboard(key: str) -> str
     """Delete a blackboard entry. Lead only."""
-    # Returns: "Deleted" or "Key not found"
 
 shutdown_request(member_name: str) -> str
     """Request shutdown of a specific teammate."""
-    # Returns: "Shutdown requested for {member_name}"
-    # **Semantics**: Despite the name "request", `shutdown_request` is an immediate
-    # (non-negotiable) session close. The teammate has no opportunity to reject or
-    # delay. The name is aspirational — in v1, the lead's shutdown decision is final.
+
+team_add_member(name: str, agent: str, prompt: str = "", lifecycle: str = "persistent", notify: str = "", instructions: str = "") -> str
+    """Add a new member to an existing team."""
+
+task_create_batch(tasks: list[dict]) -> str
+    """Create multiple tasks atomically with inter-task dependencies."""
+    # tasks: [{"subject": "...", "blocked_by": ["#0"]}, {"id": "research", "subject": "..."}]
+    # Supports #N index refs and symbolic id refs for blocked_by and parent_id
+    # Returns: created task IDs with #N/id → actual ID mapping
 ```
 
 ### Configuration
@@ -980,10 +1012,13 @@ agents:
         members:
           - name: researcher
             agent: researcher
+            instructions: "You gather research data. Write findings to blackboard key 'research_data'."
           - name: coder
             agent: coder
+            instructions: "You implement code based on research. Read blackboard key 'research_data' before starting."
           - name: reviewer
             agent: reviewer
+            instructions: "You review code changes. Report issues via send_message to the lead."
 
 # Per-agent team_mode overlay semantics:
 # - Per-agent team_mode is a shallow merge with global team_mode.
@@ -1250,9 +1285,10 @@ No specific regulatory requirements. Team state is ephemeral coordination data, 
 
 | Milestone | Description | Target | Status |
 |-----------|-------------|--------|--------|
-| M1: File Persistence | FileTeamState with inbox/tasks/blackboard | Phase 1 | Not Started |
-| M2: Capability | TeamCommCapability with direct SessionPool access | Phase 2 | Not Started |
-| M3: Integration | End-to-end tests and documentation | Phase 3 | Not Started |
+| M1: File Persistence | FileTeamState with inbox/tasks/blackboard | Phase 1 | ✅ Complete |
+| M2: Capability | TeamCommCapability with direct SessionPool access | Phase 2 | ✅ Complete |
+| M3: Integration | End-to-end tests and documentation | Phase 3 | ✅ Complete |
+| M4: Collab-Flow | Per-member instructions, channel boundaries, handoff, batch, progress | Follow-up | ✅ Complete (2026-07-27) |
 
 ### Rollback Strategy
 

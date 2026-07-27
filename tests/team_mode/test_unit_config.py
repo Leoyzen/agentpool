@@ -205,3 +205,105 @@ def test_effective_base_dir_defaults_to_tempdir() -> None:
     config = TeamModeConfig()
 
     assert config.effective_base_dir == tempfile.gettempdir()
+
+
+# ------------------------------------------------------------------
+# 1.3 MemberSpec.instructions validation
+# ------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_member_spec_instructions_default_empty_string() -> None:
+    """Given no instructions, MemberSpec.instructions defaults to empty string."""
+    member = MemberSpec(name="translator", agent="translator")
+
+    assert member.instructions == ""
+
+
+@pytest.mark.unit
+def test_member_spec_instructions_non_empty_string() -> None:
+    """Given a non-empty instructions string, MemberSpec stores it."""
+    member = MemberSpec(
+        name="translator",
+        agent="translator",
+        instructions="Translate all API docs to French.",
+    )
+
+    assert member.instructions == "Translate all API docs to French."
+
+
+@pytest.mark.unit
+def test_member_spec_instructions_multiline_string() -> None:
+    """Given a multiline instructions string, MemberSpec stores it verbatim."""
+    instructions = (
+        "You are responsible for:\n"
+        "- Translating API docs\n"
+        "- Reviewing translations\n"
+        "- Reporting progress daily"
+    )
+    member = MemberSpec(name="translator", agent="translator", instructions=instructions)
+
+    assert member.instructions == instructions
+    assert "\n" in member.instructions
+    assert "- Translating API docs" in member.instructions
+
+
+# ------------------------------------------------------------------
+# 2.6 Protocol template rendering
+# ------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_protocol_template_includes_tasks_subsection() -> None:
+    """Given the default protocol template, it includes a ### Tasks subsection."""
+    config = TeamModeConfig()
+
+    rendered = config.protocol_template.format(
+        team_name="alpha",
+        role="lead",
+        member_name="coordinator",
+    )
+
+    assert "### Tasks" in rendered
+
+
+@pytest.mark.unit
+def test_protocol_template_includes_blackboard_subsection() -> None:
+    """Given the default protocol template, it includes a ### Blackboard subsection."""
+    config = TeamModeConfig()
+
+    rendered = config.protocol_template.format(
+        team_name="alpha",
+        role="lead",
+        member_name="coordinator",
+    )
+
+    assert "### Blackboard" in rendered
+
+
+@pytest.mark.unit
+def test_protocol_template_includes_messages_subsection() -> None:
+    """Given the default protocol template, it includes a ### Messages subsection."""
+    config = TeamModeConfig()
+
+    rendered = config.protocol_template.format(
+        team_name="alpha",
+        role="lead",
+        member_name="coordinator",
+    )
+
+    assert "### Messages" in rendered
+
+
+@pytest.mark.unit
+def test_protocol_template_has_no_guidelines_section() -> None:
+    """Given the default protocol template, it does NOT contain a ## Guidelines section."""
+    config = TeamModeConfig()
+
+    rendered = config.protocol_template.format(
+        team_name="alpha",
+        role="lead",
+        member_name="coordinator",
+    )
+
+    assert "## Guidelines" not in rendered

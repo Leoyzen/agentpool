@@ -153,6 +153,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             self.register_tool(self.delete_blackboard)
             self.register_tool(self.shutdown_request)
             self.register_tool(self.team_add_member)
+            self.register_tool(self.task_create_batch)
 
     @property
     def _notice_mode(self) -> DeliveryMode:
@@ -444,6 +445,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         ],
         body: Annotated[str, Field(description="Message body text")],
         message_type: Annotated[str, Field(description="Optional message type tag")] = "",
+        persist_to_blackboard: Annotated[
+            str | None,
+            Field(
+                description="If set, also writes the message body to this "
+                "blackboard key (overwrite mode). Use when the message "
+                "contains findings that should persist beyond the notification"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """Send a message to a teammate's inbox.
 
@@ -601,7 +610,23 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             to,
             {"from": self._agent_name, "body": body},
         )
-        return ToolReturn(return_value=f"Message sent to {to}")
+
+        # Persist to blackboard if requested.
+        result_msg = f"Message sent to {to}"
+        if persist_to_blackboard is not None:
+            try:
+                team_state.write_blackboard(
+                    team_id,
+                    persist_to_blackboard,
+                    {"text": body},
+                    written_by=self._agent_name,
+                    mode="overwrite",
+                )
+                result_msg += f"\nPersisted to blackboard key '{persist_to_blackboard}'"
+            except Exception as exc:  # noqa: BLE001
+                result_msg += f"\nBlackboard write failed for key '{persist_to_blackboard}': {exc}"
+
+        return ToolReturn(return_value=result_msg)
 
     async def task_create(
         self,
@@ -686,6 +711,63 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 await self._notify_member(agent_ctx, team_id, owner, notif_body)
         return ToolReturn(return_value=f"Task created: {task_id}")
 
+    async def task_create_batch(
+        self,
+        ctx: RunContext[Any],
+        tasks: Annotated[
+            list[dict[str, Any]],
+            Field(
+                description="List of task definitions. Each dict supports: "
+                '"subject" (required), "description", "owner", '
+                '"blocked_by" (list of #N index refs or symbolic id refs), '
+                '"parent_id" (also supports #N/id refs), "id" (optional '
+                'symbolic name for cross-references), "progress_total" '
+                '(optional int)")'
+            ),
+        ],
+    ) -> ToolReturn:
+        """Create multiple tasks atomically on the shared task board (lead-only).
+
+        All tasks are created or none are.  Supports ``#N`` positional
+        references and symbolic ``id`` references for ``blocked_by`` and
+        ``parent_id`` fields.
+
+        Returns:
+            Success message with list of created task IDs, or error string.
+        """
+        agent_ctx = self._resolve_agent_context(ctx)
+        role: str = agent_ctx.session.metadata.get("team_role", "")
+        if role != "lead":
+            return ToolReturn(return_value="Only lead can use task_create_batch")
+        team_id = self._get_team_id(agent_ctx)
+        if team_id is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        team_state = self._get_team_state(agent_ctx)
+        if team_state is None:
+            return ToolReturn(return_value="Not in a team session")
+
+        try:
+            task_ids = team_state.create_tasks_batch(team_id, tasks)
+        except ValueError as exc:
+            return ToolReturn(return_value=str(exc))
+
+        # Build mapping of #N / symbolic id -> actual task ID for the return.
+        id_mapping: list[str] = []
+        for i, tid in enumerate(task_ids):
+            sym_id: str | None = tasks[i].get("id") if i < len(tasks) else None
+            if sym_id:
+                id_mapping.append(f"#{i} / '{sym_id}' -> {tid}")
+            else:
+                id_mapping.append(f"#{i} -> {tid}")
+
+        mapping_str = "\n".join(id_mapping)
+        return ToolReturn(
+            return_value=(
+                f"Created {len(task_ids)} tasks:\n{mapping_str}\nTask IDs: {', '.join(task_ids)}"
+            )
+        )
+
     async def task_list(  # noqa: PLR0911
         self,
         ctx: RunContext[Any],
@@ -702,6 +784,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 description="If True, recursively include subtasks nested under each top-level task"
             ),
         ] = False,
+        mine_only: Annotated[
+            bool,
+            Field(description="If True, show only tasks owned by you"),
+        ] = False,
     ) -> ToolReturn:
         """List tasks on the shared task board.
 
@@ -709,10 +795,16 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         When ``parent_id`` is specified, shows only direct children of
         that task (as a flat list).  When ``include_children=True``,
         subtasks are nested inside parent tasks in the XML output.
+        When ``mine_only=True``, filters to tasks owned by the calling member.
 
         Returns:
-            XML task list, or error string.
+            XML task list with owner summary, or error string.
         """
+        from agentpool.capabilities.file_team_state import (
+            TaskRecord,
+            format_owner_summary,
+        )
+
         agent_ctx = self._resolve_agent_context(ctx)
         team_id = self._get_team_id(agent_ctx)
         if team_id is None:
@@ -726,6 +818,22 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if not all_tasks:
             return ToolReturn(return_value="<task_list>(empty)</task_list>")
 
+        # Filter to mine_only if requested.
+        if mine_only:
+            current_member: str = agent_ctx.session.metadata.get(
+                "team_member_name",
+                self._agent_name,
+            )
+            all_tasks = [t for t in all_tasks if t.get("owner") == current_member]
+            if not all_tasks:
+                return ToolReturn(
+                    return_value=(f"<task_list>(empty)</task_list>\n0 tasks for {current_member}")
+                )
+
+        # Build TaskRecord list for owner summary.
+        task_records = [TaskRecord.from_dict(t) for t in all_tasks]
+        owner_summary = format_owner_summary(task_records)
+
         task_by_id: dict[str, dict[str, Any]] = {t.get("task_id", ""): t for t in all_tasks}
 
         if parent_id is not None:
@@ -734,6 +842,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             if not children:
                 return ToolReturn(return_value="<task_list>(empty)</task_list>")
             lines = ["<task_list>"]
+            lines.append(f"<!-- {owner_summary} -->")
             lines.extend(self._format_task_xml(t, indent=2) for t in children)
             lines.append("</task_list>")
             return ToolReturn(return_value="\n".join(lines))
@@ -744,6 +853,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return ToolReturn(return_value="<task_list>(empty)</task_list>")
 
         lines = ["<task_list>"]
+        lines.append(f"<!-- {owner_summary} -->")
         for t in top_level:
             lines.append(
                 self._format_task_xml(
@@ -766,6 +876,11 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     ) -> str:
         """Format a task dict as an XML element, optionally nesting subtasks.
 
+        The ``owner`` attribute is always present (``owner=""`` for
+        unassigned tasks).  When both ``progress_current`` and
+        ``progress_total`` are set, a ``progress="{current}/{total}"``
+        attribute is included.
+
         Args:
             t: Task dict.
             indent: Number of spaces for indentation.
@@ -783,11 +898,20 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         last_note = t.get("last_note", "")
         blocked = t.get("is_unblocked", True)
         blocked_attr = "" if blocked else ' blocked="true"'
-        owner_attr = f' owner="{owner}"' if owner else ""
+        # Always-present owner attribute (even for unassigned tasks).
+        owner_attr = f' owner="{owner}"'
+        # Progress attribute when both values are set.
+        progress_current: int | None = t.get("progress_current")
+        progress_total: int | None = t.get("progress_total")
+        progress_attr = ""
+        if progress_current is not None and progress_total is not None:
+            progress_attr = f' progress="{progress_current}/{progress_total}"'
         pad = " " * indent
 
         parts: list[str] = []
-        parts.append(f'{pad}<task id="{tid}" status="{status}"{owner_attr}{blocked_attr}>')
+        parts.append(
+            f'{pad}<task id="{tid}" status="{status}"{owner_attr}{blocked_attr}{progress_attr}>'
+        )
         content_line = f"{subject}: {description}" if description else subject
         parts.append(f"{pad}  {content_line}")
         if last_note:
@@ -812,7 +936,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         parts.append(f"{pad}</task>")
         return "\n".join(parts)
 
-    async def task_update(  # noqa: PLR0911
+    async def task_update(  # noqa: PLR0911, PLR0915
         self,
         ctx: RunContext[Any],
         task_id: Annotated[str, Field(description="ID of the task to update")],
@@ -821,13 +945,37 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             Field(description='New status (e.g. "in_progress", "completed"). Empty = no change'),
         ] = "",
         owner: Annotated[str, Field(description="New owner name. Empty = no change")] = "",
-        note: Annotated[
+        technical_note: Annotated[
             str,
             Field(
-                description="Optional update note describing what was done "
-                "or what changed. Appended to the task's update log"
+                description="Optional technical note for the task audit trail. "
+                "NOT for communication — use send_message for that. "
+                "Appended to the task's update log"
             ),
         ] = "",
+        handoff_to: Annotated[
+            str | None,
+            Field(
+                description="When setting status to 'completed', optionally "
+                "hand off to another member. Sends them a notification with "
+                "the task context and any blackboard keys you've written to"
+            ),
+        ] = None,
+        handoff_context_keys: Annotated[
+            list[str] | None,
+            Field(
+                description="Blackboard keys to include in the handoff "
+                "notification so the receiver knows where to find context"
+            ),
+        ] = None,
+        progress_current: Annotated[
+            int | None,
+            Field(description="Current progress value. Must be <= progress_total"),
+        ] = None,
+        progress_total: Annotated[
+            int | None,
+            Field(description="Total progress value (denominator)"),
+        ] = None,
     ) -> ToolReturn:
         """Update a task's status or owner on the shared task board.
 
@@ -851,14 +999,50 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             updates["status"] = status
         if owner:
             updates["owner"] = owner
-        if note:
-            updates["last_note"] = note
+        if technical_note:
+            updates["last_note"] = technical_note
             updates["updated_at"] = datetime.datetime.now(datetime.UTC).isoformat()
             updates["updated_by"] = agent_ctx.session.metadata.get(
                 "team_member_name",
                 self._agent_name,
             )
-        if not updates:
+
+        # --- Progress tracking validation (tasks 42-45) ---
+        if progress_current is not None and progress_current < 0:
+            return ToolReturn(
+                return_value=f"progress_current must be non-negative, got {progress_current}"
+            )
+        if progress_total is not None and progress_total < 0:
+            return ToolReturn(
+                return_value=f"progress_total must be non-negative, got {progress_total}"
+            )
+        if (
+            progress_current is not None
+            and progress_total is not None
+            and progress_current > progress_total
+        ):
+            return ToolReturn(
+                return_value=(
+                    f"progress_current ({progress_current}) must be <= "
+                    f"progress_total ({progress_total})"
+                )
+            )
+
+        # Auto-complete: when status="completed" and progress_total is
+        # already set on the task but progress_current is not explicitly
+        # provided in this call, auto-set progress_current = progress_total.
+        existing_task = team_state.get_task(team_id, task_id)
+        if existing_task is None:
+            return ToolReturn(return_value=f"Task not found: {task_id}")
+        existing_progress_total: int | None = existing_task.get("progress_total")
+        if (
+            status == "completed"
+            and progress_current is None
+            and existing_progress_total is not None
+        ):
+            progress_current = existing_progress_total
+
+        if not updates and progress_current is None and progress_total is None:
             return ToolReturn(return_value="No updates specified")
 
         current_member: str = agent_ctx.session.metadata.get(
@@ -869,19 +1053,24 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         # Permission check: lead bypasses, members need ownership or unclaimed.
         role: str = agent_ctx.session.metadata.get("team_role", "")
         if role != "lead":
-            existing = team_state.get_task(team_id, task_id)
-            if existing is None:
-                return ToolReturn(return_value=f"Task not found: {task_id}")
-            current_owner: str = existing.get("owner", "")
+            current_owner: str = existing_task.get("owner", "")
             if current_owner and current_owner != current_member:
                 return ToolReturn(
                     return_value=(
-                        "Permission denied: you can only update tasks you own or unclaimed tasks"
+                        f"Task {task_id} is owned by '{current_owner}'. "
+                        f"Use send_message(to='{current_owner}', ...) to "
+                        f"coordinate, or ask the lead to reassign."
                     )
                 )
 
         try:
-            updated = team_state.update_task(team_id, task_id, updates)
+            updated = team_state.update_task(
+                team_id,
+                task_id,
+                updates,
+                progress_current=progress_current,
+                progress_total=progress_total,
+            )
         except (FileNotFoundError, OSError):
             return ToolReturn(return_value=f"Task not found: {task_id}")
         tid = updated.get("task_id", "?")
@@ -890,6 +1079,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         subject = updated.get("subject", "")
         description = updated.get("description", "")
         last_note = updated.get("last_note", "")
+
+        # --- Handoff guard: only triggers when status == "completed" ---
+        handoff_messages: list[str] = []
+        if handoff_to is not None and status != "completed":
+            handoff_messages.append(
+                f"Warning: handoff_to='{handoff_to}' ignored — "
+                "handoff only applies when status='completed'"
+            )
 
         # --- Push notifications for task changes ---
         # 1. Notify new owner when a task is assigned (skip if already completed).
@@ -907,30 +1104,83 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             for t in all_tasks:
                 if tid in t.get("blocked_by", []) and t.get("is_unblocked"):
                     downstream_owner: str = t.get("owner", "")
-                    if downstream_owner and downstream_owner != current_member:
-                        downstream_subject = t.get("subject", "?")
-                        downstream_id = t.get("task_id", "?")
-                        notif_body = (
-                            f"Task unblocked:\n"
-                            f"- [{downstream_id}] {downstream_subject}\n"
-                            f"Dependency '{subject}' ({tid}) is now complete.\n"
-                            f"Use task_list to see details."
-                        )
+                    if not downstream_owner:
+                        continue
+                    # Skip self-notification: if the dependent task is
+                    # owned by the same member who completed the dependency.
+                    if downstream_owner == current_member:
+                        continue
+                    downstream_subject = t.get("subject", "?")
+                    downstream_id = t.get("task_id", "?")
+                    dep_notif_body = (
+                        f'<team-message type="dependency_resolved">\n'
+                        f"Completed task '{subject}' (id={tid}) was blocking "
+                        f"your task '{downstream_subject}' (id={downstream_id}).\n"
+                        f"The dependency is now resolved — your task is unblocked.\n"
+                        f"Use task_list to see details.\n"
+                        f"</team-message>"
+                    )
+                    await self._notify_member(
+                        agent_ctx,
+                        team_id,
+                        downstream_owner,
+                        dep_notif_body,
+                    )
+
+        # --- Handoff notification (tasks 20-26) ---
+        if handoff_to is not None and status == "completed":
+            # Look up the member in team state.
+            from agentpool.capabilities.file_team_state import FileTeamState
+
+            handoff_state_path = team_state._state_path(team_id)
+            if handoff_state_path.exists():
+                handoff_state: dict[str, Any] = FileTeamState._read_json(
+                    handoff_state_path,
+                )
+                handoff_members: dict[str, dict[str, Any]] = handoff_state.get(
+                    "members",
+                    {},
+                )
+                if handoff_to in handoff_members:
+                    keys_list = ""
+                    if handoff_context_keys:
+                        keys_list = ", ".join(handoff_context_keys)
+                    tech_note_line = ""
+                    if technical_note:
+                        tech_note_line = f"Technical note: {technical_note}\n"
+                    handoff_body = (
+                        f'<team-message from="{current_member}" type="handoff">\n'
+                        f'Task "{subject}" (id={tid}) has been completed and '
+                        f"handed off to you.\n"
+                        f"Context is available in blackboard keys: {keys_list}\n"
+                        f"{tech_note_line}"
+                        f"Please review and continue the work.\n"
+                        f"</team-message>"
+                    )
+                    try:
                         await self._notify_member(
                             agent_ctx,
                             team_id,
-                            downstream_owner,
-                            notif_body,
+                            handoff_to,
+                            handoff_body,
                         )
+                        handoff_messages.append(f"handoff notification sent to {handoff_to}")
+                    except Exception as exc:  # noqa: BLE001
+                        handoff_messages.append(f"handoff notification delivery failed: {exc}")
+                else:
+                    handoff_messages.append(f"handoff failed: member '{handoff_to}' not found")
+            else:
+                handoff_messages.append("handoff failed: team state not found")
 
         owner_attr = f' owner="{owner}"' if owner else ""
         content = f"{subject}: {description}" if description else subject
         note_attr = f"\n{last_note}" if last_note else ""
-        return ToolReturn(
-            return_value=(
-                f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}{note_attr}\n</task>'
-            )
-        )
+        result_parts = [
+            f'<task id="{tid}" status="{status}"{owner_attr}>\n{content}{note_attr}\n</task>'
+        ]
+        if handoff_messages:
+            result_parts.extend(handoff_messages)
+        return ToolReturn(return_value="\n".join(result_parts))
 
     async def task_get(
         self,
@@ -1486,6 +1736,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         created_sessions: list[str] = []
         try:
             for member in members:
+                member_instructions: str = member.get("instructions", "")
                 member_session_id = await self._create_member_session(
                     agent_ctx,
                     member["agent"],
@@ -1494,6 +1745,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     team_id=team_id,
                     team_role="member",
                     team_member_name=member["name"],
+                    team_member_instructions=member_instructions,
                 )
                 created_sessions.append(member_session_id)
                 team_state.register_member(
@@ -1528,7 +1780,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     full_prompt += (
                         f"\n\n## Task\n{prompt}"
                         "\n\nRemember to report progress regularly using "
-                        '`task_update(note="...")`.'
+                        '`task_update(technical_note="...")`.'
                     )
                 await session_pool.send_message(
                     member_session_id,
@@ -1812,6 +2064,13 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "auto-broadcast to existing members"
             ),
         ] = "",
+        instructions: Annotated[
+            str,
+            Field(
+                description="Optional per-member instructions injected into "
+                "the member's system prompt"
+            ),
+        ] = "",
     ) -> ToolReturn:
         """Add a new member to an existing team (lead-only).
 
@@ -1880,6 +2139,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 team_id=team_id,
                 team_role="member",
                 team_member_name=name,
+                team_member_instructions=instructions,
             )
         except Exception as exc:  # noqa: BLE001
             return ToolReturn(return_value=f"Failed to create member session: {exc}")
@@ -1926,7 +2186,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             initial_prompt += (
                 f"\n\n## Task\n{prompt}"
                 "\n\nRemember to report progress regularly using "
-                '`task_update(note="...")`.'
+                '`task_update(technical_note="...")`.'
             )
         await session_pool.send_message(
             member_session_id,
@@ -2210,6 +2470,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             "delete_blackboard",
             "shutdown_request",
             "team_add_member",
+            "task_create_batch",
         },
     )
 
@@ -2415,6 +2676,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 '- Broadcast (`to="*"`) is not available to you — send '
                 "individual messages to each member instead.\n"
             )
+
+        # Per-member instructions injection (## Your Assignment).
+        instructions_text: str = self._session_metadata.get(
+            "team_member_instructions",
+            "",
+        )
+        if instructions_text:
+            base += f"\n\n## Your Assignment\n\n{instructions_text}"
 
         # Append eligible agent names + descriptions so the LLM knows
         # which agents can be used as team members in team_create.
