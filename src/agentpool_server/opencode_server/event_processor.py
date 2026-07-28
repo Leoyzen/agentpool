@@ -1051,7 +1051,7 @@ class EventProcessor:
         content: str | list[Any],
         timestamp: float,
         meta: Any = None,
-        source: str = "protocol",
+        source: str = "internal",
     ) -> AsyncIterator[Event]:
         """Process a UserMessageInsertedEvent into OpenCode SSE events.
 
@@ -1064,16 +1064,14 @@ class EventProcessor:
         When ``meta`` is ``None``, falls back to text-only ``content`` →
         ``TextPart``.
 
-        For ``source="protocol"`` messages (from REST handler), only
-        ``MessageUpdatedEvent`` is yielded — parts come from the TUI's
-        ``sync.session.sync()`` which loads from DB. Sending
-        ``PartUpdatedEvent`` with original part IDs would conflict with
-        the DB-reconstructed parts (which have different IDs from
-        ``chat_message_to_opencode``), causing duplicate text rendering.
+        For ``source="internal"`` messages (fire-and-forget from
+        ``steer()``/``followup()``), both ``MessageUpdatedEvent`` and
+        ``PartUpdatedEvent`` are yielded because there is no ``sync()``
+        to load parts from DB.
 
-        For internal sources (``"background_task"``, ``"internal"``),
-        both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
-        because there is no ``sync()`` to load parts from DB.
+        For ``source="enqueued"`` messages (from
+        ``EnqueuedMessagesEvent`` mapping), both events are also yielded
+        — these arrive at processing time and trigger steer split.
 
         Dedup: If ``message_id`` is already in ``ctx.displayed_message_ids``,
         the event is skipped. This prevents duplicate user message display
@@ -1087,8 +1085,9 @@ class EventProcessor:
             timestamp: Wall-clock time the event was created (epoch seconds).
             meta: Optional protocol-specific metadata carrying serialized
                 Part data for rich user message reconstruction.
-            source: Where the message originated — ``"protocol"``,
-                ``"background_task"``, or ``"internal"``.
+            source: Where the message originated — ``"enqueued"``
+                (from EnqueuedMessagesEvent mapping) or ``"internal"``
+                (fire-and-forget emission).
 
         Yields:
             ``MessageUpdatedEvent`` for the user message, followed by

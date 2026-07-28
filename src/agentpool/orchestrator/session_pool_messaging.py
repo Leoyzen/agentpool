@@ -212,7 +212,7 @@ class SessionPoolMessagingMixin:
                 uses it to reconstruct the full user message (e.g. OpenCode
                 parts, ACP content blocks) instead of falling back to
                 text-only content.
-            source: Originator of the message — ``"protocol"`` (default)
+            source: Originator of the message — ``"internal"`` (default)
                 for protocol handler requests, ``"team"`` for team-mode
                 coordination messages. Passed through to
                 ``UserMessageInsertedEvent.source`` so protocol frontends

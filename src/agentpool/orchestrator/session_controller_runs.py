@@ -516,8 +516,9 @@ class SessionControllerRunsMixin:
                 and priority.
             meta: Optional protocol-specific metadata carried through to
                 ``UserMessageInsertedEvent`` for rich user message display.
-            source: Originator of the message — ``"protocol"`` (default)
-                for protocol handler requests, ``"team"`` for team-mode
+            source: Originator of the message — ``"internal"`` (default)
+                for all message sources including protocol handler
+                requests and team-mode messages.
                 coordination messages. Passed to
                 ``UserMessageInsertedEvent.source``.
 
