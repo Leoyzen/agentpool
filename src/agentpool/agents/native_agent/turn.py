@@ -551,6 +551,8 @@ class NativeTurn(HookAwareTurn, Turn):
                 # (Talk stats, storage, ACP event converter) can track token usage.
                 cost_info: TokenCost | None = None
                 request_usage: RequestUsage | None = None
+                response_model_name: str | None = None
+                response_provider_name: str | None = None
                 if agent_run is not None:
                     try:
                         run_usage = agent_run.usage
@@ -558,12 +560,18 @@ class NativeTurn(HookAwareTurn, Turn):
                             usage=run_usage,
                             model=self._agent.model_name or "",
                         )
-                        # Extract RequestUsage from the last ModelResponse in new_messages.
-                        # agent_run.usage is RunUsage (cumulative), but ChatMessage.usage
-                        # expects RequestUsage (per-request) for ACP/OpenCode converters.
+                        # Extract RequestUsage and model info from the last
+                        # ModelResponse in new_messages. agent_run.usage is
+                        # RunUsage (cumulative), but ChatMessage.usage expects
+                        # RequestUsage (per-request) for ACP/OpenCode converters.
+                        # model_name/provider_name are needed by the OpenCode
+                        # event processor to resolve variant names for TUI
+                        # context-length display.
                         for msg in reversed(new_messages):
                             if isinstance(msg, ModelResponse):
                                 request_usage = msg.usage
+                                response_model_name = msg.model_name
+                                response_provider_name = msg.provider_name
                                 break
                     except Exception:
                         logger.debug("Failed to extract usage from agent run", exc_info=True)
@@ -579,6 +587,8 @@ class NativeTurn(HookAwareTurn, Turn):
                     usage=request_usage or RequestUsage(),
                     response_time=time.perf_counter() - self._run_ctx.start_time,
                     messages=new_messages if agent_run is not None else [],
+                    model_name=response_model_name,
+                    provider_name=response_provider_name,
                 )
 
                 # Belt-and-suspenders: if cancelled during execution (e.g.

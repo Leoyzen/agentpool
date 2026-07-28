@@ -89,6 +89,7 @@ def adapter_context() -> EventProcessorContext:
     state.ensure_session = Mock()
     state.storage = Mock()
     state.storage.log_message = Mock()
+    state.model_variants = {}
 
     return EventProcessorContext(
         session_id=session_id,
@@ -794,6 +795,7 @@ def event_context():
     state.ensure_session = Mock()
     state.storage = Mock()
     state.storage.log_message = Mock()
+    state.model_variants = {}
 
     return EventProcessorContext(
         session_id=session_id,

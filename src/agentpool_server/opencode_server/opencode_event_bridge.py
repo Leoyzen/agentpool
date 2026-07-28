@@ -179,7 +179,21 @@ class OpenCodeEventBridgeMixin:
             # created via create_child_session() never go through that path.
             if session_state.agent is not None:
                 agent_model_name = cast("BaseAgent[Any, Any]", session_state.agent).model_name
-                if isinstance(agent_model_name, str) and ":" in agent_model_name:
+                model_variants = self.server_state.model_variants
+                from agentpool_server.shared.model_utils import (
+                    _extract_provider,
+                    _find_variant_name,
+                )
+
+                variant_name = (
+                    _find_variant_name(model_variants, agent_model_name)
+                    if agent_model_name is not None
+                    else None
+                )
+                if variant_name:
+                    config = model_variants[variant_name]
+                    model_id, provider_id = variant_name, _extract_provider(config)
+                elif isinstance(agent_model_name, str) and ":" in agent_model_name:
                     provider, model = agent_model_name.split(":", 1)
                     model_id, provider_id = model, provider
         pending_meta = self._pending_message_metadata.pop(session_id, None)

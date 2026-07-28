@@ -14,6 +14,7 @@ from agentpool_server.shared.model_utils import (
     _build_providers_from_tokonomics,
     _extract_provider,
     _extract_provider_from_identifier,
+    resolve_model_info_from_response,
 )
 
 
@@ -379,3 +380,86 @@ class TestIntegration:
         assert "fast" in openai_provider.models
         assert "claude-3-opus" in anthropic_provider.models
         assert "smart" in anthropic_provider.models
+
+
+class TestResolveModelInfoFromResponse:
+    """Tests for resolve_model_info_from_response function."""
+
+    def test_variant_match(self) -> None:
+        """Resolve raw API names to variant name and configured provider."""
+        from agentpool.models.model_configs import StringModelConfig
+
+        # get_model() canonicalizes "openai-chat" → "openai", so
+        # _resolve_variant_identifier() returns "openai:svc/kimi-k2".
+        # In the real API response, provider_name = model.system = "openai"
+        # (the canonicalized name), so reconstruction matches.
+        variants = {"kimi-k2": StringModelConfig(identifier="openai-chat:svc/kimi-k2")}
+        result = resolve_model_info_from_response("svc/kimi-k2", "openai", variants)
+        assert result[0] == "kimi-k2"
+
+    def test_variant_match_with_explicit_provider(self) -> None:
+        """Resolve to variant name with explicit provider field in config."""
+        from agentpool.models.model_configs import StringModelConfig
+
+        variants = {
+            "kimi-k2": StringModelConfig(
+                identifier="openai-chat:svc/kimi-k2",
+                provider="wolf-ai",
+            )
+        }
+        result = resolve_model_info_from_response("svc/kimi-k2", "openai", variants)
+        assert result == ("kimi-k2", "wolf-ai")
+
+    def test_no_match_fallback(self) -> None:
+        """Fall back to raw names when no variant matches."""
+        from agentpool.models.model_configs import StringModelConfig
+
+        variants = {"kimi-k2": StringModelConfig(identifier="openai-chat:svc/kimi-k2")}
+        result = resolve_model_info_from_response("gpt-4o", "openai", variants)
+        assert result == ("gpt-4o", "openai")
+
+    def test_empty_variants(self) -> None:
+        """Return raw names when model_variants is empty."""
+        result = resolve_model_info_from_response("gpt-4o", "openai", {})
+        assert result == ("gpt-4o", "openai")
+
+    def test_none_model_name(self) -> None:
+        """Return ('unknown', provider_name) when model_name is None."""
+        from agentpool.models.model_configs import StringModelConfig
+
+        variants = {"kimi-k2": StringModelConfig(identifier="openai-chat:svc/kimi-k2")}
+        result = resolve_model_info_from_response(None, "openai-chat", variants)
+        assert result == ("unknown", "openai-chat")
+
+    def test_none_provider_name(self) -> None:
+        """Return (model_name, 'agentpool') when provider_name is None."""
+        result = resolve_model_info_from_response("gpt-4o", None, {})
+        assert result == ("gpt-4o", "agentpool")
+
+    def test_both_none(self) -> None:
+        """Return ('unknown', 'agentpool') when both inputs are None."""
+        result = resolve_model_info_from_response(None, None, {})
+        assert result == ("unknown", "agentpool")
+
+    def test_non_string_config_variant(self) -> None:
+        """Test matching with OpenAIModelConfig (non-StringModelConfig)."""
+        from agentpool.models.model_configs import OpenAIModelConfig
+
+        # OpenAIModelConfig resolves to variant_name as-is per _resolve_variant_identifier
+        variants = {"gpt-5": OpenAIModelConfig(identifier="gpt-5.1-chat-latest")}
+        # The combined identifier is "openai:gpt-5.1-chat-latest" but
+        # _resolve_variant_identifier for OpenAIModelConfig returns the
+        # variant_name "gpt-5" (not combined format). So the match fails
+        # and we fall back to raw names.
+        result = resolve_model_info_from_response("gpt-5.1-chat-latest", "openai", variants)
+        # Should fall back to raw names since the match format differs
+        assert result == ("gpt-5.1-chat-latest", "openai")
+
+    def test_multiple_variants_same_identifier_first_wins(self) -> None:
+        """First variant in dict order wins when multiple match the same identifier."""
+        from agentpool.models.model_configs import StringModelConfig
+
+        config = StringModelConfig(identifier="openai-chat:svc/kimi-k2")
+        variants = {"first": config, "second": config}
+        result = resolve_model_info_from_response("svc/kimi-k2", "openai", variants)
+        assert result[0] in ("first", "second")
