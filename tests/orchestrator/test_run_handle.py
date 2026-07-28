@@ -183,11 +183,12 @@ async def test_steer_while_running_with_agent_run() -> None:
 
 @pytest.mark.unit
 async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
-    """steer() with active agent_run publishes UserMessageInsertedEvent to EventBus.
+    """steer() with active agent_run skips fire-and-forget emission.
 
-    Given: A RunHandle with a real EventBus and active agent_run.
-    When: steer() is called with emit_user_message=True (default).
-    Then: UserMessageInsertedEvent is published to EventBus with delivery="steer".
+    When ``_enqueued_messages_available=True`` and ``active_agent_run`` is
+    set, the display event comes from ``handle_enqueued_messages()`` with
+    ``source="enqueued"`` instead of the fire-and-forget
+    ``_schedule_user_message_emission()`` path.
     """
     from agentpool.agents.events.events import UserMessageInsertedEvent
 
@@ -211,12 +212,13 @@ async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
         envelope = queue.get_nowait()
         received_events.append(envelope.event)
 
-    # Verify UserMessageInsertedEvent was published
+    # Emission is SKIPPED when EnqueuedMessagesEvent is available and
+    # active_agent_run is set — the display event comes from
+    # handle_enqueued_messages() instead.
     user_msg_events = [e for e in received_events if isinstance(e, UserMessageInsertedEvent)]
-    assert len(user_msg_events) == 1
-    assert user_msg_events[0].delivery == "steer"
-    assert user_msg_events[0].source == "internal"
-    assert user_msg_events[0].content == "inject me"
+    assert len(user_msg_events) == 0
+    # Verify the actual enqueue happened.
+    mock_agent_run.enqueue.assert_called_once_with("inject me", priority="asap")
 
 
 @pytest.mark.unit

@@ -46,6 +46,17 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+# Check if EnqueuedMessagesEvent is available in the installed pydantic-ai version.
+# When available, the stream itself emits display events for enqueued messages,
+# making the manual _schedule_user_message_emission() call redundant for
+# steer/followup when an active_agent_run exists.
+try:
+    from pydantic_ai.messages import EnqueuedMessagesEvent  # noqa: F401
+
+    ENQUEUED_MESSAGES_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    ENQUEUED_MESSAGES_AVAILABLE = False
+
 
 def _has_invalid_json_args(part: Any) -> bool:
     """Check if a ToolCallPart has invalid JSON string arguments.
@@ -253,6 +264,16 @@ class RunHandle:
     """OTel Context containing ``_run_span``. Attached in ``_consume_run`` so
     all spans within the run (turn.native, tools, notifications) are children
     of ``run.message`` and share the same trace_id."""
+    _enqueued_messages_available: bool = field(default=False)
+    """Whether ``EnqueuedMessagesEvent`` is available in the installed
+    pydantic-ai version. When ``True`` and ``active_agent_run`` is not
+    ``None``, steer/followup skip ``_schedule_user_message_emission()``
+    because the stream itself emits the display event via
+    ``EnqueuedMessagesEvent``."""
+
+    def __post_init__(self) -> None:
+        """Initialize computed fields after dataclass construction."""
+        self._enqueued_messages_available = ENQUEUED_MESSAGES_AVAILABLE
 
     @property
     def is_running(self) -> bool:
@@ -684,6 +705,9 @@ class RunHandle:
 
         agent_run = self.active_agent_run
         if agent_run is not None:
+            # Append message_id to FIFO queue BEFORE enqueue so
+            # handle_enqueued_messages() can reuse the same ID.
+            self.run_ctx._pending_enqueue_message_ids.append(fb.message_id)
             if fb.content_blocks is not None:
                 agent_run.enqueue(*fb.content_blocks, priority="asap")
             else:
@@ -703,7 +727,13 @@ class RunHandle:
             self.run_ctx.queued_steer_messages.append(fb.content)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND there is an active
+        # agent_run, skip the fire-and-forget emission — the display event
+        # will come from handle_enqueued_messages() with source="enqueued".
+        # Otherwise, emit with source="internal" as a fallback display.
+        if emit_user_message and not (
+            self._enqueued_messages_available and self.active_agent_run is not None
+        ):
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
@@ -772,10 +802,32 @@ class RunHandle:
         session = self.session
         if session is None:
             return None
-        session.prompt_queue.put_nowait(message)
+        agent_run = self.active_agent_run
+        if agent_run is not None:
+            # Enqueue directly to the active agent_run so
+            # PendingMessageDrainCapability fires EnqueuedMessagesEvent
+            # for display. The prompt will be drained as a "when_idle"
+            # message after the current node finishes.
+            # Append message_id to FIFO queue BEFORE enqueue so
+            # handle_enqueued_messages() can reuse the same ID.
+            self.run_ctx._pending_enqueue_message_ids.append(message_id)
+            if isinstance(message, list):
+                agent_run.enqueue(*message, priority="when_idle")
+            else:
+                agent_run.enqueue(message, priority="when_idle")
+        else:
+            # No active agent_run — fall back to session.prompt_queue.
+            # The next RunHandle's _consume_run() will drain this queue.
+            session.prompt_queue.put_nowait(message)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND there is an active
+        # agent_run, skip the fire-and-forget emission — the display event
+        # will come from handle_enqueued_messages() with source="enqueued".
+        # Otherwise, emit with source="internal" as a fallback display.
+        if emit_user_message and not (
+            self._enqueued_messages_available and self.active_agent_run is not None
+        ):
             self._schedule_user_message_emission(message, "followup", message_id=message_id)
 
         return message_id
@@ -817,7 +869,7 @@ class RunHandle:
         self,
         content: str | list[Any],
         delivery: Literal["initial", "steer", "followup"],
-        source: Literal["protocol", "background_task", "internal"],
+        source: Literal["internal"],
         *,
         message_id: str | None = None,
     ) -> None:
@@ -831,8 +883,8 @@ class RunHandle:
             content: The message content that was inserted.
             delivery: Delivery mode — ``"initial"``, ``"steer"``, or
                 ``"followup"``.
-            source: Originator — ``"protocol"``, ``"background_task"``,
-                or ``"internal"``.
+            source: Originator — ``"internal"`` for fire-and-forget
+                fallback display events.
             message_id: Optional message ID for dedup correlation. If
                 ``None``, a new UUID is generated.
         """

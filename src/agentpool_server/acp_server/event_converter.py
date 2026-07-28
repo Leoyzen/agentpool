@@ -266,6 +266,17 @@ class ACPEventConverter:
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
 
+    _displayed_message_ids: set[str] = field(default_factory=set, init=False)
+    """Per-session set of message_ids already displayed as UserMessageChunk.
+
+    When ``steer()``/``followup()`` emits a fire-and-forget
+    ``UserMessageInsertedEvent`` AND ``EnqueuedMessagesEvent`` also
+    produces one with the same ``message_id`` (reused via
+    ``_pending_enqueue_message_ids``), the converter skips the second
+    event. This set is NOT cleared in ``reset()`` — it persists for the
+    entire session lifetime.
+    """
+
     def _format_raw_input(self, raw_input: dict[str, Any] | None) -> Any:
         """Format raw_input for ACP session updates based on raw_input_mode.
 
@@ -554,6 +565,12 @@ class ACPEventConverter:
                 content=event_content,
                 meta=event_meta,
             ):
+                # Dedup: skip if this message_id was already displayed.
+                # This happens when both the fire-and-forget emission
+                # from steer()/followup() and the EnqueuedMessagesEvent
+                # produce a UserMessageInsertedEvent with the same ID.
+                if mid and mid in self._displayed_message_ids:
+                    return
                 # Use meta.content_blocks if available, otherwise fall back
                 # to text-only content.
                 if isinstance(event_meta, ACPUserMessageMeta):
@@ -579,6 +596,9 @@ class ACPEventConverter:
                             content=block,
                             message_id=mid or None,
                         )
+                # Mark this message_id as displayed for dedup.
+                if mid:
+                    self._displayed_message_ids.add(mid)
 
             # Thinking/reasoning
             case (
