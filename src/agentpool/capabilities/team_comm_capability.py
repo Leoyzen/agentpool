@@ -353,7 +353,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Resolve display_name: prefer team_member_name (the member's display
         # name within the team), fall back to manifest config display_name.
-        team_member_name: str | None = metadata.get("team_member_name")  # type: ignore[assignment]
+        team_member_name: str | None = metadata.get("team_member_name")
         child_display_name: str | None = None
         if team_member_name is not None and team_member_name != agent_name:
             child_display_name = team_member_name
@@ -369,10 +369,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         if event_bus is not None:
             # Build metadata with team context for protocol display enrichment.
             spawn_metadata: dict[str, Any] = {"prompt": ""}
-            team_id_meta: str | None = metadata.get("team_id")  # type: ignore[assignment]
-            team_role_meta: str | None = metadata.get("team_role")  # type: ignore[assignment]
-            team_member_name_meta: str | None = metadata.get("team_member_name")  # type: ignore[assignment]
-            team_name_meta: str | None = metadata.get("team_name")  # type: ignore[assignment]
+            team_id_meta: str | None = metadata.get("team_id")
+            team_role_meta: str | None = metadata.get("team_role")
+            team_member_name_meta: str | None = metadata.get("team_member_name")
+            team_name_meta: str | None = metadata.get("team_name")
             if team_id_meta is not None:
                 spawn_metadata["team_id"] = team_id_meta
             if team_name_meta is not None:

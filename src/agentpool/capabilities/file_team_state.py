@@ -742,7 +742,10 @@ class FileTeamState:
         bb_dir = self._blackboard_dir(team_id)
         if not bb_dir.exists():
             return []
-        keys = [f.stem for f in bb_dir.glob("*.json")]
+        bb_resolved = bb_dir.resolve()
+        keys = [
+            str(f.relative_to(bb_resolved).with_suffix("")) for f in bb_resolved.rglob("*.json")
+        ]
         return sorted(keys)
 
     def delete_blackboard(self, team_id: str, key: str) -> None:

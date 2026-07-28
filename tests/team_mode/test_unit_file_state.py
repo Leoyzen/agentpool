@@ -263,6 +263,27 @@ def test_list_blackboard_returns_all_keys(initialized_team: FileTeamState) -> No
     assert keys == ["alpha", "mid_key", "zebra"]
 
 
+def test_list_blackboard_returns_namespace_keys(initialized_team: FileTeamState) -> None:
+    """Given keys with '/' separators (namespace keys), list_blackboard returns them all.
+
+    Keys like ``findings/artisan`` are stored as nested files
+    (``blackboard/findings/artisan.json``).  ``list_blackboard`` must
+    use ``rglob`` to discover them, not just top-level ``glob``.
+    """
+    initialized_team.write_blackboard("team-1", "principles", {"v": 1})
+    initialized_team.write_blackboard("team-1", "findings/artisan", {"v": 2})
+    initialized_team.write_blackboard("team-1", "findings/curator", {"v": 3})
+    initialized_team.write_blackboard("team-1", "problems/critic", {"v": 4})
+
+    keys = initialized_team.list_blackboard("team-1")
+    assert keys == [
+        "findings/artisan",
+        "findings/curator",
+        "principles",
+        "problems/critic",
+    ]
+
+
 # ------------------------------------------------------------------
 # 12. delete_blackboard removes key
 # ------------------------------------------------------------------
