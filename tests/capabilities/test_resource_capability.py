@@ -616,3 +616,336 @@ def test_extract_skill_name() -> None:
     assert ResourceCapability._extract_skill_name("skill://my-skill") == "my-skill"
     assert ResourceCapability._extract_skill_name("skill://a/b/c") == "a"
     assert ResourceCapability._extract_skill_name("skill://") == ""
+
+
+# =============================================================================
+# Pagination tests
+# =============================================================================
+
+
+async def test_list_resources_pagination_default_limit() -> None:
+    """list_resources truncates at default limit=50 and shows 'more' message."""
+    entries = [ResourceEntry(uri=f"mcp://server/res{i}", name=f"res{i}") for i in range(60)]
+    ra = FakeResourceAccess(resources=entries)
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx)
+
+    # 2 header lines + 50 data rows + 1 "more" message
+    lines = result.split("\n")
+    data_lines = [line for line in lines if "mcp://server/res" in line]
+    assert len(data_lines) == 50
+    assert "10 more resources" in result
+    assert "offset=50" in result
+
+
+async def test_list_resources_pagination_custom_limit() -> None:
+    """list_resources respects custom limit parameter."""
+    entries = [ResourceEntry(uri=f"mcp://server/res{i}", name=f"res{i}") for i in range(30)]
+    ra = FakeResourceAccess(resources=entries)
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx, limit=10)
+
+    data_lines = [line for line in result.split("\n") if "mcp://server/res" in line]
+    assert len(data_lines) == 10
+    assert "20 more resources" in result
+    assert "offset=10" in result
+
+
+async def test_list_resources_pagination_offset() -> None:
+    """list_resources respects offset parameter."""
+    entries = [ResourceEntry(uri=f"mcp://server/res{i}", name=f"res{i}") for i in range(30)]
+    ra = FakeResourceAccess(resources=entries)
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx, limit=10, offset=20)
+
+    data_lines = [line for line in result.split("\n") if "mcp://server/res" in line]
+    assert len(data_lines) == 10
+    assert "res20" in result
+    assert "res29" in result
+    # No "more" message since we're at the end
+    assert "more resources" not in result
+
+
+async def test_list_resources_pagination_offset_beyond_total() -> None:
+    """list_resources with offset beyond total returns empty message."""
+    entries = [ResourceEntry(uri="mcp://server/only", name="only")]
+    ra = FakeResourceAccess(resources=entries)
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx, offset=100)
+
+    assert "No resources at offset 100" in result
+    assert "Total: 1 resource" in result
+
+
+async def test_list_resource_templates_pagination() -> None:
+    """list_resource_templates truncates at default limit and shows 'more' message."""
+    templates = [
+        ResourceTemplateEntry(uri_template=f"file:///dir{i}/{{path}}", name=f"tpl{i}")
+        for i in range(60)
+    ]
+    rta = FakeResourceTemplateAccess(templates=templates)
+    registry = _make_registry_with_caps(rta)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resource_templates(ctx)
+
+    data_lines = [line for line in result.split("\n") if "tpl" in line and "Source" not in line]
+    assert len(data_lines) == 50
+    assert "10 more templates" in result
+    assert "offset=50" in result
+
+
+# =============================================================================
+# Truncation tests
+# =============================================================================
+
+
+async def test_read_resource_text_truncation() -> None:
+    """read_resource truncates text content exceeding 10,000 chars."""
+    long_text = "A" * 15_000
+    ra = FakeResourceAccess(
+        read_contents=[TextResourceContent(uri="mcp://server/big.txt", text=long_text)],
+    )
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "mcp://server/big.txt")
+
+    assert isinstance(result, ToolReturn)
+    assert "[truncated: 15000 chars total" in result.return_value
+    assert "showing first 10000" in result.return_value
+    # The return value should contain the truncated text + suffix
+    assert len(result.return_value) < len(long_text)
+
+
+async def test_read_resource_text_no_truncation_at_limit() -> None:
+    """read_resource does not truncate text at exactly 10,000 chars."""
+    text = "B" * 10_000
+    ra = FakeResourceAccess(
+        read_contents=[TextResourceContent(uri="mcp://server/exact.txt", text=text)],
+    )
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "mcp://server/exact.txt")
+
+    assert isinstance(result, ToolReturn)
+    assert "[truncated" not in result.return_value
+    assert result.return_value == text
+
+
+async def test_read_resource_skill_truncation() -> None:
+    """read_resource truncates long skill content."""
+    long_content = "C" * 12_000
+    sr = FakeSkillResource(
+        skills=[SkillEntry(name="big-skill", uri="skill://big-skill/SKILL.md")],
+        read_content=long_content,
+        exists_names={"big-skill"},
+    )
+    registry = _make_registry_with_caps(sr)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "skill://big-skill/SKILL.md")
+
+    assert isinstance(result, ToolReturn)
+    assert "[truncated: 12000 chars total" in result.return_value
+
+
+# =============================================================================
+# Completion suggestion cap tests
+# =============================================================================
+
+
+async def test_complete_resource_template_caps_suggestions() -> None:
+    """complete_resource_template caps at 100 suggestions with total count."""
+    values = [f"suggestion_{i}" for i in range(150)]
+    rta = FakeResourceTemplateAccess(
+        templates=[ResourceTemplateEntry(uri_template="file:///{path}")],
+        completion_result=CompletionResult(values=values, total=150),
+    )
+    registry = _make_registry_with_caps(rta)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.complete_resource_template(ctx, "file:///{path}", "path", "f")
+
+    # Should show first 100 suggestions
+    assert "suggestion_0" in result
+    assert "suggestion_99" in result
+    assert "suggestion_100" not in result
+    assert "150 total" in result
+    assert "showing first 100" in result
+
+
+# =============================================================================
+# Multi-provider behavior tests
+# =============================================================================
+
+
+async def test_read_resource_fallthrough_first_none_second_found() -> None:
+    """read_resource falls through to second provider when first returns None."""
+    ra_none = FakeResourceAccess(read_contents=None)
+    ra_found = FakeResourceAccess(
+        read_contents=[TextResourceContent(uri="mcp://server/file.txt", text="found!")],
+    )
+    registry = _make_registry_with_caps(ra_none, ra_found)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "mcp://server/file.txt")
+
+    assert isinstance(result, ToolReturn)
+    assert "found!" in result.return_value
+
+
+async def test_read_resource_mixed_text_and_blob() -> None:
+    """read_resource handles mixed TextResourceContent and BlobResourceContent."""
+    raw_data = b"\x89PNG\r\n\x1a\n"
+    encoded = base64.b64encode(raw_data).decode("ascii")
+    ra = FakeResourceAccess(
+        read_contents=[
+            TextResourceContent(uri="mcp://server/mixed", text="text part"),
+            BlobResourceContent(
+                uri="mcp://server/mixed",
+                mime_type="image/png",
+                blob=encoded,
+            ),
+        ],
+    )
+    registry = _make_registry_with_caps(ra)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "mcp://server/mixed")
+
+    assert isinstance(result, ToolReturn)
+    assert result.content is not None
+    assert len(result.content) == 2
+    assert isinstance(result.content[0], str)
+    assert result.content[0] == "text part"
+    assert isinstance(result.content[1], BinaryContent)
+    assert result.content[1].data == raw_data
+
+
+async def test_resource_exists_multiple_providers_first_false_second_true() -> None:
+    """resource_exists returns True if any provider has the resource."""
+    ra_no = FakeResourceAccess(exists_uris=set())
+    ra_yes = FakeResourceAccess(exists_uris={"mcp://server/file.txt"})
+    registry = _make_registry_with_caps(ra_no, ra_yes)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.resource_exists(ctx, "mcp://server/file.txt")
+
+    assert result is True
+
+
+async def test_list_resources_multiple_providers_same_type() -> None:
+    """list_resources aggregates from multiple ResourceAccess providers."""
+    ra1 = FakeResourceAccess(
+        resources=[ResourceEntry(uri="mcp://srv1/a", name="a")],
+    )
+    ra2 = FakeResourceAccess(
+        resources=[ResourceEntry(uri="mcp://srv2/b", name="b")],
+    )
+    registry = _make_registry_with_caps(ra1, ra2)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx)
+
+    assert "mcp://srv1/a" in result
+    assert "mcp://srv2/b" in result
+
+
+# =============================================================================
+# Error and edge case tests
+# =============================================================================
+
+
+async def test_resolve_agent_context_wrong_deps_type() -> None:
+    """_resolve_agent_context raises RuntimeError for non-AgentContext deps."""
+    ctx = MagicMock()
+    ctx.deps = "not an AgentContext"
+
+    cap = ResourceCapability()
+    with pytest.raises(RuntimeError, match="ResourceCapability requires AgentContext"):
+        await cap.list_resources(ctx)
+
+
+async def test_list_resources_providers_return_empty() -> None:
+    """list_resources returns 'No resources available.' when providers return empty lists."""
+    ra = FakeResourceAccess(resources=[])
+    sr = FakeSkillResource(skills=[])
+    registry = _make_registry_with_caps(ra, sr)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx)
+
+    assert result == "No resources available."
+
+
+async def test_resource_exists_skill_not_found_multiple_providers() -> None:
+    """resource_exists returns False when no skill provider has the skill."""
+    sr1 = FakeSkillResource(exists_names={"skill_a"})
+    sr2 = FakeSkillResource(exists_names={"skill_b"})
+    registry = _make_registry_with_caps(sr1, sr2)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.resource_exists(ctx, "skill://nonexistent/SKILL.md")
+
+    assert result is False
+
+
+async def test_complete_resource_template_multiple_matching_providers() -> None:
+    """complete_resource_template returns first successful provider's result."""
+    rta1 = FakeResourceTemplateAccess(
+        templates=[ResourceTemplateEntry(uri_template="file:///{path}")],
+        completion_result=CompletionResult(values=["from_first"]),
+    )
+    rta2 = FakeResourceTemplateAccess(
+        templates=[ResourceTemplateEntry(uri_template="file:///{path}")],
+        completion_result=CompletionResult(values=["from_second"]),
+    )
+    registry = _make_registry_with_caps(rta1, rta2)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.complete_resource_template(ctx, "file:///{path}", "path", "f")
+
+    assert "from_first" in result
+    assert "from_second" not in result

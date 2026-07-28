@@ -254,6 +254,11 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         total = len(rows)
         paginated = rows[offset : offset + limit]
 
+        if not paginated:
+            if offset > 0:
+                return f"No resources at offset {offset}. Total: {total} resource(s)."
+            return "No resources available."
+
         header = f"{'Source':<25} {'URI':<45} {'Name':<20} {'Description':<30} {'MIME Type':<15}"
         lines = [header, "-" * len(header)]
         lines.extend(paginated)
