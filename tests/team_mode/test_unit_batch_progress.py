@@ -364,18 +364,10 @@ def test_format_task_xml_without_progress() -> None:
 
     When: format_task_xml is called.
     Then: XML does NOT include progress attribute.
-
-    Note: format_task_xml has a bug where ``parts`` is only initialized
-    inside the progress ``if`` block.  This test uses progress values
-    set to None but exercises the function via the ``_format_task_xml``
-    static method on TeamCommCapability instead, which handles the
-    no-progress case correctly.
     """
-    from agentpool.capabilities.team_comm_capability import TeamCommCapability
+    record = TaskRecord(task_id="t1", subject="No progress task")
 
-    record = {"task_id": "t1", "subject": "No progress task", "status": "pending"}
-
-    xml = TeamCommCapability._format_task_xml(record)
+    xml = format_task_xml(record)
 
     assert "progress=" not in xml
     assert "No progress task" in xml

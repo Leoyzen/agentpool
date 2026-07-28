@@ -109,12 +109,12 @@ def format_task_xml(
     progress_attr = ""
     if task.progress_current is not None and task.progress_total is not None:
         progress_attr = f' progress="{task.progress_current}/{task.progress_total}"'
-        parts: list[str] = [
-            (
-                f'{pad}<task id="{task.task_id}" status="{task.status}" '
-                f'owner="{task.owner}"{blocked_attr}{progress_attr}>'
-            )
-        ]
+    parts: list[str] = [
+        (
+            f'{pad}<task id="{task.task_id}" status="{task.status}" '
+            f'owner="{task.owner}"{blocked_attr}{progress_attr}>'
+        )
+    ]
     content_line = f"{task.subject}: {task.description}" if task.description else task.subject
     parts.append(f"{pad}  {content_line}")
     if task.last_note:
@@ -180,6 +180,11 @@ class FileTeamState:
 
     def _locks_dir(self, team_id: str) -> Path:
         return self._blackboard_dir(team_id) / ".locks"
+
+    def _state_lock(self, team_id: str) -> FileLock:
+        """Return a file lock protecting state.json read-modify-write cycles."""
+        self._locks_dir(team_id).mkdir(parents=True, exist_ok=True)
+        return FileLock(str(self._locks_dir(team_id) / "state.lock"))
 
     # ------------------------------------------------------------------
     # Atomic write helper
@@ -261,17 +266,18 @@ class FileTeamState:
                 in the member record.  If not provided, defaults to
                 ``member_name`` for backward compatibility.
         """
-        state = self._read_json(self._state_path(team_id))
-        members: dict[str, dict[str, str]] = state["members"]
-        if member_name not in members:
-            members[member_name] = {
-                "agent": agent or member_name,
-                "session_id": "",
-            }
-        members[member_name]["session_id"] = session_id
-        if agent is not None:
-            members[member_name]["agent"] = agent
-        self._atomic_write(self._state_path(team_id), state)
+        with self._state_lock(team_id):
+            state = self._read_json(self._state_path(team_id))
+            members = state["members"]
+            if member_name not in members:
+                members[member_name] = {
+                    "agent": agent or member_name,
+                    "session_id": "",
+                }
+            members[member_name]["session_id"] = session_id
+            if agent is not None:
+                members[member_name]["agent"] = agent
+            self._atomic_write(self._state_path(team_id), state)
 
     def get_member_session_id(self, team_id: str, member_name: str) -> str | None:
         """Return the session_id for a member, or ``None`` if not registered.

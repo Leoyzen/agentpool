@@ -86,13 +86,6 @@ logger = get_logger(__name__)
 # while they are awaiting ``RunHandle.complete_event``.
 _cleanup_tasks: set[asyncio.Task[Any]] = set()
 
-# Serialize _create_member_session calls so generate_session_id() runs
-# sequentially.  Concurrent tool invocations (PydanticAI can fire multiple
-# tool calls in parallel) would otherwise let two session creations share
-# the same millisecond, producing equal time.created values even with a
-# random delay.
-_create_session_lock = asyncio.Lock()
-
 
 class TeamCommCapability(FunctionToolsetCapability[Any]):
     """Capability providing team communication protocol instructions and tools.
@@ -135,6 +128,10 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         self._agent_name = agent_name
         self._session_metadata: dict[str, Any] = session_metadata or {}
         self._agent_descriptions: dict[str, str] = agent_descriptions or {}
+        # Per-instance lock serializes _create_member_session calls within
+        # the same agent (concurrent PydanticAI tool calls share the same
+        # capability instance) without blocking other teams' agents.
+        self._create_session_lock = asyncio.Lock()
         # Register universal tools (all members can use)
         if config.enabled:
             self.register_tool(self.send_message)
@@ -333,9 +330,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             raise RuntimeError(msg)
 
         # Serialize session creation so generate_session_id() calls are
-        # sequential.  Concurrent tool invocations share the same millisecond,
-        # producing equal time.created values.
-        async with _create_session_lock:
+        # sequential within this agent.  Concurrent tool invocations share
+        # the same millisecond, producing equal time.created values.
+        async with self._create_session_lock:
             state = await session_pool.create_child_session(
                 parent_session_id=parent_session_id,
                 agent_name=agent_name,
@@ -1435,6 +1432,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             file_size = key_path.stat().st_size
             max_size = self._config.blackboard.max_size_mb * 1024 * 1024
             if file_size > max_size:
+                # Clean up the oversized file so subsequent reads return
+                # "Key not found" instead of stale oversized data.
+                key_path.unlink(missing_ok=True)
                 return ToolReturn(
                     return_value=(
                         f"Blackboard write exceeds max size "

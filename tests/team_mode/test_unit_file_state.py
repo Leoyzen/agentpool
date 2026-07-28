@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.capabilities.file_team_state import FileTeamState, start_team_cleanup_task
+from agentpool.capabilities.file_team_state import (
+    FileTeamState,
+    TaskRecord,
+    format_task_xml,
+    start_team_cleanup_task,
+)
 
 
 if TYPE_CHECKING:
@@ -718,3 +723,68 @@ def test_list_children_returns_direct_children(
 
     no_children = initialized_team.list_children("team-1", "task_nope")
     assert no_children == []
+
+
+# ------------------------------------------------------------------
+# 32. format_task_xml without progress fields does not crash
+# ------------------------------------------------------------------
+
+
+def test_format_task_xml_without_progress_does_not_crash() -> None:
+    """Given: TaskRecord with progress_current=None and progress_total=None.
+
+    When: format_task_xml is called.
+    Then: Returns valid XML without progress attribute, no UnboundLocalError.
+    """
+    record = TaskRecord(task_id="t1", subject="No progress task")
+
+    xml = format_task_xml(record)
+
+    assert "progress=" not in xml
+    assert "No progress task" in xml
+    assert "<task " in xml
+    assert "</task>" in xml
+
+
+def test_format_task_xml_without_progress_with_note() -> None:
+    """Given: TaskRecord without progress but with last_note.
+
+    When: format_task_xml is called.
+    Then: XML includes note line, no crash.
+    """
+    record = TaskRecord(task_id="t1", subject="Task", last_note="Important note")
+
+    xml = format_task_xml(record)
+
+    assert "progress=" not in xml
+    assert "note: Important note" in xml
+
+
+# ------------------------------------------------------------------
+# 33. concurrent register_member does not lose members
+# ------------------------------------------------------------------
+
+
+async def test_concurrent_register_member_preserves_all_members(
+    initialized_team: FileTeamState,
+) -> None:
+    """Given: A team with initialized state.
+
+    When: Multiple members are registered concurrently via asyncio.to_thread.
+    Then: All members appear in state.json (no lost writes).
+
+    This tests that register_member uses a file lock to protect the
+    read-modify-write cycle on state.json.
+    """
+    members = [f"member_{i}" for i in range(10)]
+
+    await asyncio.gather(
+        *(
+            asyncio.to_thread(initialized_team.register_member, "team-1", m, f"session-{m}")
+            for m in members
+        )
+    )
+
+    for m in members:
+        sid = initialized_team.get_member_session_id("team-1", m)
+        assert sid == f"session-{m}", f"Member {m} lost during concurrent registration"

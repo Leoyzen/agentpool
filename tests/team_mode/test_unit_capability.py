@@ -886,6 +886,38 @@ async def test_bounds_blackboard_max_size_exceeded(tmp_path: Any) -> None:
 
 
 @pytest.mark.unit
+async def test_bounds_blackboard_max_size_cleans_up_file(tmp_path: Any) -> None:
+    """Given: team session with max_size_mb=1 (minimum allowed).
+
+    When: write_blackboard is called with > 1MB of data.
+    Then: returns error about blackboard exceeding max size AND the
+          oversized file is deleted from disk so subsequent reads
+          return None instead of stale oversized data.
+    """
+    _init_team(str(tmp_path))
+    config = _make_enabled_config(base_dir=str(tmp_path))
+    config = config.model_copy(
+        update={"blackboard": config.blackboard.model_copy(update={"max_size_mb": 1})}
+    )
+    ctx = _make_run_context(
+        config=config,
+        base_dir=str(tmp_path),
+    )
+    cap = TeamCommCapability(config, "worker", _make_session_metadata())
+
+    # Write > 1MB of data.
+    big_value = "x" * (1024 * 1024 + 1)
+    result = await cap.write_blackboard(ctx, "big_key", big_value)
+    assert "Blackboard write exceeds max size" in result.return_value
+
+    # The oversized file must be cleaned up — reading the key should return
+    # "Key not found" (not the oversized data as a list).
+    read_result = await cap.read_blackboard(ctx, "big_key")
+    assert isinstance(read_result.return_value, str)
+    assert "not found" in read_result.return_value.lower()
+
+
+@pytest.mark.unit
 async def test_task_create_happy_path(tmp_path: Any) -> None:
     """Given: team session with initialized state.
 
@@ -1681,6 +1713,87 @@ async def test_send_message_queue_mode(tmp_path: Any) -> None:
 
 
 # ---- Config default members tests ----
+
+
+@pytest.mark.unit
+async def test_session_lock_is_per_instance_not_global(tmp_path: Any) -> None:
+    """Given: two TeamCommCapability instances (different teams/agents).
+
+    When: both call _create_member_session concurrently.
+    Then: both proceed in parallel — the session creation lock is per-instance,
+          not a global module-level lock that serializes all teams.
+    """
+    config = _make_enabled_config(base_dir=str(tmp_path))
+
+    mock_pool = MagicMock()
+
+    ctx1 = _make_run_context(
+        metadata=_make_lead_metadata(team_id="team_A"),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        session_id="lead_session_A",
+    )
+    ctx2 = _make_run_context(
+        metadata=_make_lead_metadata(team_id="team_B"),
+        session_pool=mock_pool,
+        config=config,
+        base_dir=str(tmp_path),
+        session_id="lead_session_B",
+    )
+
+    # Track concurrent in-flight create_child_session calls.
+    # Set up AFTER _make_run_context so it doesn't override our custom function.
+    in_flight = 0
+    max_in_flight = 0
+    counter_lock = asyncio.Lock()
+
+    async def track_create_child_session(**kwargs: Any) -> Any:
+        nonlocal in_flight, max_in_flight
+        async with counter_lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)  # Small delay to ensure overlap
+        async with counter_lock:
+            in_flight -= 1
+        child_state = MagicMock()
+        child_state.session_id = f"child_{kwargs.get('agent_name', 'unknown')}"
+        return child_state
+
+    mock_pool.create_child_session = track_create_child_session
+    mock_pool.event_bus = None
+    mock_pool.pool = MagicMock()
+    mock_pool.pool.manifest = MagicMock()
+    mock_pool.pool.manifest.agents = {}
+
+    cap1 = TeamCommCapability(config, "coordinator", _make_lead_metadata(team_id="team_A"))
+    cap2 = TeamCommCapability(config, "coordinator2", _make_lead_metadata(team_id="team_B"))
+
+    # Run two _create_member_session calls concurrently from different instances.
+    await asyncio.gather(
+        cap1._create_member_session(
+            ctx1.deps,
+            "worker",
+            "lead_session_A",
+            "test",
+            team_id="team_A",
+            team_member_name="worker_A",
+        ),
+        cap2._create_member_session(
+            ctx2.deps,
+            "worker",
+            "lead_session_B",
+            "test",
+            team_id="team_B",
+            team_member_name="worker_B",
+        ),
+    )
+
+    # With per-instance locks, both calls should be in-flight simultaneously.
+    assert max_in_flight == 2, (
+        f"Expected max_in_flight=2 (parallel), got {max_in_flight}. "
+        f"Session creation lock may be global instead of per-instance."
+    )
 
 
 @pytest.mark.unit
