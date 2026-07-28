@@ -1,12 +1,10 @@
-"""Unit + integration tests for AgentFactory modality capability injection.
+"""Unit + integration tests for AgentFactory modality capability resolution.
 
 Tests cover:
 - 5.5: image_output mapping to pydantic-ai Model profile
-- 5.6: conditional injection of ModalityFilterCapability
-  - Skip for fully multimodal models
-  - Auto-inject when model lacks input modalities
-  - User-config precedence over auto-injection
-  - FallbackModelConfig intersection (pessimistic)
+- 5.6: User-configured ModalityFilterCapability is populated with resolved caps
+- FallbackModelConfig intersection (pessimistic) for capability resolution
+- _model_config_names and _intersect_capabilities helpers
 """
 
 from __future__ import annotations
@@ -130,64 +128,56 @@ async def test_image_output_merges_with_existing_profile() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5.6 — Conditional injection: skip for fully multimodal
+# 5.6 — User-configured ModalityFilterCapability populated with resolved caps
 # ---------------------------------------------------------------------------
 
 
-async def test_needs_modality_filter_false_for_full_multimodal() -> None:
-    """All-True capabilities should NOT trigger modality filter."""
-    agent = Agent(name="test", model="test")
-    assert agent._needs_modality_filter(_all_true_caps()) is False
+async def test_user_config_modality_filter_populated_with_resolved_caps() -> None:
+    """When user pre-configures a ModalityFilterCapability, it should be populated.
 
-
-async def test_needs_modality_filter_true_when_image_disabled() -> None:
-    """image_input=False should trigger modality filter."""
-    agent = Agent(name="test", model="test")
-    caps = _caps(image_input=False, audio_input=True, video_input=True, document_input=True)
-    assert agent._needs_modality_filter(caps) is True
-
-
-async def test_needs_modality_filter_true_when_audio_disabled() -> None:
-    """audio_input=False should trigger modality filter."""
-    agent = Agent(name="test", model="test")
-    caps = _caps(image_input=True, audio_input=False, video_input=True, document_input=True)
-    assert agent._needs_modality_filter(caps) is True
-
-
-async def test_needs_modality_filter_false_when_all_none() -> None:
-    """All-None capabilities (unknown) should NOT trigger filter (no explicit False)."""
-    agent = Agent(name="test", model="test")
-    caps = ModelCapabilities()
-    assert agent._needs_modality_filter(caps) is False
-
-
-# ---------------------------------------------------------------------------
-# 5.6 — Auto-inject ModalityFilterCapability in get_agentlet
-# ---------------------------------------------------------------------------
-
-
-async def test_auto_inject_modality_filter_for_text_only_model() -> None:
-    """get_agentlet should auto-inject ModalityFilterCapability when model lacks inputs."""
+    The user must explicitly add a ModalityFilterCapability to the agent's
+    capabilities list. The factory populates it with resolved capabilities
+    but does NOT auto-inject one if the user hasn't configured it.
+    """
+    user_filter = ModalityFilterCapability(
+        capabilities=_caps(image_input=False),
+        image_strategy="drop",
+    )
     config = NativeAgentConfig(
         model=_TestModelConfig(capabilities=_text_only_caps()),
     )
-    agent = Agent(name="test", model="test", agent_config=config)
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        capabilities=[user_filter],
+    )
     pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
-    # Find ModalityFilterCapability in the agent's capabilities.
     filter_caps = [
         cap
         for cap in pydantic_agent.root_capability.capabilities
         if isinstance(cap, ModalityFilterCapability)
     ]
+    # Should have exactly one (the user's instance, not auto-injected).
     assert len(filter_caps) == 1
+    # The user's strategy settings are preserved.
+    assert filter_caps[0].image_strategy == "drop"
+    # Capabilities were populated by the factory.
     assert filter_caps[0].capabilities.image_input is False
     assert filter_caps[0].capabilities.audio_input is False
+    assert filter_caps[0].capabilities.video_input is False
+    assert filter_caps[0].capabilities.document_input is False
 
 
-async def test_no_inject_for_fully_multimodal_model() -> None:
-    """get_agentlet should NOT inject ModalityFilterCapability for fully multimodal model."""
+async def test_no_modality_filter_when_not_configured() -> None:
+    """get_agentlet should NOT inject ModalityFilterCapability when not configured.
+
+    Even if the model lacks input modalities, the capability is only
+    activated when the user explicitly configures ``type: modality_filter``
+    in the agent's capabilities list.
+    """
     config = NativeAgentConfig(
-        model=_TestModelConfig(capabilities=_all_true_caps()),
+        model=_TestModelConfig(capabilities=_text_only_caps()),
     )
     agent = Agent(name="test", model="test", agent_config=config)
     pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
@@ -212,39 +202,6 @@ async def test_no_inject_when_no_config() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5.6 — User-config precedence: populate user's instance
-# ---------------------------------------------------------------------------
-
-
-async def test_user_config_modality_filter_populated_with_resolved_caps() -> None:
-    """When user pre-configures a ModalityFilterCapability, it should be populated."""
-    user_filter = ModalityFilterCapability(capabilities=_caps(image_input=False))
-    config = NativeAgentConfig(
-        model=_TestModelConfig(capabilities=_text_only_caps()),
-    )
-    agent = Agent(
-        name="test",
-        model="test",
-        agent_config=config,
-        capabilities=[user_filter],
-    )
-    pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
-    filter_caps = [
-        cap
-        for cap in pydantic_agent.root_capability.capabilities
-        if isinstance(cap, ModalityFilterCapability)
-    ]
-    # Should have exactly one (the user's instance, not auto-injected).
-    assert len(filter_caps) == 1
-    # The user's instance should be populated with resolved capabilities.
-    assert filter_caps[0] is user_filter
-    assert filter_caps[0].capabilities.image_input is False
-    assert filter_caps[0].capabilities.audio_input is False
-    assert filter_caps[0].capabilities.video_input is False
-    assert filter_caps[0].capabilities.document_input is False
-
-
-# ---------------------------------------------------------------------------
 # 5.6 — FallbackModelConfig intersection (pessimistic)
 # ---------------------------------------------------------------------------
 
@@ -266,7 +223,7 @@ def test_intersect_capabilities_pessimistic() -> None:
         image_output=False,
     )
     result = _intersect_capabilities([caps_a, caps_b])
-    assert result.image_input is False  # a=True, b=False → False
+    assert result.image_input is False  # a=True, b=False -> False
     assert result.audio_input is True  # both True
     assert result.video_input is False  # both False
     assert result.document_input is True
@@ -274,7 +231,7 @@ def test_intersect_capabilities_pessimistic() -> None:
 
 
 def test_intersect_capabilities_all_true() -> None:
-    """Intersection: all True → all True."""
+    """Intersection: all True -> all True."""
     caps_a = _all_true_caps()
     caps_b = _all_true_caps()
     result = _intersect_capabilities([caps_a, caps_b])
@@ -305,7 +262,7 @@ def test_model_config_names_openai_config() -> None:
 
 
 def test_model_config_names_test_config() -> None:
-    """_TestModelConfig has no identifier → empty list."""
+    """_TestModelConfig has no identifier -> empty list."""
     config = _TestModelConfig()
     names = _model_config_names(config)
     assert names == []
@@ -386,17 +343,31 @@ async def test_fallback_model_calls_resolve_for_each_sub_model() -> None:
 
 
 @pytest.mark.integration
-async def test_fallback_model_intersection_injects_filter() -> None:
-    """Fallback where one sub-model lacks image should inject filter."""
+async def test_fallback_model_user_filter_populated_with_intersection() -> None:
+    """Fallback with user-configured modality_filter: resolved caps are intersection.
+
+    When the user explicitly configures ``type: modality_filter`` and
+    uses a FallbackModelConfig, the factory populates the capability with
+    the pessimistic intersection of all sub-models' resolved capabilities.
+    """
+    user_filter = ModalityFilterCapability(
+        capabilities=None,
+        image_strategy="describe",
+    )
     config = NativeAgentConfig(
         model=FallbackModelConfig(
             models=["openai:gpt-4o", "openai:gpt-3.5-turbo"],
             capabilities=_caps(),
         ),
     )
-    agent = Agent(name="test", model="test", agent_config=config)
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        capabilities=[user_filter],
+    )
 
-    # gpt-4o has image, gpt-3.5-turbo does not → intersection = False.
+    # gpt-4o has image, gpt-3.5-turbo does not -> intersection = False.
     async def mock_resolve(name: str, declared: Any) -> ModelCapabilities:
         if "gpt-4o" in name:
             return ModelCapabilities(
@@ -425,5 +396,6 @@ async def test_fallback_model_intersection_injects_filter() -> None:
             if isinstance(cap, ModalityFilterCapability)
         ]
         assert len(filter_caps) == 1
-        # Intersection: gpt-4o=True, gpt-3.5=False → False (pessimistic).
+        # Intersection: gpt-4o=True, gpt-3.5=False -> False (pessimistic).
+        assert filter_caps[0].capabilities is not None
         assert filter_caps[0].capabilities.image_input is False

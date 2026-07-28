@@ -171,7 +171,7 @@ class CapabilityCache:
         model_info = await self._get_model_info(model_name)
         if model_info is None:
             return None
-        input_modalities = model_info.input_modalities
+        input_modalities = model_info.input_modalities  # type: ignore[attr-defined]
         target = "video" if modality == "video_input" else "file"
         return target in input_modalities
 

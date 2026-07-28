@@ -330,17 +330,7 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
         case MemoryCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["memory"], config)
         case ModalityFilterCapabilityConfig():
-            from agentpool.capabilities.modality_filter import ModalityFilterCapability
-            from agentpool_config.model_capabilities import ModelCapabilities
-
-            # The capabilities field is injected by AgentFactory at runtime.
-            # For YAML-configured instances, we create a placeholder that will
-            # be populated by the factory's user-config precedence logic (D14).
-            kwargs = config.model_dump(exclude={"type"})
-            return ModalityFilterCapability(
-                capabilities=ModelCapabilities(),  # placeholder — factory will replace
-                **kwargs,
-            )
+            return _import_and_instantiate(IMPORT_MAP["modality_filter"], config)
         case _ as unreachable:
             from typing import assert_never
 

@@ -90,14 +90,16 @@ class ModalityFilterCapability(AbstractCapability[Any]):
 
     Attributes:
         capabilities: Resolved model capabilities (all fields are
-            ``bool``, not ``None``).
+            ``bool``, not ``None``).  May be ``None`` when the
+            capability is created from YAML config and the agent
+            factory has not yet populated it.
         image_strategy: Strategy for unsupported image content.
         audio_strategy: Strategy for unsupported audio content.
         video_strategy: Strategy for unsupported video content.
         document_strategy: Strategy for unsupported document content.
     """
 
-    capabilities: ModelCapabilities
+    capabilities: ModelCapabilities | None = None
     image_strategy: ModalityStrategy = "describe"
     audio_strategy: ModalityStrategy = "describe"
     video_strategy: ModalityStrategy = "describe"
@@ -182,15 +184,15 @@ class ModalityFilterCapability(AbstractCapability[Any]):
         for msg in messages:
             match msg:
                 case ModelRequest():
-                    new_msg = self._filter_model_request(msg)
-                    if new_msg is not msg:
+                    filtered_req = self._filter_model_request(msg)
+                    if filtered_req is not msg:
                         changed = True
-                    new_messages.append(new_msg)
+                    new_messages.append(filtered_req)
                 case ModelResponse():
-                    new_msg = self._filter_model_response(msg)
-                    if new_msg is not msg:
+                    filtered_resp = self._filter_model_response(msg)
+                    if filtered_resp is not msg:
                         changed = True
-                    new_messages.append(new_msg)
+                    new_messages.append(filtered_resp)
                 case _:
                     new_messages.append(msg)
 
@@ -213,7 +215,7 @@ class ModalityFilterCapability(AbstractCapability[Any]):
                 return self._filter_content_list(result)
             case _:
                 if isinstance(result, _MULTIMODAL_TYPES):
-                    filtered = self._filter_single_content(result)
+                    filtered = self._filter_single_content(result)  # type: ignore[arg-type]
                     match filtered:
                         case str():
                             return filtered
@@ -234,7 +236,7 @@ class ModalityFilterCapability(AbstractCapability[Any]):
         changed = False
         for item in items:
             if isinstance(item, _MULTIMODAL_TYPES):
-                filtered = self._filter_single_content(item)
+                filtered = self._filter_single_content(item)  # type: ignore[arg-type]
                 match filtered:
                     case None:
                         changed = True
@@ -257,7 +259,15 @@ class ModalityFilterCapability(AbstractCapability[Any]):
 
     def _filter_single_content(
         self,
-        content: MultiModalContent,
+        content: (
+            BinaryContent
+            | BinaryImage
+            | ImageUrl
+            | AudioUrl
+            | VideoUrl
+            | DocumentUrl
+            | UploadedFile
+        ),
     ) -> str | MultiModalContent | None:
         """Filter a single ``MultiModalContent`` item.
 
@@ -372,7 +382,7 @@ class ModalityFilterCapability(AbstractCapability[Any]):
                         pass
             case _:
                 if isinstance(content, _MULTIMODAL_TYPES):
-                    filtered = self._filter_single_content(content)
+                    filtered = self._filter_single_content(content)  # type: ignore[arg-type]
                     match filtered:
                         case str():
                             new_content = filtered
@@ -387,7 +397,18 @@ class ModalityFilterCapability(AbstractCapability[Any]):
 
     # ---- Internal: classification & strategy ----
 
-    def _classify_content(self, content: MultiModalContent) -> BinaryCategory:
+    def _classify_content(
+        self,
+        content: (
+            BinaryContent
+            | BinaryImage
+            | ImageUrl
+            | AudioUrl
+            | VideoUrl
+            | DocumentUrl
+            | UploadedFile
+        ),
+    ) -> BinaryCategory:
         """Classify a ``MultiModalContent`` item into a modality category.
 
         For ``BinaryImage``, always returns ``"image"`` regardless of
@@ -422,7 +443,12 @@ class ModalityFilterCapability(AbstractCapability[Any]):
 
         ``"unknown"`` content is always treated as supported — we
         cannot degrade what we cannot classify.
+
+        When ``capabilities`` is ``None`` (unresolved), all modalities
+        are treated as supported (no filtering).
         """
+        if self.capabilities is None:
+            return True
         match category:
             case "image":
                 return self.capabilities.image_input is True
@@ -490,10 +516,10 @@ def _has_multimodal_content(messages: list[ModelMessage]) -> bool:
                         case _:
                             pass
             case ModelResponse():
-                for part in msg.parts:
-                    match part:
+                for resp_part in msg.parts:
+                    match resp_part:
                         case ToolReturnPart():
-                            content = part.content
+                            content = resp_part.content
                             if isinstance(content, multimodal_types):
                                 return True
                             if isinstance(content, list):

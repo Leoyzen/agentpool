@@ -163,21 +163,30 @@ async def test_tool_image_vision_model_receives_binary_unchanged() -> None:
 
 @pytest.mark.integration
 async def test_fallback_model_intersection_injects_filter() -> None:
-    """FallbackModelConfig with mixed vision capabilities injects filter.
+    """FallbackModelConfig with mixed vision capabilities populates user-configured filter.
 
-    Primary model has image_input=True, fallback has image_input=False.
-    The intersection (pessimistic) is False, so ModalityFilterCapability
-    should be auto-injected.
+    The user must explicitly configure a ModalityFilterCapability. The factory
+    populates it with the pessimistic intersection of all sub-models'
+    resolved capabilities.
     """
     from unittest.mock import patch
 
+    user_filter = ModalityFilterCapability(
+        capabilities=None,
+        image_strategy="describe",
+    )
     config = NativeAgentConfig(
         model=FallbackModelConfig(
             models=["openai:gpt-4o", "openai:gpt-3.5-turbo"],
             capabilities=ModelCapabilities(),
         ),
     )
-    agent = Agent(name="test", model="test", agent_config=config)
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        capabilities=[user_filter],
+    )
 
     async def mock_resolve(name: str, declared: Any) -> ModelCapabilities:
         if "gpt-4o" in name:
@@ -208,7 +217,8 @@ async def test_fallback_model_intersection_injects_filter() -> None:
         if isinstance(cap, ModalityFilterCapability)
     ]
     assert len(filter_caps) == 1
-    # Intersection: gpt-4o=True, gpt-3.5=False → False (pessimistic).
+    # Intersection: gpt-4o=True, gpt-3.5=False -> False (pessimistic).
+    assert filter_caps[0].capabilities is not None
     assert filter_caps[0].capabilities.image_input is False
 
     # Verify image content is degraded by this capability.
@@ -297,14 +307,14 @@ async def test_user_prompt_image_degraded_for_text_only() -> None:
 
 @pytest.mark.integration
 async def test_user_config_modality_filter_precedence() -> None:
-    """User-configured ModalityFilterCapability is used, not auto-injected.
+    """User-configured ModalityFilterCapability is populated, not auto-injected.
 
     When the user explicitly configures a ModalityFilterCapability in the
-    agent's capabilities list, the factory should populate it with resolved
-    capabilities and NOT inject a second one.
+    agent's capabilities list, the factory populates it with resolved
+    capabilities and preserves the user's strategy settings.
     """
     user_filter = ModalityFilterCapability(
-        capabilities=_text_only_caps(),
+        capabilities=None,
         image_strategy="drop",
         audio_strategy="pass",
     )
@@ -326,11 +336,11 @@ async def test_user_config_modality_filter_precedence() -> None:
     ]
     # Exactly one — the user's instance, not a second auto-injected one.
     assert len(filter_caps) == 1
-    assert filter_caps[0] is user_filter
     # User's strategy settings are preserved.
     assert filter_caps[0].image_strategy == "drop"
     assert filter_caps[0].audio_strategy == "pass"
     # Capabilities were populated by the factory.
+    assert filter_caps[0].capabilities is not None
     assert filter_caps[0].capabilities.image_input is False
     assert filter_caps[0].capabilities.audio_input is False
 

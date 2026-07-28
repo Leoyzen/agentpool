@@ -381,13 +381,22 @@ class AgentPoolACPAgent(ACPAgent):
         # True (optimistic) to preserve backward-compatible behavior.
         audio_prompts = True
         image_prompts = True
+        from agentpool.agents.native_agent.agent import Agent
         from agentpool.models.model_configs import BaseModelConfig
 
-        model_config = self.default_agent.config.model
-        if isinstance(model_config, BaseModelConfig) and model_config.capabilities is not None:
-            caps = model_config.capabilities
-            audio_prompts = caps.audio_input if caps.audio_input is not None else True
-            image_prompts = caps.image_input if caps.image_input is not None else True
+        # Derive modality support from the default agent's model config.
+        # When the agent or its config is unavailable (e.g. test mocks),
+        # fall back to True (optimistic) to preserve backward-compatible behavior.
+        if (
+            self.default_agent is not None
+            and isinstance(self.default_agent, Agent)
+            and self.default_agent.config is not None
+        ):
+            model_config = self.default_agent.config.model
+            if isinstance(model_config, BaseModelConfig) and model_config.capabilities is not None:
+                caps = model_config.capabilities
+                audio_prompts = caps.audio_input if caps.audio_input is not None else True
+                image_prompts = caps.image_input if caps.image_input is not None else True
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",

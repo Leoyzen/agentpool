@@ -928,15 +928,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         resolved_list = [await resolve_capabilities(name, declared) for name in model_names]
         return _intersect_capabilities(resolved_list)
 
-    def _needs_modality_filter(self, caps: ModelCapabilities) -> bool:
-        """Check if the model lacks any input modality."""
-        return (
-            caps.image_input is False
-            or caps.audio_input is False
-            or caps.video_input is False
-            or caps.document_input is False
-        )
-
     def _apply_image_output_profile(
         self,
         model_: Model,
@@ -1158,36 +1149,31 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                     tool_capabilities.append(cap)
 
         # ------------------------------------------------------------------
-        # ModalityFilterCapability — auto-inject when model lacks input
-        # modalities.  Skip for non-native agent types.
+        # Model capability resolution — resolve ModelCapabilities for
+        # image_output profile mapping and for populating any
+        # user-configured ModalityFilterCapability instances.
         # ------------------------------------------------------------------
         resolved_caps = await self._resolve_model_capabilities(model_)
         if resolved_caps is not None:
             # 5.4 — Apply image_output profile to the pydantic-ai Model.
             model_ = self._apply_image_output_profile(model_, resolved_caps)
 
-            # 5.2 — Inject ModalityFilterCapability if model lacks any
-            #       input modality.
-            if self._needs_modality_filter(resolved_caps):
-                from agentpool.capabilities.modality_filter import (
-                    ModalityFilterCapability,
-                )
+            # Populate any user-configured ModalityFilterCapability with
+            # resolved model capabilities.  This is NOT auto-injection —
+            # the user must explicitly configure ``type: modality_filter``
+            # in YAML capabilities for this to activate.
+            from agentpool.capabilities.modality_filter import (
+                ModalityFilterCapability,
+            )
 
-                # Check if user already configured a ModalityFilterCapability.
-                user_filter: ModalityFilterCapability | None = None
-                for cap in tool_capabilities:
-                    if isinstance(cap, ModalityFilterCapability):
-                        user_filter = cap
-                        break
-
-                if user_filter is not None:
-                    # User already configured one — populate with resolved
-                    # capabilities if not already set.
-                    user_filter.capabilities = resolved_caps
-                else:
-                    # Auto-inject a new instance.
-                    tool_capabilities.append(
-                        ModalityFilterCapability(capabilities=resolved_caps),
+            for i, cap in enumerate(tool_capabilities):
+                if isinstance(cap, ModalityFilterCapability):
+                    tool_capabilities[i] = ModalityFilterCapability(
+                        capabilities=resolved_caps,
+                        image_strategy=cap.image_strategy,
+                        audio_strategy=cap.audio_strategy,
+                        video_strategy=cap.video_strategy,
+                        document_strategy=cap.document_strategy,
                     )
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries

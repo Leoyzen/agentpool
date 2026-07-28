@@ -76,18 +76,12 @@ def test_build_capability_has_correct_strategies() -> None:
 
 
 @pytest.mark.unit
-def test_build_capability_has_placeholder_capabilities() -> None:
-    """Built capability has placeholder ``ModelCapabilities()`` with all None."""
+def test_build_capability_has_none_capabilities() -> None:
+    """Built capability has ``capabilities=None`` (factory populates later)."""
     config = ModalityFilterCapabilityConfig()
     capability = build_capability(config)
-    from agentpool_config.model_capabilities import ModelCapabilities
 
-    assert isinstance(capability.capabilities, ModelCapabilities)
-    assert capability.capabilities.image_input is None
-    assert capability.capabilities.audio_input is None
-    assert capability.capabilities.video_input is None
-    assert capability.capabilities.document_input is None
-    assert capability.capabilities.image_output is None
+    assert capability.capabilities is None
 
 
 @pytest.mark.unit
