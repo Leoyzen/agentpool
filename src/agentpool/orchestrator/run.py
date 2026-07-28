@@ -727,12 +727,13 @@ class RunHandle:
             self.run_ctx.queued_steer_messages.append(fb.content)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        # Always emit when emit_user_message=True. The converter-level
-        # dedup (_displayed_message_ids set in ACPEventConverter and
-        # EventProcessorContext) skips the duplicate by message_id when
-        # EnqueuedMessagesEvent also produces a UserMessageInsertedEvent
-        # with the same ID (reused from _pending_enqueue_message_ids).
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND there is an active
+        # agent_run, skip the fire-and-forget emission — the display event
+        # will come from handle_enqueued_messages() with source="enqueued".
+        # Otherwise, emit with source="internal" as a fallback display.
+        if emit_user_message and not (
+            self._enqueued_messages_available and self.active_agent_run is not None
+        ):
             self._schedule_user_message_emission(message, "steer", message_id=fb.message_id)
 
         return fb.message_id
@@ -820,12 +821,13 @@ class RunHandle:
             session.prompt_queue.put_nowait(message)
 
         # Fire-and-forget UserMessageInsertedEvent publication.
-        # Always emit when emit_user_message=True. The converter-level
-        # dedup (_displayed_message_ids set in ACPEventConverter and
-        # EventProcessorContext) skips the duplicate by message_id when
-        # EnqueuedMessagesEvent also produces a UserMessageInsertedEvent
-        # with the same ID (reused from _pending_enqueue_message_ids).
-        if emit_user_message:
+        # When EnqueuedMessagesEvent is available AND there is an active
+        # agent_run, skip the fire-and-forget emission — the display event
+        # will come from handle_enqueued_messages() with source="enqueued".
+        # Otherwise, emit with source="internal" as a fallback display.
+        if emit_user_message and not (
+            self._enqueued_messages_available and self.active_agent_run is not None
+        ):
             self._schedule_user_message_emission(message, "followup", message_id=message_id)
 
         return message_id
@@ -867,7 +869,7 @@ class RunHandle:
         self,
         content: str | list[Any],
         delivery: Literal["initial", "steer", "followup"],
-        source: Literal["protocol", "background_task", "internal"],
+        source: Literal["internal"],
         *,
         message_id: str | None = None,
     ) -> None:
@@ -881,8 +883,8 @@ class RunHandle:
             content: The message content that was inserted.
             delivery: Delivery mode — ``"initial"``, ``"steer"``, or
                 ``"followup"``.
-            source: Originator — ``"protocol"``, ``"background_task"``,
-                or ``"internal"``.
+            source: Originator — ``"internal"`` for fire-and-forget
+                fallback display events.
             message_id: Optional message ID for dedup correlation. If
                 ``None``, a new UUID is generated.
         """

@@ -736,21 +736,22 @@ class OpenCodeEventBridgeMixin:
             # The canonical assistant_msg_id from the REST handler is correct.
 
             # Steer split: When EnqueuedMessagesEvent fires (mapped to
-            # UserMessageInsertedEvent with source="internal"), the steer
+            # UserMessageInsertedEvent with source="enqueued"), the steer
             # message has entered run history and the model is about to process
             # it. This is the precise moment to split the logical turn:
             # finalize the current assistant message (A1) and create a new one
             # (A2) with a fresh message ID, so the steer user message sorts
             # between A1 and A2 in the TUI's lexicographic message ID ordering.
             #
-            # source="internal" means the event came from
+            # source="enqueued" means the event came from
             # handle_enqueued_messages() → EnqueuedMessagesEvent → actual drain
-            # time. source="protocol" means it came from _route_message() →
-            # receive time (not a split trigger).
+            # time. source="internal" means it came from fire-and-forget
+            # _schedule_user_message_emission() → send time (not a split
+            # trigger).
             if (
                 isinstance(event, UserMessageInsertedEvent)
                 and event.delivery == "steer"
-                and event.source == "internal"
+                and event.source == "enqueued"
                 and self._message_registered.get(session_id, False)
             ):
                 await self._finalize_assistant_time(session_id)

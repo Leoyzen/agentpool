@@ -160,7 +160,7 @@ async def test_replay_buffer_contains_events_after_publish() -> None:
         content="hello",
         session_id=session_id,
         message_id="msg-u1",
-        source="protocol",
+        source="internal",
     )
 
     await event_bus.publish(session_id, event)
@@ -186,7 +186,7 @@ async def test_new_subscriber_receives_replay_buffer_events() -> None:
         content="hello",
         session_id=session_id,
         message_id="msg-u2",
-        source="protocol",
+        source="internal",
     )
     await event_bus.publish(session_id, event)
 
@@ -220,7 +220,7 @@ async def test_clear_replay_buffer_prevents_redelivery() -> None:
         content="hello",
         session_id=session_id,
         message_id="msg-u3",
-        source="protocol",
+        source="internal",
     )
     await event_bus.publish(session_id, event)
 
@@ -256,10 +256,10 @@ async def test_clear_replay_buffer_only_affects_target_session() -> None:
     _bridge, event_bus, _ctx = _setup_bridge_with_event_bus(session_a)
 
     event_a = UserMessageInsertedEvent(
-        content="a", session_id=session_a, message_id="msg-a", source="protocol"
+        content="a", session_id=session_a, message_id="msg-a", source="internal"
     )
     event_b = UserMessageInsertedEvent(
-        content="b", session_id=session_b, message_id="msg-b", source="protocol"
+        content="b", session_id=session_b, message_id="msg-b", source="internal"
     )
     await event_bus.publish(session_a, event_a)
     await event_bus.publish(session_b, event_b)
@@ -289,7 +289,7 @@ async def test_events_after_clear_are_still_delivered() -> None:
 
     # Publish old event
     old_event = UserMessageInsertedEvent(
-        content="old", session_id=session_id, message_id="msg-old", source="protocol"
+        content="old", session_id=session_id, message_id="msg-old", source="internal"
     )
     await event_bus.publish(session_id, old_event)
 
@@ -298,7 +298,7 @@ async def test_events_after_clear_are_still_delivered() -> None:
 
     # Publish new event AFTER clear
     new_event = UserMessageInsertedEvent(
-        content="new", session_id=session_id, message_id="msg-new", source="protocol"
+        content="new", session_id=session_id, message_id="msg-new", source="internal"
     )
     await event_bus.publish(session_id, new_event)
 

@@ -165,7 +165,7 @@ async def test_single_steer_creates_two_assistant_messages(
             message_id=steer_msg_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(1, session_id),
         _part_delta(1, session_id, "world"),
@@ -243,7 +243,7 @@ async def test_message_id_ordering_after_split(
             message_id=msg_steer_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(1, session_id),
         _part_delta(1, session_id, "world"),
@@ -307,7 +307,7 @@ async def test_multiple_steers_create_three_splits(
             message_id=steer_1_id,
             content="steer 1",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(1, session_id),
         _part_delta(1, session_id, "part2"),
@@ -316,7 +316,7 @@ async def test_multiple_steers_create_three_splits(
             message_id=steer_2_id,
             content="steer 2",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(2, session_id),
         _part_delta(2, session_id, "part3"),
@@ -439,7 +439,7 @@ async def test_split_preserves_tool_parts_in_a1(
             message_id=steer_msg_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(1, session_id),
         _part_delta(1, session_id, "after steer"),
@@ -506,7 +506,7 @@ async def test_d1_reset_still_works_after_split(
             message_id=steer_msg_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_start(1, session_id),
         _part_delta(1, session_id, "turn1-after-steer"),
@@ -560,23 +560,71 @@ async def test_d1_reset_still_works_after_split(
 
 
 # =============================================================================
-# TEST 7: Split triggers on internal steer event (precise trigger)
+# TEST 7: Split triggers on enqueued steer event (precise trigger)
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_split_triggers_on_internal_steer_event(
+async def test_split_triggers_on_enqueued_steer_event(
     server_state: ServerState,
 ) -> None:
-    """UserMessageInsertedEvent(source="internal", delivery="steer") triggers split.
+    """UserMessageInsertedEvent(source="enqueued", delivery="steer") triggers split.
 
-    Given: A real EventProcessor with an active turn that receives an internal
+    Given: A real EventProcessor with an active turn that receives an enqueued
         steer UserMessageInsertedEvent (from EnqueuedMessagesEvent drain time).
     When: Events are fed through _handle_event.
     Then: Session has 2 assistant messages (split happened immediately on the
-        internal steer event, no PartStartEvent heuristic needed).
+        enqueued steer event, no PartStartEvent heuristic needed).
     """
     session_id = "test-split-7"
+    bridge = _FakeBridge(server_state, server_state.pool.session_pool)
+    await bridge._before_consumer_loop(session_id)
+
+    steer_msg_id = identifier.ascending("message")
+
+    events: list[Any] = [
+        RunStartedEvent(run_id="run-1", agent_name="test-agent", session_id=session_id),
+        _part_start(0, session_id),
+        _part_delta(0, session_id, "hello"),
+        UserMessageInsertedEvent(
+            session_id=session_id,
+            message_id=steer_msg_id,
+            content="steer text",
+            delivery="steer",
+            source="enqueued",
+        ),
+        _part_delta(0, session_id, "world"),
+        StreamCompleteEvent(
+            message=ChatMessage(content="done", role="assistant"),
+            session_id=session_id,
+        ),
+    ]
+    await _feed_events(bridge, session_id, events)
+
+    assistant_msgs = _assistant_messages(server_state, session_id)
+    assert len(assistant_msgs) == 2, f"Expected 2 assistant messages, got {len(assistant_msgs)}"
+
+
+# =============================================================================
+# TEST 8: Split does NOT trigger on internal steer event (fire-and-forget)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_split_does_not_trigger_on_internal_steer_event(
+    server_state: ServerState,
+) -> None:
+    """UserMessageInsertedEvent(source="internal", delivery="steer") does NOT split.
+
+    Given: A real EventProcessor with an active turn that receives an internal
+        steer UserMessageInsertedEvent (from fire-and-forget
+        _schedule_user_message_emission() send time, not EnqueuedMessagesEvent
+        drain time).
+    When: Events are fed through _handle_event.
+    Then: Session has only 1 assistant message (no split), because internal
+        source means send time, not drain time.
+    """
+    session_id = "test-split-8"
     bridge = _FakeBridge(server_state, server_state.pool.session_pool)
     await bridge._before_consumer_loop(session_id)
 
@@ -602,54 +650,8 @@ async def test_split_triggers_on_internal_steer_event(
     await _feed_events(bridge, session_id, events)
 
     assistant_msgs = _assistant_messages(server_state, session_id)
-    assert len(assistant_msgs) == 2, f"Expected 2 assistant messages, got {len(assistant_msgs)}"
-
-
-# =============================================================================
-# TEST 8: Split does NOT trigger on protocol steer event
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_split_does_not_trigger_on_protocol_steer_event(
-    server_state: ServerState,
-) -> None:
-    """UserMessageInsertedEvent(source="protocol", delivery="steer") does NOT split.
-
-    Given: A real EventProcessor with an active turn that receives a protocol
-        steer UserMessageInsertedEvent (from _route_message() receive time).
-    When: Events are fed through _handle_event.
-    Then: Session has only 1 assistant message (no split), because protocol
-        source means receive time, not drain time.
-    """
-    session_id = "test-split-8"
-    bridge = _FakeBridge(server_state, server_state.pool.session_pool)
-    await bridge._before_consumer_loop(session_id)
-
-    steer_msg_id = identifier.ascending("message")
-
-    events: list[Any] = [
-        RunStartedEvent(run_id="run-1", agent_name="test-agent", session_id=session_id),
-        _part_start(0, session_id),
-        _part_delta(0, session_id, "hello"),
-        UserMessageInsertedEvent(
-            session_id=session_id,
-            message_id=steer_msg_id,
-            content="steer text",
-            delivery="steer",
-            source="protocol",
-        ),
-        _part_delta(0, session_id, "world"),
-        StreamCompleteEvent(
-            message=ChatMessage(content="done", role="assistant"),
-            session_id=session_id,
-        ),
-    ]
-    await _feed_events(bridge, session_id, events)
-
-    assistant_msgs = _assistant_messages(server_state, session_id)
     assert len(assistant_msgs) == 1, (
-        f"Expected 1 assistant message (no split for protocol source), got {len(assistant_msgs)}"
+        f"Expected 1 assistant message (no split for internal source), got {len(assistant_msgs)}"
     )
 
 
@@ -732,7 +734,7 @@ async def test_split_does_not_trigger_when_no_message_registered(
             message_id=steer_msg_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         RunStartedEvent(run_id="run-1", agent_name="test-agent", session_id=session_id),
         _part_start(0, session_id),
@@ -785,7 +787,7 @@ async def test_split_creates_new_assistant_message(
             message_id=steer_msg_id,
             content="steer text",
             delivery="steer",
-            source="internal",
+            source="enqueued",
         ),
         _part_delta(0, session_id, "world"),
         StreamCompleteEvent(

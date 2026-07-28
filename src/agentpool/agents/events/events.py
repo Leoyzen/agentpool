@@ -958,14 +958,18 @@ class UserMessageInsertedEvent[T]:
     delivery: Literal["initial", "steer", "followup"] = "initial"
     """How the message was delivered to the run."""
 
-    source: Literal["protocol", "background_task", "internal", "team"] = "protocol"
+    source: Literal["enqueued", "internal"] = "internal"
     """Originator of the inserted message.
 
-    ``"team"`` indicates a team-mode coordination message (e.g.
-    ``send_message`` between team members).  Protocol frontends should
-    render these with a distinct visual style (e.g. team badge) and the
-    ``meta`` field carries team-specific metadata such as ``from_member``,
-    ``to_member``, ``team_name``, and ``message_type``.
+    ``"enqueued"`` indicates the event was produced from
+    ``EnqueuedMessagesEvent`` mapping at model processing time — this is
+    the precise moment the steer message enters run history and the model
+    is about to process it, making it the split trigger for protocol
+    frontends.
+
+    ``"internal"`` indicates a fire-and-forget emission from
+    ``_schedule_user_message_emission()`` at send time — this is a
+    fallback display event that does NOT trigger a turn split.
     """
 
     timestamp: float = field(default_factory=time.time)

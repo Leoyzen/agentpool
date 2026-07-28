@@ -258,7 +258,7 @@ class EventMapper:
             message_id=message_id,
             content=content,
             delivery=delivery,
-            source="internal",
+            source="enqueued",
             timestamp=datetime.now(UTC).timestamp(),
             meta=None,
         )

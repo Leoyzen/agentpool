@@ -1,11 +1,14 @@
 """Tests for RunHandle steer/followup emission behavior.
 
 Verifies that:
-- ``steer()`` ALWAYS calls ``_schedule_user_message_emission()`` when
-  ``emit_user_message=True``, regardless of ``_enqueued_messages_available``
-  or ``active_agent_run`` state.
-- ``followup()`` ALWAYS calls ``_schedule_user_message_emission()`` when
-  ``emit_user_message=True``.
+- ``steer()`` SKIPS ``_schedule_user_message_emission()`` when
+  ``emit_user_message=True`` AND ``_enqueued_messages_available=True``
+  AND ``active_agent_run`` is not ``None`` (EnqueuedMessagesEvent path
+  handles display instead).
+- ``steer()`` CALLS ``_schedule_user_message_emission()`` when
+  ``emit_user_message=True`` AND either ``_enqueued_messages_available``
+  is ``False`` OR ``active_agent_run`` is ``None`` (fallback path).
+- ``followup()`` follows the same conditional skip logic.
 - ``steer()`` appends ``message_id`` to ``_pending_enqueue_message_ids``
   before calling ``agent_run.enqueue()``.
 - ``followup()`` appends ``message_id`` to ``_pending_enqueue_message_ids``
@@ -95,8 +98,8 @@ async def _drain_tasks() -> None:
 @pytest.mark.unit
 async def test_steer_emits_when_enqueued_available_and_agent_run_active() -> None:
     """When EnqueuedMessagesEvent is available and active_agent_run is set,
-    steer() STILL calls _schedule_user_message_emission() — the dedup is
-    handled at the converter level, not at the emission level.
+    steer() SKIPS _schedule_user_message_emission() — the display event
+    comes from handle_enqueued_messages() with source="enqueued" instead.
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()
@@ -115,8 +118,7 @@ async def test_steer_emits_when_enqueued_available_and_agent_run_active() -> Non
         for call in event_bus.publish.call_args_list
         if isinstance(call.args[1], UserMessageInsertedEvent)
     ]
-    assert len(user_msg_events) == 1
-    assert user_msg_events[0].args[1].delivery == "steer"
+    assert len(user_msg_events) == 0
     # Verify the actual enqueue happened.
     agent_run.enqueue.assert_called_once_with("steer content", priority="asap")
 
@@ -197,8 +199,9 @@ async def test_steer_appends_message_id_to_pending_queue() -> None:
 @pytest.mark.unit
 async def test_followup_emits_when_enqueued_available_and_agent_run_active() -> None:
     """When EnqueuedMessagesEvent is available and active_agent_run is set,
-    followup() STILL calls _schedule_user_message_emission() when
-    emit_user_message=True — the dedup is handled at the converter level.
+    followup() SKIPS _schedule_user_message_emission() when
+    emit_user_message=True — the display event comes from
+    handle_enqueued_messages() with source="enqueued" instead.
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()
@@ -217,8 +220,7 @@ async def test_followup_emits_when_enqueued_available_and_agent_run_active() -> 
         for call in event_bus.publish.call_args_list
         if isinstance(call.args[1], UserMessageInsertedEvent)
     ]
-    assert len(user_msg_events) == 1
-    assert user_msg_events[0].args[1].delivery == "followup"
+    assert len(user_msg_events) == 0
     # Verify the enqueue happened with when_idle priority.
     agent_run.enqueue.assert_called_once_with("followup content", priority="when_idle")
 
