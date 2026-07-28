@@ -655,7 +655,7 @@ class DynamicContextPruningCapability(AbstractCapability[Any]):
         # Strip ThinkingPart from assistant messages before the last user
         # message.  Re-applied every iteration because ctx.state.message_history
         # restores original content.  Gated by config + state flag.
-        if self._config.clear_thinking_enabled and state.clear_thinking_active:
+        if self._config.clear_thinking_enabled:
             messages, stripped = _strip_thinking_content(messages)
             if stripped > 0:
                 logger.info(
@@ -885,17 +885,17 @@ class DynamicContextPruningCapability(AbstractCapability[Any]):
         ``tool_id_list`` is always populated by Phase 0.5 in
         ``before_model_request``, so no lazy rebuild is needed.
 
-        When ``clear_thinking`` is not ``None`` and the feature is enabled
-        in config, toggles ``state.clear_thinking_active``.  When the
-        feature is disabled, the ``clear_thinking`` parameter is ignored
-        and a note is included in the return value.
+        When ``clear_thinking`` is ``True``, immediately strips all
+        ``ThinkingPart`` from ``state.current_messages`` (one-shot).
+        When the feature is disabled in config, the ``clear_thinking``
+        parameter is ignored and a note is included in the return value.
         """
-        if clear_thinking is not None and not self._config.clear_thinking_enabled:
-            # Feature disabled — report but don't toggle.
-            result = prune_tool(ctx, ids, reason, clear_thinking=None)
+        if clear_thinking is True and not self._config.clear_thinking_enabled:
+            # Feature disabled — report but don't strip.
+            result = prune_tool(ctx, ids, reason, clear_thinking=None)  # type: ignore[arg-type]
             result["clear_thinking"] = "disabled (feature not enabled in config)"
             return result
-        return prune_tool(ctx, ids, reason, clear_thinking)
+        return prune_tool(ctx, ids, reason, clear_thinking)  # type: ignore[arg-type]
 
     def _distill_tool_handler(
         self,

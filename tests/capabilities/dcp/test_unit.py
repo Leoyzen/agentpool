@@ -939,15 +939,31 @@ def test_decompress_tool_not_found_returns_error() -> None:
     assert result["restored"] is False
 
 
-def test_prune_tool_clear_thinking_toggle() -> None:
-    """prune_tool() with clear_thinking=True toggles the persistent flag."""
+def test_prune_tool_clear_thinking_strips_all() -> None:
+    """prune_tool() with clear_thinking=True strips all ThinkingPart immediately."""
+    from pydantic_ai.messages import ModelResponse, ThinkingPart
+
     state = DCPState()
     state.tool_id_list = ["call_1"]
     ctx = _make_run_ctx(state)
 
+    # Set up messages with ThinkingPart in multiple ModelResponses
+    state.current_messages = [
+        ModelResponse(
+            parts=[ThinkingPart(content="old reasoning"), TextPart(content="r1")],
+        ),
+        ModelResponse(
+            parts=[ThinkingPart(content="more reasoning"), TextPart(content="r2")],
+        ),
+    ]
+
     result = prune_tool(ctx, clear_thinking=True)
-    assert state.clear_thinking_active is True
-    assert "clear_thinking enabled" in result["action"]
+    assert result["status"] == "applied"
+    assert "cleared" in result["action"]
+    # All ThinkingPart should be removed from current_messages
+    for msg in state.current_messages:
+        for part in msg.parts:
+            assert not isinstance(part, ThinkingPart)
 
 
 def test_prune_tool_both_ids_and_clear_thinking() -> None:
@@ -956,9 +972,9 @@ def test_prune_tool_both_ids_and_clear_thinking() -> None:
     state.tool_id_list = ["call_1"]
     ctx = _make_run_ctx(state)
 
+    # clear_thinking=False is a no-op, ids still work
     result = prune_tool(ctx, ids=["0"], clear_thinking=False)
     assert result["status"] == "applied"
-    assert state.clear_thinking_active is False
     assert len(state.pending_actions) == 1
 
 

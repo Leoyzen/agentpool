@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 from uuid import uuid4
 
 from pydantic_ai import ModelRetry
-from pydantic_ai.messages import ToolCallPart, ToolReturnPart
+from pydantic_ai.messages import ModelResponse, ThinkingPart, ToolCallPart, ToolReturnPart
 
 from agentpool.capabilities.dcp.state import (
     DCPState,
@@ -219,6 +219,44 @@ def _apply_action_immediately(
     state.current_messages = new_messages
 
 
+def _strip_all_thinking(state: DCPState) -> int:
+    """Remove all ``ThinkingPart`` from ``state.current_messages`` immediately.
+
+    Iterates all ``ModelResponse`` messages and removes every
+    ``ThinkingPart`` instance (regardless of position).  Returns the
+    number of parts removed.
+
+    Args:
+        state: The DCP state with ``current_messages``.
+
+    Returns:
+        Number of ``ThinkingPart`` instances removed.
+    """
+    if state.current_messages is None:
+        return 0
+
+    new_messages: list[Any] = []
+    stripped = 0
+    for msg in state.current_messages:
+        if not isinstance(msg, ModelResponse):
+            new_messages.append(msg)
+            continue
+        new_parts = []
+        modified = False
+        for part in msg.parts:
+            if isinstance(part, ThinkingPart):
+                stripped += 1
+                modified = True
+            else:
+                new_parts.append(part)
+        if modified:
+            new_messages.append(replace(msg, parts=tuple(new_parts)))
+        else:
+            new_messages.append(msg)
+    state.current_messages = new_messages
+    return stripped
+
+
 def prune_tool(
     ctx: RunContext[AgentContext],
     ids: Annotated[
@@ -232,8 +270,8 @@ def prune_tool(
     ] = None,  # type: ignore[assignment]
     clear_thinking: Annotated[
         bool,  # noqa: RUF013
-        "Toggle thinking-content stripping: "
-        "True=enable, False=disable, None=no change.",
+        "When True, immediately strip all ThinkingPart from "
+        "message history (one-shot action).",
     ] = None,  # type: ignore[assignment]
 ) -> dict[str, object]:
     """Prune tool outputs and/or toggle thinking clearing.
@@ -265,25 +303,22 @@ def prune_tool(
     if ids is None and clear_thinking is None:
         raise ModelRetry(
             "Provide either `ids` to prune tool outputs or `clear_thinking` "
-            "(true/false) to toggle thinking-content stripping.",
+            "(true) to strip all thinking content from history.",
         )
 
     state = _get_dcp_state(ctx)
     result: dict[str, object] = {"status": "applied"}
     actions_taken: list[str] = []
 
-    # --- Handle clear_thinking toggle ---
-    if clear_thinking is not None:
-        prev = state.clear_thinking_active
-        state.clear_thinking_active = clear_thinking
+    # --- Handle clear_thinking (one-shot: strip ALL ThinkingPart) ---
+    if clear_thinking is True:
+        stripped = _strip_all_thinking(state)
         actions_taken.append(
-            f"clear_thinking {'enabled' if clear_thinking else 'disabled'} "
-            f"(was {'enabled' if prev else 'disabled'})",
+            f"cleared {stripped} ThinkingPart(s) from history",
         )
         logger.debug(
-            "prune_tool: clear_thinking toggled: %s -> %s (turn=%d)",
-            prev,
-            clear_thinking,
+            "prune_tool: clear_thinking stripped %d ThinkingPart(s) (turn=%d)",
+            stripped,
             state.current_turn,
         )
 
