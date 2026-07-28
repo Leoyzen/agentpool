@@ -99,7 +99,7 @@ async def _drain_tasks() -> None:
 async def test_steer_emits_when_enqueued_available_and_agent_run_active() -> None:
     """When EnqueuedMessagesEvent is available and active_agent_run is set,
     steer() SKIPS _schedule_user_message_emission() — the display event
-    comes from handle_enqueued_messages() with source="enqueued" instead.
+    comes from handle_enqueued_messages() with source="processed" instead.
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()
@@ -201,7 +201,7 @@ async def test_followup_emits_when_enqueued_available_and_agent_run_active() -> 
     """When EnqueuedMessagesEvent is available and active_agent_run is set,
     followup() SKIPS _schedule_user_message_emission() when
     emit_user_message=True — the display event comes from
-    handle_enqueued_messages() with source="enqueued" instead.
+    handle_enqueued_messages() with source="processed" instead.
     """  # noqa: D205
     agent_run = MagicMock()
     event_bus = AsyncMock()

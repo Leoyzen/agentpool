@@ -54,7 +54,7 @@ def test_enqueued_messages_steer_delivery_for_model_request_node() -> None:
     assert result is not None
     assert isinstance(result, UserMessageInsertedEvent)
     assert result.delivery == "steer"
-    assert result.source == "enqueued"
+    assert result.source == "processed"
     assert result.content == "Steer this conversation!"
     assert result.message_id == "test-msg-id"
     assert result.session_id == ""
@@ -72,7 +72,7 @@ def test_enqueued_messages_followup_delivery_for_call_tools_node() -> None:
     assert result is not None
     assert isinstance(result, UserMessageInsertedEvent)
     assert result.delivery == "followup"
-    assert result.source == "enqueued"
+    assert result.source == "processed"
     assert result.content == "Followup message"
 
 

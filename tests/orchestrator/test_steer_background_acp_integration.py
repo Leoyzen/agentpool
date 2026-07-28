@@ -87,18 +87,18 @@ async def test_steer_from_background_task_acp_converter(
     # Release the blocking turn
     release.set()
 
-    # Find UserMessageInsertedEvent with source="internal" and delivery="steer"
+    # Find UserMessageInsertedEvent with source="accepted" and delivery="steer"
     # (filter by delivery to exclude the initial prompt event which also has
-    # source="internal").
+    # source="accepted").
     bg_events = [
         e
         for e in all_events
         if isinstance(e, UserMessageInsertedEvent)
-        and e.source == "internal"
+        and e.source == "accepted"
         and e.delivery == "steer"
     ]
     assert len(bg_events) >= 1, (
-        f"Expected UserMessageInsertedEvent(source='internal', delivery='steer'); "
+        f"Expected UserMessageInsertedEvent(source='accepted', delivery='steer'); "
         f"got {len(bg_events)} from {len(all_events)} total events. "
         f"Event types: {[type(e).__name__ for e in all_events]}"
     )

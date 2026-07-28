@@ -106,6 +106,11 @@ class OpenCodeEventBridgeMixin:
     _pending_message_ids: dict[str, str]
     _pending_message_metadata: dict[str, dict[str, str | None]]
 
+    # Crash recovery replay guard: when True, skip side-effectful actions
+    # like steer split (events are being replayed, not live). Set by the
+    # ProtocolEventConsumerMixin during crash recovery replay.
+    _replaying: bool = False
+
     if TYPE_CHECKING:
 
         def get_session_context_data(self, session_id: str) -> dict[str, Any] | None: ...
@@ -754,15 +759,17 @@ class OpenCodeEventBridgeMixin:
             # Steer split: When a steer UserMessageInsertedEvent arrives,
             # split the logical turn: finalize A1, create A2 with fresh ID.
             #
-            # Both source="enqueued" (processing-time, from
-            # EnqueuedMessagesEvent) and source="internal" (routing-time,
-            # from fire-and-forget) trigger the split. Dedup by message_id
-            # prevents double splits when both events fire for the same
-            # steer message (they share the same message_id via FIFO queue).
+            # Only source="processed" events trigger the split. These are
+            # processing-time events from EnqueuedMessagesEvent mapping.
+            # source="accepted" events (fire-and-forget from steer()/followup())
+            # are handled by the EventProcessor which creates UserMessage + SSE.
+            # Dedup by message_id via _steer_split_ids prevents double splits
+            # when both events fire for the same steer message.
             if (
                 isinstance(event, UserMessageInsertedEvent)
                 and event.delivery == "steer"
-                and event.source in ("enqueued", "internal")
+                and event.source == "processed"
+                and not self._replaying
                 and self._message_registered.get(session_id, False)
                 and event.message_id not in self._steer_split_ids.setdefault(session_id, set())
             ):

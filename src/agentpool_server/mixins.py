@@ -45,6 +45,11 @@ class ProtocolEventConsumerMixin(ABC):
     # SpawnSessionStart detection still works regardless of this flag.
     _skip_event_processing: bool = False
 
+    # Set to True during crash recovery replay to skip side-effectful
+    # actions (e.g. steer split in OpenCode). Subclasses can check
+    # self._replaying to guard against duplicate side effects.
+    _replaying: bool = False
+
     def __init__(self) -> None:
         """Initialize mixin state.
 

@@ -7,8 +7,8 @@ Reproduces and verifies fixes for bugs identified in PR #289/#298:
 - Bug 2 (FIXED): ``message_routes.py`` persists to storage AND EventProcessor
   creates message → duplicates.
 - Bug 3 (FIXED): ``_route_message()`` used ``source="protocol"`` which doesn't
-  trigger steer split (split only accepts ``"enqueued"`` and ``"internal"``).
-  Fixed by changing default to ``source="internal"``.
+  trigger steer split (split only accepts ``"processed"`` and ``"accepted"``).
+  Fixed by changing default to ``source="accepted"``.
 - Bug 4 (FIXED): ``_route_message()`` didn't generate ``message_id`` before
   calling both ``_emit_user_message_inserted()`` and ``steer()``, causing
   each to generate its own ID — dedup couldn't work. Fixed by generating
@@ -152,8 +152,8 @@ async def test_steer_mid_turn_dual_event(
 ) -> None:
     """Steer mid-turn produces TWO events with the SAME message_id.
 
-    Event 1: source="internal" (routing time) — immediate display
-    Event 2: source="enqueued" (processing time) — steer split trigger
+    Event 1: source="accepted" (routing time) — immediate display
+    Event 2: source="processed" (processing time) — steer split trigger
 
     Both share the same message_id so EventProcessor dedup catches the second.
 
@@ -162,7 +162,7 @@ async def test_steer_mid_turn_dual_event(
     empty FIFO and returned None.
 
     Bug 3 (FIXED): send_message() defaulted to source="protocol" which
-    doesn't trigger steer split.
+    doesn't trigger steer split. Now uses source="accepted".
 
     Bug 4 (FIXED): _route_message() didn't generate message_id before
     calling both _emit_user_message_inserted() and steer() — each
@@ -193,13 +193,13 @@ async def test_steer_mid_turn_dual_event(
         f"Events: {[(e.source, e.message_id[:20]) for e in steer_events]}"
     )
 
-    # Event 1: routing-time (source="internal")
-    routing_event = next(e for e in steer_events if e.source == "internal")
+    # Event 1: routing-time (source="accepted")
+    routing_event = next(e for e in steer_events if e.source == "accepted")
     assert routing_event.content == "Steer this"
     assert _is_timestamp_id(routing_event.message_id)
 
-    # Event 2: processing-time (source="enqueued")
-    enqueued_event = next(e for e in steer_events if e.source == "enqueued")
+    # Event 2: processing-time (source="processed")
+    enqueued_event = next(e for e in steer_events if e.source == "processed")
     assert enqueued_event.content == "Steer this"
 
     # Both events share the same message_id — dedup works
@@ -224,7 +224,7 @@ async def test_background_task_steer(
 ) -> None:
     """steer_from_background_task() produces a display event.
 
-    The event should have source="internal" (fire-and-forget from
+    The event should have source="accepted" (fire-and-forget from
     steer_from_background_task) and content matching the steer message.
     """
     pool, release_event, setup_session = blocking_pool
@@ -292,12 +292,12 @@ async def test_fifo_reference_preserved(
     events = await _drain_events(queue, timeout=10.0, until=StreamCompleteEvent)
 
     # If FIFO reference is broken, handle_enqueued_messages() returns None
-    # and no source="enqueued" event is produced.
+    # and no source="processed" event is produced.
     enqueued_events = [
-        e for e in events if isinstance(e, UserMessageInsertedEvent) and e.source == "enqueued"
+        e for e in events if isinstance(e, UserMessageInsertedEvent) and e.source == "processed"
     ]
     assert len(enqueued_events) >= 1, (
-        "No source='enqueued' event — FIFO reference is broken. "
+        "No source='processed' event — FIFO reference is broken. "
         "Check EventMapper.__init__: `or []` creates a new list when empty."
     )
 
@@ -310,11 +310,11 @@ async def test_fifo_reference_preserved(
 async def test_steer_split_triggers_on_internal_source(
     blocking_pool: tuple[AgentPool, asyncio.Event, Any],
 ) -> None:
-    """Routing-time event with source="internal" triggers steer split.
+    """Routing-time event with source="accepted" triggers steer split.
 
     Bug 3: send_message() defaulted to source="protocol" which doesn't
-    trigger steer split (split only accepts "enqueued" and "internal").
-    Fix: change default to source="internal".
+    trigger steer split (split only accepts "processed" and "accepted").
+    Fix: change default to source="accepted".
     """
     pool, release_event, setup_session = blocking_pool
     sp = pool.session_pool
@@ -333,15 +333,64 @@ async def test_steer_split_triggers_on_internal_source(
 
     events = await _drain_events(queue, timeout=10.0, until=StreamCompleteEvent)
 
-    # The routing-time event should have source="internal" (not "protocol")
+    # The routing-time event should have source="accepted" (not "protocol")
     routing_events = [
         e
         for e in events
         if isinstance(e, UserMessageInsertedEvent)
         and e.delivery == "steer"
-        and e.source == "internal"
+        and e.source == "accepted"
     ]
     assert len(routing_events) >= 1, (
-        "No source='internal' steer event — send_message() may still default "
+        "No source='accepted' steer event — send_message() may still default "
         "to source='protocol'. Check session_pool_messaging.py."
     )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: Degradation — no EnqueuedMessagesEvent (no active run)
+# ---------------------------------------------------------------------------
+
+
+async def test_degradation_no_enqueued_event() -> None:
+    """When no active run, accepted event displays but no processed event.
+
+    Given: A session with NO active run (idle).
+    When: A message is sent via send_message with steer mode.
+    Then: Only source="accepted" event is produced (routing-time display).
+        No source="processed" event is produced because there is no
+        EnqueuedMessagesEvent (no active model drain).
+    """
+    config = AgentsManifest(
+        agents={
+            "conductor": NativeAgentConfig(name="conductor", model="test", system_prompt="test"),
+        },
+    )
+    async with AgentPool(config) as pool:
+        sp = pool.session_pool
+        assert sp is not None
+        bus = sp.event_bus
+        session_id = "test-degradation"
+        await sp.sessions.get_or_create_session(session_id, agent_name="conductor")
+        queue = await bus.subscribe(session_id, scope="session")
+
+        # Send a message — no active run, so no EnqueuedMessagesEvent
+        await sp.send_message(session_id, "No active run steer", mode=DeliveryMode.STEER)
+
+        events = await _drain_events(queue, timeout=5.0, until=StreamCompleteEvent)
+
+        # Should have at least one accepted event
+        accepted_events = [
+            e for e in events if isinstance(e, UserMessageInsertedEvent) and e.source == "accepted"
+        ]
+        assert len(accepted_events) >= 1, (
+            f"Expected at least 1 source='accepted' event, got {len(accepted_events)}"
+        )
+
+        # Should NOT have any processed events (no active run = no model drain)
+        processed_events = [
+            e for e in events if isinstance(e, UserMessageInsertedEvent) and e.source == "processed"
+        ]
+        assert len(processed_events) == 0, (
+            f"Expected 0 source='processed' events (no active run), got {len(processed_events)}"
+        )

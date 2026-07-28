@@ -1,6 +1,6 @@
 """Tests for P2: Route UserMessageInsertedEvent through ProtocolChannel.
 
-P2 ensures that when ``source == "protocol"`` and a ProtocolChannel is
+P2 ensures that when ``source == "accepted"`` and a ProtocolChannel is
 available on the active session, the event is published through
 ``comm_channel.publish()`` (which journals before publishing to the
 EventBus) instead of direct ``EventBus.publish()``. This avoids
@@ -77,10 +77,10 @@ def _make_session_state(
 
 @pytest.mark.anyio
 async def test_steer_message_published_through_protocol_channel() -> None:
-    """P2: ProtocolChannels + source="internal" routes through comm_channel.publish().
+    """P2: ProtocolChannels + source="accepted" routes through comm_channel.publish().
 
     Given: A session with an active run and a ProtocolChannel.
-    When: _emit_user_message_inserted is called with source="internal".
+    When: _emit_user_message_inserted is called with source="accepted".
     Then: The event is published through comm_channel.publish(), NOT
         directly through EventBus.publish().
     """
@@ -118,14 +118,14 @@ async def test_steer_message_published_through_protocol_channel() -> None:
         session_id="sess-p2",
         content="steer message",
         delivery="steer",
-        source="internal",
+        source="accepted",
         message_id="msg-1",
     )
 
     assert channel_publish_called, "Event should be published through ProtocolChannel"
     assert isinstance(channel_publish_arg, UserMessageInsertedEvent)
     assert channel_publish_arg.content == "steer message"
-    assert channel_publish_arg.source == "internal"
+    assert channel_publish_arg.source == "accepted"
 
     # The EventBus.publish should eventually be called by the channel,
     # but NOT directly by _emit_user_message_inserted. Since the channel
@@ -139,7 +139,7 @@ async def test_initial_rest_message_published_directly_to_event_bus() -> None:
     """P2: When no ProtocolChannel (idle session), event goes through EventBus.publish() directly.
 
     Given: A session with no active run (idle, current_run_id=None).
-    When: _emit_user_message_inserted is called with source="protocol".
+    When: _emit_user_message_inserted is called with source="accepted".
     Then: The event is published directly through EventBus.publish(),
         NOT through any ProtocolChannel.
     """
@@ -163,7 +163,7 @@ async def test_initial_rest_message_published_directly_to_event_bus() -> None:
         session_id="sess-p2",
         content="initial message",
         delivery="initial",
-        source="internal",
+        source="accepted",
         message_id="msg-initial",
     )
 
@@ -175,11 +175,11 @@ async def test_initial_rest_message_published_directly_to_event_bus() -> None:
 
 
 @pytest.mark.anyio
-async def test_non_protocol_source_published_directly_to_event_bus() -> None:
-    """P2: source="internal" also routes through ProtocolChannel when available.
+async def test_non_accepted_source_published_directly_to_event_bus() -> None:
+    """P2: source="accepted" also routes through ProtocolChannel when available.
 
     Given: A session with an active run and ProtocolChannel.
-    When: _emit_user_message_inserted is called with source="internal".
+    When: _emit_user_message_inserted is called with source="accepted".
     Then: The event is published through ProtocolChannel (which journals
         before publishing to the EventBus), same as any other source.
         Internal sources no longer bypass the channel — all sources go
@@ -208,7 +208,7 @@ async def test_non_protocol_source_published_directly_to_event_bus() -> None:
         session_id="sess-p2",
         content="internal message",
         delivery="followup",
-        source="internal",
+        source="accepted",
         message_id="msg-internal",
     )
 
@@ -216,7 +216,7 @@ async def test_non_protocol_source_published_directly_to_event_bus() -> None:
         "ProtocolChannel should be used for source='internal' when available"
     )
     assert isinstance(channel_publish_arg, UserMessageInsertedEvent)
-    assert channel_publish_arg.source == "internal"
+    assert channel_publish_arg.source == "accepted"
 
 
 @pytest.mark.anyio
@@ -246,7 +246,7 @@ async def test_user_message_inserted_not_duplicated_during_replay() -> None:
         message_id="msg-replay",
         content="replayed message",
         delivery="initial",
-        source="internal",
+        source="accepted",
     )
 
     await protocol_channel.publish(event)
@@ -282,7 +282,7 @@ async def test_non_replayed_user_message_inserted_published_to_event_bus() -> No
         message_id="msg-normal",
         content="normal message",
         delivery="initial",
-        source="internal",
+        source="accepted",
     )
 
     await protocol_channel.publish(event)

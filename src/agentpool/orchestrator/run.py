@@ -729,8 +729,8 @@ class RunHandle:
         # Fire-and-forget UserMessageInsertedEvent publication.
         # When EnqueuedMessagesEvent is available AND there is an active
         # agent_run, skip the fire-and-forget emission — the display event
-        # will come from handle_enqueued_messages() with source="enqueued".
-        # Otherwise, emit with source="internal" as a fallback display.
+        # will come from handle_enqueued_messages() with source="processed".
+        # Otherwise, emit with source="accepted" as a fallback display.
         if emit_user_message and not (
             self._enqueued_messages_available and self.active_agent_run is not None
         ):
@@ -823,8 +823,8 @@ class RunHandle:
         # Fire-and-forget UserMessageInsertedEvent publication.
         # When EnqueuedMessagesEvent is available AND there is an active
         # agent_run, skip the fire-and-forget emission — the display event
-        # will come from handle_enqueued_messages() with source="enqueued".
-        # Otherwise, emit with source="internal" as a fallback display.
+        # will come from handle_enqueued_messages() with source="processed".
+        # Otherwise, emit with source="accepted" as a fallback display.
         if emit_user_message and not (
             self._enqueued_messages_available and self.active_agent_run is not None
         ):
@@ -859,7 +859,7 @@ class RunHandle:
             # steer/followup operation itself has already completed.
             return
         task = loop.create_task(
-            self._emit_user_message_inserted(content, delivery, "internal", message_id=message_id),
+            self._emit_user_message_inserted(content, delivery, "accepted", message_id=message_id),
         )
         # Store reference to prevent GC of the fire-and-forget task.
         self._emission_tasks.add(task)
@@ -869,7 +869,7 @@ class RunHandle:
         self,
         content: str | list[Any],
         delivery: Literal["initial", "steer", "followup"],
-        source: Literal["internal"],
+        source: Literal["accepted"],
         *,
         message_id: str | None = None,
     ) -> None:
@@ -883,7 +883,7 @@ class RunHandle:
             content: The message content that was inserted.
             delivery: Delivery mode — ``"initial"``, ``"steer"``, or
                 ``"followup"``.
-            source: Originator — ``"internal"`` for fire-and-forget
+            source: Originator — ``"accepted"`` for fire-and-forget
                 fallback display events.
             message_id: Optional message ID for dedup correlation. If
                 ``None``, a new UUID is generated.

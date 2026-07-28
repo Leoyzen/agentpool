@@ -560,6 +560,12 @@ class ACPEventConverter:
                 yield AgentMessageChunk.text(delta, message_id=self._get_message_id(event))
 
             # User message inserted (steer/followup display)
+            case UserMessageInsertedEvent(source="processed"):
+                # ACP has no split concept — processed events carry no
+                # useful info beyond what the accepted event already
+                # displayed.
+                return
+
             case UserMessageInsertedEvent(
                 message_id=mid,
                 content=event_content,

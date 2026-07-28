@@ -88,7 +88,7 @@ async def test_steer_to_acp_converter_pipeline() -> None:
     )
     event = user_msg_events[0]
     assert event.delivery == "steer"
-    assert event.source == "internal"
+    assert event.source == "accepted"
     assert event.content == "additional context"
     assert event.message_id  # non-empty
 

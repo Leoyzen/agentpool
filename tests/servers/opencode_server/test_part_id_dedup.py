@@ -61,8 +61,8 @@ def _make_ctx(session_id: str = "test-session") -> Any:
 
 
 @pytest.mark.unit
-async def test_protocol_source_does_not_yield_part_updated_events() -> None:
-    """source=protocol now YIELDS PartUpdatedEvent (P1 fix).
+async def test_accepted_source_does_not_yield_part_updated_events() -> None:
+    """source=accepted now YIELDS PartUpdatedEvent (P1 fix).
 
     P1: PartUpdatedEvent is always yielded regardless of source because
     the TUI has no optimistic mechanism. Parts come from SSE events.
@@ -95,21 +95,21 @@ async def test_protocol_source_does_not_yield_part_updated_events() -> None:
             content="hello world",
             timestamp=1000.0,
             meta=meta,
-            source="internal",
+            source="accepted",
         ):
             events.append(e)  # noqa: PERF401
 
     # P1: Should yield 2 events: MessageUpdatedEvent + PartUpdatedEvent
-    assert len(events) == 2, f"Expected 2 events for protocol source, got {len(events)}: {events}"
+    assert len(events) == 2, f"Expected 2 events for accepted source, got {len(events)}: {events}"
     assert events[0].type == "message.updated"
     assert events[1].type == "message.part.updated"
 
 
 @pytest.mark.unit
-async def test_internal_source_yields_part_updated_events() -> None:
-    """source="internal" SHOULD yield PartUpdatedEvent.
+async def test_accepted_source_yields_part_updated_events() -> None:
+    """source="accepted" SHOULD yield PartUpdatedEvent.
 
-    Internal messages have no sync() to load parts from DB, so parts
+    Accepted messages have no sync() to load parts from DB, so parts
     must come via SSE.
     """
     processor = EventProcessor()
@@ -125,7 +125,7 @@ async def test_internal_source_yields_part_updated_events() -> None:
             parts=[
                 {
                     "type": "text",
-                    "id": "part_internal_001",
+                    "id": "part_accepted_001",
                     "text": "background task result",
                     "message_id": "",
                     "session_id": "",
@@ -139,21 +139,21 @@ async def test_internal_source_yields_part_updated_events() -> None:
             content="background task result",
             timestamp=1000.0,
             meta=meta,
-            source="internal",
+            source="accepted",
         ):
             events.append(e)  # noqa: PERF401
 
     # Should yield 2 events: MessageUpdatedEvent + PartUpdatedEvent
-    assert len(events) == 2, f"Expected 2 events for internal source, got {len(events)}"
+    assert len(events) == 2, f"Expected 2 events for accepted source, got {len(events)}"
     assert events[0].type == "message.updated"
     assert events[1].type == "message.part.updated"
 
 
 @pytest.mark.unit
-async def test_protocol_source_part_ids_differ_from_db_reconstruction() -> None:
+async def test_accepted_source_part_ids_differ_from_db_reconstruction() -> None:
     """Verify the root cause: DB reconstruction creates different part IDs.
 
-    This test demonstrates WHY sending PartUpdatedEvent for protocol
+    This test demonstrates WHY sending PartUpdatedEvent for accepted
     sources causes duplication: ``chat_message_to_opencode`` generates
     new part IDs, different from the original parts in meta.
     """
@@ -189,8 +189,8 @@ async def test_protocol_source_part_ids_differ_from_db_reconstruction() -> None:
 
 
 @pytest.mark.unit
-async def test_protocol_source_no_part_updated_with_text_content() -> None:
-    """source=protocol with text-only content (no meta) now yields PartUpdatedEvent (P1 fix)."""
+async def test_accepted_source_no_part_updated_with_text_content() -> None:
+    """source=accepted with text-only content (no meta) now yields PartUpdatedEvent (P1 fix)."""
     processor = EventProcessor()
     ctx = _make_ctx("test-session")
     ctx.state = MagicMock()
@@ -207,7 +207,7 @@ async def test_protocol_source_no_part_updated_with_text_content() -> None:
             content="plain text message",
             timestamp=1000.0,
             meta=None,
-            source="internal",
+            source="accepted",
         ):
             events.append(e)  # noqa: PERF401
 
@@ -218,8 +218,8 @@ async def test_protocol_source_no_part_updated_with_text_content() -> None:
 
 
 @pytest.mark.unit
-async def test_internal_source_text_content_yields_part_updated() -> None:
-    """source="internal" with text-only content SHOULD yield PartUpdatedEvent."""
+async def test_accepted_source_text_content_yields_part_updated() -> None:
+    """source="accepted" with text-only content SHOULD yield PartUpdatedEvent."""
     processor = EventProcessor()
     ctx = _make_ctx("test-session")
     ctx.state = MagicMock()
@@ -233,10 +233,10 @@ async def test_internal_source_text_content_yields_part_updated() -> None:
         async for e in processor._process_user_message_inserted(
             ctx,
             message_id="msg_test_005",
-            content="internal steer message",
+            content="accepted steer message",
             timestamp=1000.0,
             meta=None,
-            source="internal",
+            source="accepted",
         ):
             events.append(e)  # noqa: PERF401
 
