@@ -222,19 +222,19 @@ def _apply_action_immediately(
 def prune_tool(
     ctx: RunContext[AgentContext],
     ids: Annotated[
-        list[str] | None,
+        list[str],  # noqa: RUF013
         "Numeric string IDs from the <prunable-tools> list, "
         "e.g. ['0', '2']. If None, no pruning is performed.",
-    ] = None,
+    ] = None,  # type: ignore[assignment]
     reason: Annotated[
-        str | None,
+        str,  # noqa: RUF013
         "Optional reason for pruning (logged only, not shown to user).",
-    ] = None,
+    ] = None,  # type: ignore[assignment]
     clear_thinking: Annotated[
-        bool | None,
+        bool,  # noqa: RUF013
         "Toggle thinking-content stripping: "
         "True=enable, False=disable, None=no change.",
-    ] = None,
+    ] = None,  # type: ignore[assignment]
 ) -> dict[str, object]:
     """Prune tool outputs and/or toggle thinking clearing.
 
@@ -252,15 +252,6 @@ def prune_tool(
 
     Both ``ids`` and ``clear_thinking`` can be provided in the same call
     to prune tool outputs and toggle thinking clearing simultaneously.
-
-    Args:
-        ctx: The run context with agent dependencies.
-        ids: Numeric string IDs from the ``<prunable-tools>`` list.
-            If ``None``, no tool-output pruning is performed.
-        reason: Optional reason for pruning (used for logging only).
-        clear_thinking: When ``True``, enable persistent thinking-content
-            stripping.  When ``False``, disable it.  When ``None`` (default),
-            no change to the thinking-clearing flag.
 
     Returns:
         Dict with ``status``, ``action``, and details about what was
@@ -369,13 +360,9 @@ def distill_tool(
     and ``distillation`` (summary text).  IDs map to ``tool_call_id``
     values via ``state.tool_id_list``.
 
-    The action is deferred — it is appended to ``pending_actions`` and
-    applied later by the capability's Phase 3 pipeline.  Tools do NOT
-    modify messages directly.
-
-    Args:
-        ctx: The run context with agent dependencies.
-        targets: List of ``DistillTargetInput`` dicts.
+    The action is applied to ``state.current_messages`` immediately
+    (so ``decompress_tool`` works in the same turn) and enqueued in
+    ``pending_actions`` for ``before_model_request`` re-prune.
 
     Returns:
         Dict with ``queued`` (number of targets queued) and
@@ -484,11 +471,6 @@ def decompress_tool(
 
     Does NOT modify message history — the model receives the original
     content as a tool return and can decide how to use it.
-
-    Args:
-        ctx: The run context with agent dependencies.
-        tool_id: Numeric ID (as string) from the ``<prunable-tools>`` list.
-            The ID must correspond to a ``[pruned]`` entry.
 
     Returns:
         If pruned: ``{"id": ..., "original_content": ...,
