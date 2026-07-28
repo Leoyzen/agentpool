@@ -326,6 +326,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._resume_contexts: dict[str, dict[str, Any]] = {}
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
+        self._steer_split_ids: dict[str, set[str]] = {}
 
     def set_session_context_data(self, session_id: str, data: dict[str, Any]) -> None:
         self._resume_contexts[session_id] = data
