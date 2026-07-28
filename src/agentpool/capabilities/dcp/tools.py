@@ -1,9 +1,11 @@
 """Context pruning tool functions for model-invoked pruning actions.
 
 Provides ``prune_tool``, ``distill_tool``, and ``decompress_tool`` that
-the model calls to record pruning decisions.  Actions are deferred —
-they are appended to ``DCPState.pending_actions`` and applied later by
-the capability's Phase 3 pipeline.
+the model calls to manage context.  Actions are applied to
+``state.current_messages`` immediately for same-turn visibility (so
+``decompress_tool`` works in the same turn) and also enqueued in
+``pending_actions`` for ``before_model_request`` re-prune (because
+pydantic-ai's ``_clean_message_history`` may restore originals).
 
 ``prune_tool`` and ``distill_tool`` use numeric string IDs that map to
 ``tool_call_id`` values via ``state.tool_id_list``.  The model sees a
@@ -15,9 +17,10 @@ the capability's Phase 3 pipeline.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any, TypedDict
 from uuid import uuid4
 
 from pydantic_ai import ModelRetry
@@ -28,7 +31,7 @@ from agentpool.capabilities.dcp.state import (
     DistillTarget,
     PruneAction,
 )
-from agentpool.capabilities.dcp.strategies import _is_pruned
+from agentpool.capabilities.dcp.strategies import _is_pruned, _prune_part
 
 
 if TYPE_CHECKING:
@@ -155,18 +158,80 @@ def _get_dcp_state(ctx: RunContext[AgentContext]) -> DCPState:
     return new_state
 
 
+def _apply_action_immediately(
+    state: DCPState,
+    action: PruneAction,
+) -> None:
+    """Apply a ``PruneAction`` to ``state.current_messages`` right away.
+
+    This makes the pruning effect visible to other tools (e.g.
+    ``decompress_tool``) in the same turn, without waiting for the
+    next ``before_model_request`` cycle.  The ``pending_actions`` queue
+    is still consumed by ``before_model_request`` for re-prune, because
+    pydantic-ai's ``_clean_message_history`` may restore originals
+    between turns.
+
+    ``state.current_messages`` is DCP's own reference — modifying it
+    does not affect pydantic-ai's internal message state.  The
+    reference is reset at the start of the next ``before_model_request``
+    (``state.current_messages = ctx.messages``), so the immediate
+    application is temporary and only affects same-turn tool
+    interactions.
+
+    Args:
+        state: The DCP state with ``current_messages``.
+        action: The action to apply (prune or distill).
+    """
+    if state.current_messages is None:
+        return
+
+    new_messages: list[Any] = []
+    for msg in state.current_messages:
+        parts = getattr(msg, "parts", None)
+        if parts is None:
+            new_messages.append(msg)
+            continue
+        new_parts = list(parts)
+        modified = False
+        for i, part in enumerate(new_parts):
+            if not isinstance(part, ToolReturnPart):
+                continue
+            if action.kind == "prune" and part.tool_call_id in action.ids:
+                new_parts[i] = _prune_part(part, "[pruned]", "prune")
+                modified = True
+            elif action.kind == "distill" and action.targets:
+                for target in action.targets:
+                    if part.tool_call_id == target.tool_call_id:
+                        new_parts[i] = _prune_part(
+                            part,
+                            target.distillation,
+                            "distill",
+                            summary=target.distillation,
+                        )
+                        modified = True
+                        break
+        if modified:
+            new_messages.append(
+                replace(msg, parts=tuple(new_parts)),  # type: ignore[arg-type]
+            )
+        else:
+            new_messages.append(msg)
+    state.current_messages = new_messages
+
+
 def prune_tool(
     ctx: RunContext[AgentContext],
     ids: list[str] | None = None,
     reason: str | None = None,
     clear_thinking: bool | None = None,
 ) -> dict[str, object]:
-    """Record a prune action to remove tool outputs and/or toggle thinking clearing.
+    """Prune tool outputs and/or toggle thinking clearing.
 
     Each ID is a numeric string (e.g. ``"0"``, ``"2"``) that maps to a
-    ``tool_call_id`` via ``state.tool_id_list``.  The action is deferred
-    — it is appended to ``pending_actions`` and applied later by the
-    capability's Phase 3 pipeline.  Tools do NOT modify messages directly.
+    ``tool_call_id`` via ``state.tool_id_list``.  The action is applied
+    to ``state.current_messages`` immediately (so ``decompress_tool``
+    works in the same turn) and enqueued in ``pending_actions`` for
+    ``before_model_request`` re-prune.
 
     When ``clear_thinking`` is not ``None``, it toggles the persistent
     ``clear_thinking_active`` flag in ``DCPState``.  When ``True``,
@@ -259,6 +324,7 @@ def prune_tool(
             source_tool_call_id=action_id,
         )
         state.pending_actions.append(action)
+        _apply_action_immediately(state, action)
         actions_taken.append(f"pruned {len(mapped_ids)} tool output(s): ID(s) {', '.join(ids)}")
         logger.debug(
             "prune_tool: turn=%d ids=%s action_id=%s reason=%s pending=%d",
@@ -362,6 +428,7 @@ def distill_tool(
         source_tool_call_id=action_id,
     )
     state.pending_actions.append(action)
+    _apply_action_immediately(state, action)
     logger.debug(
         "distill_tool: turn=%d targets=%d action_id=%s pending=%d",
         state.current_turn,

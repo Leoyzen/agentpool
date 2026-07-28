@@ -34,7 +34,7 @@ IMPORT_MAP: dict[str, str] = {
     "loop_detection": "agentpool.capabilities.loop_detection.LoopDetectionCapability",
     "token_budget": "agentpool.capabilities.token_budget.TokenBudgetCapability",
     "tool_output_budget": ("agentpool.capabilities.tool_output_budget.ToolOutputBudgetCapability"),
-    "dcp": "agentpool.capabilities.dcp.capability:DynamicContextPruningCapability",
+    "dcp": "agentpool.capabilities.dcp.DynamicContextPruningCapability",
     "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
 }

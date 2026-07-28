@@ -847,6 +847,84 @@ async def test_nudge_skipped_when_below_frequency_with_pool() -> None:
 
 
 # =============================================================================
+# 9.10b — Same-turn prune + decompress (immediate application)
+# =============================================================================
+
+
+async def test_prune_then_decompress_same_turn() -> None:
+    """Test decompress works in the same turn as prune.
+
+    Given: A capability with a 2-turn conversation containing tool outputs.
+    When: prune_tool is called for ID 0, then decompress_tool is called
+          for ID 0 in the same turn (no before_model_request in between).
+    Then: decompress returns restored=True with the original content,
+          because prune_tool applies the action to state.current_messages
+          immediately.
+    """
+    from agentpool.capabilities.dcp.tools import decompress_tool, prune_tool
+
+    session_data, state = _make_session_with_state()
+    ctx = _make_run_context(session_data=session_data)
+
+    messages = [
+        _make_request([UserPromptPart(content="Read file")]),
+        _make_response([_make_tool_call("read", {"path": "f.ts"}, "tc_0")]),
+        _make_request([_make_tool_return(tool_call_id="tc_0", content="file content here")]),
+    ]
+    state.current_messages = list(messages)
+    state.tool_id_list = ["tc_0"]
+
+    # Prune ID 0
+    result = prune_tool(ctx, ids=["0"])
+    assert result["status"] == "applied"
+    assert result["count"] == 1
+
+    # Decompress ID 0 in the SAME turn — should work now
+    dec_result = decompress_tool(ctx, tool_id="0")
+    assert dec_result["restored"] is True
+    assert dec_result["original_content"] == "file content here"
+    assert dec_result["was_pruned_as"] == "prune"
+
+
+async def test_distill_then_decompress_same_turn() -> None:
+    """Test decompress works in the same turn as distill.
+
+    Given: A capability with a 2-turn conversation containing tool outputs.
+    When: distill_tool is called for ID 0, then decompress_tool is called
+          for ID 0 in the same turn.
+    Then: decompress returns restored=True with the original content,
+          because distill_tool applies the action to state.current_messages
+          immediately.
+    """
+    from agentpool.capabilities.dcp.tools import decompress_tool, distill_tool
+
+    session_data, state = _make_session_with_state()
+    ctx = _make_run_context(session_data=session_data)
+
+    messages = [
+        _make_request([UserPromptPart(content="Read file")]),
+        _make_response([_make_tool_call("read", {"path": "f.ts"}, "tc_0")]),
+        _make_request([_make_tool_return(tool_call_id="tc_0", content="long file content")]),
+    ]
+    state.current_messages = list(messages)
+    state.tool_id_list = ["tc_0"]
+
+    # Distill ID 0
+    result = distill_tool(
+        ctx,
+        targets=[{"id": "0", "distillation": "short summary"}],
+    )
+    assert result["status"] == "applied"
+    assert result["count"] == 1
+
+    # Decompress ID 0 in the SAME turn
+    dec_result = decompress_tool(ctx, tool_id="0")
+    assert dec_result["restored"] is True
+    assert dec_result["original_content"] == "long file content"
+    assert dec_result["was_pruned_as"] == "distill"
+
+
+# =============================================================================
 # 9.11 — Guard last message — ModelResponse as last → empty ModelRequest appended
 # =============================================================================
 
