@@ -179,7 +179,7 @@ class SkillManagerCap(
                 continue
             try:
                 imported = self._tool_manager.import_tools(skill.tools)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("Failed to import tools for skill %r", name, exc_info=True)
                 continue
             if imported:
@@ -215,7 +215,7 @@ class SkillManagerCap(
                 try:
                     cap = McpServerCap(config=mcp_config)
                     caps.append(cap)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to create McpServerCap for skill %r server %r",
                         name,
@@ -460,7 +460,7 @@ class SkillManagerCap(
                 try:
                     remote_skills = await child.list_skills()
                     entries.extend(remote_skills)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to list skills from child %r",
                         child.get_serialization_name(),
@@ -492,7 +492,7 @@ class SkillManagerCap(
             if isinstance(child, SkillResource):
                 try:
                     content = await child.read_skill(name)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to read skill %r from child %r",
                         name,
@@ -561,7 +561,7 @@ class SkillManagerCap(
                 try:
                     remote_commands = await child.list_commands()
                     entries.extend(remote_commands)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to list commands from child %r",
                         child.get_serialization_name(),

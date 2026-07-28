@@ -382,7 +382,7 @@ class McpServerCap(
         client = await self._ensure_client()
         try:
             resources = await client.list_resources()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to list resources for skills", exc_info=True)
             return []
         entries: list[SkillEntry] = []
@@ -439,7 +439,7 @@ class McpServerCap(
 
         try:
             contents = await client.read_resource(target_uri)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to read skill %r from MCP", name, exc_info=True)
             return None
         if not contents:
@@ -496,7 +496,7 @@ class McpServerCap(
         client = await self._ensure_client()
         try:
             prompts = await client.list_prompts()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to list prompts for commands", exc_info=True)
             return []
         return [

@@ -295,7 +295,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
                     await self._main_task
                 except asyncio.CancelledError:
                     pass
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     self.log.warning("Main task raised during shutdown", exc_info=e)
         finally:
             self._main_task = None
@@ -1105,6 +1105,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
                 parent_session_id=parent_sid or "",
                 source_type=source_type,
                 source_name=node.name,
+                display_name=node.display_name if node.display_name != node.name else None,
                 depth=child_depth,
                 description=f"Spawning {node.name} as team member",
                 spawn_mechanism="spawn",
@@ -1209,6 +1210,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
                     spawn_mechanism="spawn",
                     source_type=source_type,
                     source_name=node.name,
+                    display_name=node.display_name if node.display_name != node.name else None,
                     depth=child_depth,
                     description=f"Sequential team member {node.name!r}",
                 )

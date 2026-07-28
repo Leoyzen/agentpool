@@ -66,6 +66,7 @@ from agentpool.agents.events import (
     RunStartedEvent,
     SessionResumeEvent,
     SpawnSessionStart,
+    StepUsageEvent,
     StreamCompleteEvent,
     SubAgentEvent,
     TerminalContentItem,
@@ -83,6 +84,8 @@ from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from pydantic_ai.usage import UsageBase
 
     from acp.schema import TextContentBlock
     from acp.schema.tool_call import ToolCallContent, ToolCallKind
@@ -126,6 +129,36 @@ def get_compaction_text(trigger: str) -> str:
     if trigger == "auto":
         return "\n\n---\n\n📦 **Context compaction** triggered. Summarizing...\n\n---\n\n"
     return "\n\n---\n\n📦 **Manual compaction** requested. Summarizing...\n\n---\n\n"
+
+
+def _to_acp_usage(usage: UsageBase) -> Usage:
+    """Convert a pydantic-ai ``UsageBase`` to an ACP ``Usage`` object.
+
+    Accepts both ``RunUsage`` (per-step deltas) and ``RequestUsage``
+    (final turn totals) since both share the same token fields through
+    ``UsageBase``.
+
+    Maps token fields from the pydantic-ai usage representation to the
+    ACP schema.  ``thought_tokens`` is extracted from the ``details``
+    dict (key ``"reasoning_tokens"``).  Cache fields are set to ``None``
+    when zero so they are omitted from the serialized output.
+
+    Args:
+        usage: The pydantic-ai usage object to convert (``RunUsage`` for
+            per-step deltas, ``RequestUsage`` for final turn totals).
+
+    Returns:
+        An ACP ``Usage`` object with the corresponding token counts.
+    """
+    thought = usage.details.get("reasoning_tokens") or None
+    return Usage(
+        total_tokens=usage.total_tokens,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        thought_tokens=thought,
+        cached_read_tokens=usage.cache_read_tokens or None,
+        cached_write_tokens=usage.cache_write_tokens or None,
+    )
 
 
 @dataclass
@@ -835,26 +868,49 @@ class ACPEventConverter:
             case FinalResultEvent():
                 pass  # No notification needed
 
+            case StepUsageEvent(
+                step_index=step_index,
+                step_usage=step_usage,
+                cumulative_usage=cumulative_usage,
+            ):
+                logger.info(
+                    "ACP converter emitting per-step UsageUpdate",
+                    step_index=step_index,
+                    used=step_usage.total_tokens,
+                    cumulative=cumulative_usage.total_tokens,
+                )
+                # Emit a per-step UsageUpdate with DELTA token values.
+                # ACP clients should accumulate these per-step deltas and
+                # then REPLACE the running total with the final
+                # UsageUpdate from StreamCompleteEvent (which carries
+                # cumulative totals).
+                acp_usage = _to_acp_usage(step_usage)
+                cumulative_acp = _to_acp_usage(cumulative_usage)
+                yield UsageUpdate(
+                    used=acp_usage.total_tokens,
+                    size=cumulative_usage.total_tokens,
+                    field_meta={
+                        "step_index": step_index,
+                        "step_usage": acp_usage.model_dump(exclude_none=True),
+                        "cumulative_usage": cumulative_acp.model_dump(exclude_none=True),
+                    },
+                )
+
             case StreamCompleteEvent(message=message, cancelled=cancelled):
                 request_usage = message.usage
-                thought = request_usage.details.get("reasoning_tokens") or None
-                self.last_usage = Usage(
-                    total_tokens=request_usage.total_tokens,
-                    input_tokens=request_usage.input_tokens,
-                    output_tokens=request_usage.output_tokens,
-                    thought_tokens=thought,
-                    cached_read_tokens=request_usage.cache_read_tokens or None,
-                    cached_write_tokens=request_usage.cache_write_tokens or None,
-                )
+                # Build the final cumulative Usage via the shared helper.
+                self.last_usage = _to_acp_usage(request_usage)
                 cost_obj: Cost | None = None
                 if message.cost_info and message.cost_info.total_cost:
                     cost_obj = Cost(
                         amount=float(message.cost_info.total_cost),
                         currency="USD",
                     )
-                # Always yield UsageUpdate on stream completion so clients
-                # know the turn has ended — especially critical for inject-
-                # triggered turns where no PromptResponse(stop_reason) is sent.
+                # Final turn-level UsageUpdate with cumulative totals.
+                # ACP clients that received per-step UsageUpdate notifications
+                # (from StepUsageEvent) should REPLACE their running "used"
+                # total with this final value, NOT add it on top — this
+                # UsageUpdate carries the turn's complete cumulative usage.
                 yield UsageUpdate(
                     used=request_usage.total_tokens,
                     size=request_usage.total_tokens,  # best approximation

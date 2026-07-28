@@ -304,7 +304,7 @@ async def _handle_elicitation_deferred(
                     form_params,
                     shared_future=future,
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to broadcast elicitation question",
                     tool_call_id=call.tool_call_id,
@@ -354,7 +354,7 @@ async def _handle_elicitation_deferred(
                         )
                         data.touch()
                         await store.save_session(data)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug(
                         "Failed to update session status to checkpointed",
                         session_id=session_id,

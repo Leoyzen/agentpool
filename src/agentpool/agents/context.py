@@ -422,13 +422,13 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                                 )
                                 data.touch()
                                 await store.save_session(data)
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug(
                                 "Failed to update session status to checkpointed",
                                 session_id=run_ctx.session_id,
                                 exc_info=True,
                             )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Checkpoint failed — the in-process future await still
                 # works, but crash recovery won't be available for this
                 # elicitation. Log prominently so operators know durability
@@ -449,7 +449,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # question and the future times out.
         try:
             await provider.broadcast_elicitation_question(handle, params, shared_future=future)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Failed to broadcast elicitation question",
                 session_id=run_ctx.session_id,
@@ -750,12 +750,24 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             event_spawn_mechanism: Literal["task", "spawn"] = (
                 "task" if spawn_mechanism == "task" else "spawn"
             )
+            # Resolve display_name from manifest config when available.
+            child_display_name: str | None = None
+            if pool is not None:
+                child_config = pool.manifest.agents.get(agent_name)
+                if child_config is not None and child_config.display_name is not None:
+                    child_display_name = (
+                        child_config.display_name
+                        if child_config.display_name != agent_name
+                        else None
+                    )
+
             spawn_event = SpawnSessionStart(
                 child_session_id=child_sid,
                 parent_session_id=self.run_ctx.session_id,
                 tool_call_id=tool_call_id or self.tool_call_id,
                 spawn_mechanism=event_spawn_mechanism,
                 source_name=agent_name,
+                display_name=child_display_name,
                 source_type="agent",
                 depth=child_depth,
                 description=description,

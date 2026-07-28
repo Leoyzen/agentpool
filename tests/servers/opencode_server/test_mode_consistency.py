@@ -44,8 +44,10 @@ async def test_agent_endpoint_mode_is_primary_for_all_agents() -> None:
 
     agent1 = MagicMock()
     agent1.description = "Agent 1"
+    agent1.display_name = None
     agent2 = MagicMock()
     agent2.description = "Agent 2"
+    agent2.display_name = None
 
     ctx = MagicMock()
     ctx.main_agent_name = "agent1"
@@ -80,6 +82,7 @@ async def test_before_consumer_loop_sets_mode_to_agent_name() -> None:
 
     session_state = MagicMock()
     session_state.agent_name = "librarian"
+    session_state.metadata = {}
 
     session_pool = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=session_state)
@@ -182,6 +185,7 @@ async def test_subagent_assistant_mode_matches_child_agent_name() -> None:
 
     child_session_state = MagicMock()
     child_session_state.agent_name = "historian"
+    child_session_state.metadata = {}
 
     session_pool = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=child_session_state)

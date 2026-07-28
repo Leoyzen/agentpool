@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -517,7 +517,34 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
         This allows users to open http://localhost:4096 in a browser and get
         the full OpenCode web interface, which then makes API calls back to
         this local server for all data operations.
+
+        API paths (``session/``, ``config/``, ``agent/``, etc.) are excluded
+        from the proxy so that unmatched API routes return 404 instead of
+        silently forwarding to the cloud (which would return empty data and
+        break the TUI's history loading).
         """
+        # Don't proxy API paths — return 404 so the TUI knows the endpoint
+        # doesn't exist rather than receiving cloud data for local sessions.
+        _api_prefixes = (
+            "session/",
+            "config/",
+            "agent/",
+            "model/",
+            "provider/",
+            "command/",
+            "skill/",
+            "location/",
+            "integration/",
+            "file/",
+            "todo/",
+            "diff/",
+            "snapshot/",
+            "v1/",
+            "experimental/",
+        )
+        if any(path.startswith(prefix) for prefix in _api_prefixes):
+            raise HTTPException(status_code=404, detail=f"Endpoint not found: /{path}")
+
         import httpx
 
         # Build target URL
@@ -544,7 +571,7 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
     if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
         try:
             logfire.instrument_fastapi(app)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)
     return app
 

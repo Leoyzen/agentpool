@@ -29,6 +29,7 @@ class Agent(OpenCodeBaseModel):
     """Agent information matching SDK type."""
 
     name: str
+    display_name: str | None = None
     description: str | None = None
     mode: AgentMode = "primary"
     native: bool | None = None

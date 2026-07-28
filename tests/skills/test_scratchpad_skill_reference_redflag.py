@@ -118,8 +118,10 @@ def mock_mcp_client_with_scratchpad_skills():
             return ["# Systematic Troubleshooting\n\nFollow the procedure."]
         if "_manifest" in uri:
             return [
-                '{"name": "systematic-troubleshooting",'
-                ' "description": "Systematic troubleshooting"}'
+                (
+                    '{"name": "systematic-troubleshooting",'
+                    ' "description": "Systematic troubleshooting"}'
+                )
             ]
         return []
 

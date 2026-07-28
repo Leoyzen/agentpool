@@ -134,7 +134,7 @@ class OpenAIAPIServer(BaseServer, ProtocolEventConsumerMixin):
         if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
             try:
                 logfire.instrument_fastapi(self.app)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)
 
         if cors:

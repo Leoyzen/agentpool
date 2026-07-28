@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from agentpool.agents.events.events import RichAgentStreamEvent
     from agentpool.host.context import HostContext
     from agentpool.host.registry import AgentRegistry
+    from agentpool.lifecycle.protocols import CommChannel
     from agentpool.orchestrator.core import EventBus, SessionState
 
 
@@ -419,9 +420,14 @@ class RunHandle:
                     current_prompts: list[str | list[Any]] = (
                         [initial_prompt] if initial_prompt else []
                     )
-                    if not current_prompts:
-                        # No prompt — nothing to do, terminate immediately.
+                    if not current_prompts and (agent is None or not agent.staged_content):
+                        # No prompt and no staged_content — nothing to do.
+                        # (issue #284: staged_content may have been injected
+                        # by skill commands even when the prompt is empty)
                         return
+                    # If we reach here with empty current_prompts but
+                    # staged_content has content, execute a turn so
+                    # NativeTurn.execute() can consume staged_content.
 
                     try:
                         async with contextlib.aclosing(
@@ -447,6 +453,35 @@ class RunHandle:
                 # Do NOT call agent.__aexit__() — that's session-level.
                 self.complete_event.set()
 
+    async def _safe_publish(
+        self,
+        comm: CommChannel,
+        event: RichAgentStreamEvent[Any],
+    ) -> None:
+        """Publish an event to the CommChannel, suppressing errors if closed.
+
+        During session shutdown (e.g. team member removal), the ProtocolChannel
+        may be closed before the RunHandle finishes publishing events. In that
+        case, ``comm.publish()`` raises ``RuntimeError("ProtocolChannel is
+        closed; cannot publish.")``. This is a benign race — the session is
+        already shutting down and no consumer remains to receive the event.
+
+        Args:
+            comm: The CommChannel to publish on.
+            event: The event to publish.
+        """
+        try:
+            await comm.publish(event)
+        except RuntimeError as e:
+            if "ProtocolChannel is closed" in str(e):
+                logger.debug(
+                    "ProtocolChannel closed during publish — session likely "
+                    "shutting down. Event type: %s",
+                    type(event).__name__,
+                )
+            else:
+                raise
+
     async def _publish_cancelled_event(self, event_bus: EventBus | None) -> None:
         """Publish a RunFailedEvent for cancelled turns.
 
@@ -463,7 +498,7 @@ class RunHandle:
         if comm is not None and event_bus is not None and not comm.publishes_to_event_bus:
             await event_bus.publish(self.session_id, cancelled_event)
         if comm is not None:
-            await comm.publish(cancelled_event)
+            await self._safe_publish(comm, cancelled_event)
         elif comm is None and event_bus is not None:
             await event_bus.publish(self.session_id, cancelled_event)
 
@@ -521,7 +556,7 @@ class RunHandle:
         )
         if event_bus is not None and not comm.publishes_to_event_bus:
             await event_bus.publish(self.session_id, run_started)
-        await comm.publish(run_started)
+        await self._safe_publish(comm, run_started)
         # Set _current_input_provider ContextVar so MCP elicitation can
         # access it during turn execution.
         if session.input_provider is not None:
@@ -531,20 +566,24 @@ class RunHandle:
         # Save user prompt to agent conversation before execution.
         # This ensures user messages are preserved even if the turn
         # fails or is cancelled.
-        from agentpool.agents.native_agent.helpers import _summarize_content_block
+        # Skip when current_prompts is empty — the real content comes from
+        # staged_content (consumed by NativeTurn), and saving an empty user
+        # message would pollute conversation history (issue #284).
+        if current_prompts:
+            from agentpool.agents.native_agent.helpers import _summarize_content_block
 
-        prompt_text = "\n".join(
-            p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
-            for p in current_prompts
-        )
-        agent.conversation.add_chat_messages([
-            ChatMessage(
-                content=prompt_text,
-                role="user",
-                name=agent.name,
-                session_id=self.session_id,
-            ),
-        ])
+            prompt_text = "\n".join(
+                p if isinstance(p, str) else " ".join(_summarize_content_block(b) for b in p)
+                for p in current_prompts
+            )
+            agent.conversation.add_chat_messages([
+                ChatMessage(
+                    content=prompt_text,
+                    role="user",
+                    name=agent.name,
+                    session_id=self.session_id,
+                ),
+            ])
         # Store turn state for downstream sub-methods.
         self._current_turn = turn
         self._current_turn_failed = False
@@ -561,7 +600,7 @@ class RunHandle:
                     async for event in event_gen:
                         if event_bus is not None and not comm.publishes_to_event_bus:
                             await event_bus.publish(self.session_id, event)
-                        await comm.publish(event)
+                        await self._safe_publish(comm, event)
                         # Save assistant final message to conversation BEFORE
                         # yielding. The _consume_run caller closes the generator
                         # immediately after receiving StreamCompleteEvent, which
@@ -607,7 +646,7 @@ class RunHandle:
                 )
                 if event_bus is not None and not comm.publishes_to_event_bus:
                     await event_bus.publish(self.session_id, error_event)
-                await comm.publish(error_event)
+                await self._safe_publish(comm, error_event)
                 yield error_event
             finally:
                 self._current_turn_failed = turn_failed
@@ -881,7 +920,7 @@ class RunHandle:
                 )
                 if self.event_bus is not None:
                     await self.event_bus.publish(self.session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,

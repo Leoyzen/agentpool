@@ -183,17 +183,23 @@ async def test_session_load_nonexistent(acp_server: ACPSessionHandle) -> None:
 
 
 async def test_session_close_then_load(acp_server: ACPSessionHandle) -> None:
-    """B2.4: Create, close, attempt load → ResourceNotFound."""
+    """B2.4: Create, close, load → closed session loads for read-only history replay.
+
+    Previously load_session rejected closed sessions with ResourceNotFound.
+    Now closed sessions are loaded for read-only history access (e.g. viewing
+    team member conversations after team_delete). The session loads but won't
+    accept new prompts since it remains closed in the SessionPool.
+    """
     new_sess = await acp_server.new_session()
     session_id = new_sess.session_id
 
     await acp_server.close_session(session_id)
 
-    with pytest.raises(RequestError) as exc_info:
-        await acp_server.conn.load_session(
-            LoadSessionRequest(session_id=session_id, cwd="/tmp", mcp_servers=[])
-        )
-    assert exc_info.value.code == -32002
+    # Closed sessions now load successfully for history replay
+    loaded = await acp_server.conn.load_session(
+        LoadSessionRequest(session_id=session_id, cwd="/tmp", mcp_servers=[])
+    )
+    assert loaded is not None
 
 
 # ---------------------------------------------------------------------------

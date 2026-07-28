@@ -54,6 +54,7 @@ def get_shared_engine(url: str, pool_size: int = 5) -> AsyncEngine:
     This ensures all storage instances using the same database share
     a single engine and connection pool, avoiding lock contention.
     """
+    from sqlalchemy import event as sa_event
     from sqlalchemy.ext.asyncio import create_async_engine
 
     if url in _engine_cache:
@@ -71,6 +72,19 @@ def get_shared_engine(url: str, pool_size: int = 5) -> AsyncEngine:
     # SQLite doesn't support pool_size parameter
     if url_str.startswith("sqlite+aiosqlite://"):
         engine = create_async_engine(url_str)
+
+        # Enable WAL mode and set busy timeout to prevent "database is locked"
+        # errors under concurrent writes. WAL allows concurrent readers with a
+        # single writer, and busy_timeout makes writers wait (up to 30s) for
+        # the lock instead of failing immediately.
+        @sa_event.listens_for(engine.sync_engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn: object, conn_record: object) -> None:
+            cursor = dbapi_conn.cursor()  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
     else:
         engine = create_async_engine(url_str, pool_size=pool_size)
 

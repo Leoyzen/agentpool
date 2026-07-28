@@ -303,7 +303,7 @@ class SkillURIResolver:
             if isinstance(provider, SkillResource):
                 try:
                     entries = await provider.list_skills()
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "Failed to list skills from provider",
                         exc_info=True,

@@ -456,7 +456,7 @@ def resolve_config(  # noqa: PLR0915
                 )
                 merged_data.setdefault("skills", {}).setdefault("paths", []).extend(pkg_skill_paths)
             logger.debug("include_packages: merged %s successfully", ref)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("Failed to load package config: %s", ref, exc_info=True)
 
     if skill_scope_paths or node_skill_scopes:

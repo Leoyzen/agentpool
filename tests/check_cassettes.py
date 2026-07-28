@@ -87,6 +87,9 @@ def main() -> int:
             continue
         test_function = parts[-1].removesuffix(".yaml")
         test_module = parts[-2]
+        # Handle parametrized test names: test_func[param_id] → test_func
+        if "[" in test_function:
+            test_function = test_function.split("[")[0]
         test_file = _find_test_file(test_module)
         if test_file is None:
             orphaned.append((cassette, f"no test file tests/vcr/{test_module}.py"))

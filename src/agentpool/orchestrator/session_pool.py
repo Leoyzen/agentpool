@@ -453,7 +453,7 @@ class SessionPool(
                         stored_hash=session_data.agent_config_hash,
                         current_hash=current_hash,
                     )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug(
                     "Could not compute agent config hash for drift check",
                     session_id=session_data.session_id,

@@ -130,6 +130,7 @@ async def list_agents(state: StateDep) -> list[Agent]:
     agents = [
         Agent(
             name=name,
+            display_name=agent.display_name,
             description=agent.description or f"Agent: {name}",
             mode="primary",
             default=(name == default_name),

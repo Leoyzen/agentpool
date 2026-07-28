@@ -25,6 +25,7 @@ from pydantic_ai import (
     AgentStreamEvent,
     PartDeltaEvent as PyAIPartDeltaEvent,
     PartStartEvent as PyAIPartStartEvent,
+    RunUsage,
     TextPart,
     TextPartDelta,
     ThinkingPart,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from agentpool.lifecycle.types import RunState
+    from agentpool.messaging.messages import TokenCost
     from agentpool.tools.base import ToolKind
     from agentpool.utils.todos import PlanEntry
 
@@ -749,6 +751,11 @@ class SpawnSessionStart:
     """How the subagent was created: 'task' for task-based, 'spawn' for direct spawn."""
     source_name: str
     """Name of the agent or team being spawned."""
+    display_name: str | None = None
+    """Display name for the subagent, if different from source_name.
+
+    Falls back to source_name when None.
+    """
     source_type: Literal["agent", "team_parallel", "team_sequential"]
     """Type of source being spawned: agent, parallel team, or sequential team."""
     depth: int = 1
@@ -951,8 +958,15 @@ class UserMessageInsertedEvent[T]:
     delivery: Literal["initial", "steer", "followup"] = "initial"
     """How the message was delivered to the run."""
 
-    source: Literal["protocol", "background_task", "internal"] = "protocol"
-    """Originator of the inserted message."""
+    source: Literal["protocol", "background_task", "internal", "team"] = "protocol"
+    """Originator of the inserted message.
+
+    ``"team"`` indicates a team-mode coordination message (e.g.
+    ``send_message`` between team members).  Protocol frontends should
+    render these with a distinct visual style (e.g. team badge) and the
+    ``meta`` field carries team-specific metadata such as ``from_member``,
+    ``to_member``, ``team_name``, and ``message_type``.
+    """
 
     timestamp: float = field(default_factory=time.time)
     """Wall-clock time the event was created (epoch seconds)."""
@@ -964,6 +978,32 @@ class UserMessageInsertedEvent[T]:
     user message (e.g. OpenCode parts, ACP content blocks) instead of
     falling back to text-only ``content``.
     """
+
+
+@dataclass(kw_only=True)
+class StepUsageEvent:
+    """Per-step token usage, emitted after each LLM call within a turn.
+
+    Emitted by ``NativeTurn.execute()`` after each ``agent_run.next(node)``
+    when the step involved an LLM call (``step_usage.requests > 0``).
+    Carries the per-step delta and the running cumulative total.
+    """
+
+    step_index: int
+    """Zero-based index of this LLM step within the current turn (resets per turn)."""
+
+    step_usage: RunUsage
+    """Per-step delta usage (difference from previous step). NOT ``RequestUsage``
+    because ``RequestUsage.requests`` is a read-only property returning 1."""
+
+    cumulative_usage: RunUsage
+    """Running cumulative usage for the entire turn (snapshot copy, not live reference)."""
+
+    cost_info: TokenCost | None = None
+    """Per-step cost. Always ``None`` — per-step cost calculation is a non-goal."""
+
+    event_kind: Literal["step_usage"] = "step_usage"
+    """Event type discriminator (all events use ``event_kind``, NOT ``event_type``)."""
 
 
 type RichAgentStreamEvent[OutputDataT] = (
@@ -988,6 +1028,7 @@ type RichAgentStreamEvent[OutputDataT] = (
     | ToolCallUpdateEvent
     | MessageReplacementEvent
     | UserMessageInsertedEvent[Any]
+    | StepUsageEvent
 )
 
 

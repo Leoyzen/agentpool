@@ -36,6 +36,16 @@ class FakeDelegationService:
         self._spawn_output = spawn_output if spawn_output is not None else ["chunk_1", "chunk_2"]
         self.spawn_calls: list[tuple[str, str]] = []
 
+    async def create_child_session(
+        self,
+        agent_name: str,
+        *,
+        parent_session_id: str | None = None,
+        description: str = "",
+        **metadata: Any,
+    ) -> str:
+        return "child_session_001"
+
     def spawn_subagent(self, name: str, prompt: str) -> Any:
         """Yield test chunks, recording the call."""
         self.spawn_calls.append((name, prompt))

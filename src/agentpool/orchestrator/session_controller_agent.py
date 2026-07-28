@@ -100,8 +100,18 @@ class SessionControllerAgentMixin:
         Returns:
             Persistable session data.
         """
+        from datetime import UTC, datetime
+
         from agentpool.sessions.models import SessionData
-        from agentpool.utils.time_utils import get_now
+
+        # Derive created_at from created_at_ns (epoch nanoseconds) so the
+        # persisted timestamp matches the session ID's embedded timestamp.
+        # created_at_wall is a separate get_now() call that can differ by
+        # milliseconds, causing time.created ≠ ID-embedded timestamp.
+        created_at = datetime.fromtimestamp(state.created_at_ns / 1_000_000_000, tz=UTC)
+        # Derive last_active from last_active_at_ns for the same reason —
+        # get_now() is a separate wall-clock call that can diverge.
+        last_active = datetime.fromtimestamp(state.last_active_at_ns / 1_000_000_000, tz=UTC)
 
         return SessionData(
             session_id=state.session_id,
@@ -110,8 +120,8 @@ class SessionControllerAgentMixin:
             project_id=state.metadata.get("project_id"),
             cwd=state.metadata.get("cwd"),
             agent_type=state.metadata.get("agent_type"),
-            created_at=state.created_at_wall,
-            last_active=get_now(),
+            created_at=created_at,
+            last_active=last_active,
             metadata=state.metadata,
         )
 
@@ -166,6 +176,16 @@ class SessionControllerAgentMixin:
             metadata=metadata,
             checkpoint_enabled=self.store is not None,
         )
+        # Sync created_at_ns with the timestamp embedded in the session ID.
+        # This ensures time.created order matches session ID lexicographic
+        # order, since both come from the same now_ms() call inside
+        # generate_session_id() / ascending() / descending().
+        from agentpool.utils.identifiers import extract_timestamp_ms
+
+        ts_ms = extract_timestamp_ms(session_id)
+        if ts_ms is not None:
+            state.created_at_ns = ts_ms * 1_000_000
+            state.last_active_at_ns = ts_ms * 1_000_000
         self._sessions[session_id] = state
 
         # Clear todos for new top-level sessions only (not subagents)

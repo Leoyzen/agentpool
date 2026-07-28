@@ -363,3 +363,104 @@ async def test_staged_content_reaches_model_through_runhandle_pipeline() -> None
             f"Skill instructions '{skill_instructions}' not found in "
             f"message history. Text: {all_text[:500]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Bug #284: start([]) with staged_content — silent no-op
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_start_empty_list_with_staged_content_executes_turn() -> None:
+    """start([]) with staged_content must execute a turn (issue #284).
+
+    When a user sends a message that is entirely a slash command, the ACP
+    handler splits it into commands and non_command_content. The skill
+    command injects instructions into ``staged_content``, but
+    ``non_command_content`` is empty ``[]``. ``RunHandle.start([])`` must
+    still execute a turn so ``NativeTurn`` can consume the staged content.
+
+    Before the fix, ``start([])`` returned immediately because ``[]`` is
+    falsy, causing the agent to silently do nothing.
+    """
+    skill_instructions = "IMPORTANT_SKILL_DIRECTIVE"
+    agent = Agent(
+        name="test-empty-list-staged",
+        model=TestModel(custom_output_text="skill response"),
+    )
+    async with agent:
+        # Simulate skill bridge injecting instructions
+        agent.staged_content.add_text(skill_instructions)
+
+        event_bus = EventBus()
+        session = SessionState(
+            session_id="test-empty-list-staged-session",
+            agent_name="test-empty-list-staged",
+        )
+        run_ctx = AgentRunContext(
+            session_id="test-empty-list-staged-session",
+            event_bus=event_bus,
+        )
+        run_handle = RunHandle(
+            run_id="test-empty-list-staged-run",
+            session_id="test-empty-list-staged-session",
+            agent_type="test-empty-list-staged",
+            agent=agent,
+            event_bus=event_bus,
+            session=session,
+            run_ctx=run_ctx,
+        )
+
+        receive_stream = await event_bus.subscribe(
+            "test-empty-list-staged-session",
+            scope="session",
+        )
+
+        session._comm_channel = DirectChannel(MemoryJournal())
+
+        async def _drive_run() -> None:
+            # Pass EMPTY LIST — this is the bug scenario from #284.
+            # The entire user message was a slash command, so
+            # non_command_content is [].
+            async for _ in run_handle.start([]):
+                pass
+
+        drive_task = asyncio.create_task(_drive_run())
+
+        received_events: list[RichAgentStreamEvent[Any]] = []
+        stream_complete_received = False
+
+        try:
+            async with asyncio.timeout(10):
+                while True:
+                    try:
+                        envelope = await receive_stream.get()
+                    except asyncio.QueueShutDown:
+                        break
+
+                    event = envelope.event if hasattr(envelope, "event") else envelope
+                    received_events.append(event)
+
+                    if isinstance(event, StreamCompleteEvent):
+                        stream_complete_received = True
+                        break
+        except TimeoutError:
+            pytest.fail(
+                "Timed out waiting for StreamCompleteEvent — start([]) likely "
+                "returned without executing a turn (issue #284). "
+                f"Events: {[type(e).__name__ for e in received_events]}"
+            )
+        finally:
+            drive_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await drive_task
+
+        assert stream_complete_received, (
+            "Consumer never received StreamCompleteEvent — turn did not execute"
+        )
+
+        # staged_content must have been consumed
+        assert len(agent.staged_content) == 0, (
+            "staged_content was not consumed — start([]) returned without "
+            "executing a turn (issue #284)"
+        )

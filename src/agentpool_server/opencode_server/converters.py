@@ -329,7 +329,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                     case PydanticToolCallPart(tool_name=tool_name, tool_call_id=call_id):
                         tool_input = _convert_params_for_ui(safe_args_as_dict(p))
                         ts = TimeStart(start=created_ms)
-                        title = f"Running {tool_name}"
+                        title = "Running"
                         running_state = ToolStateRunning(time=ts, input=tool_input, title=title)
                         tool_part = result.add_tool_part(tool_name, call_id, state=running_state)
                         tool_calls[call_id] = tool_part
@@ -379,7 +379,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                     time=TimeStartEnd(start=created_ms, end=end_ms),
                                 )
                             else:
-                                title = f"Completed {tool_name}"
+                                title = "Completed"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                                 # Extract metadata from tool result if present
                                 # (e.g., subagent sessionId)
@@ -403,7 +403,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
                                 ts_end = TimeStartEnd(start=created_ms, end=end_ms)
                                 state = ToolStateError(error=err, time=ts_end)
                             else:
-                                title = f"Completed {tool_name}"
+                                title = "Completed"
                                 tsc = TimeStartEndCompacted(start=created_ms, end=end_ms)
                                 # Extract metadata for orphan returns too
                                 metadata = (
@@ -575,6 +575,16 @@ def session_data_to_opencode(data: SessionData) -> Session:
     # Convert datetime to milliseconds timestamp
     created_ms = datetime_to_ms(data.created_at)
     updated_ms = datetime_to_ms(data.last_active)
+    # Override created_ms with the timestamp embedded in the session ID
+    # when available.  Old sessions persisted before the created_at_ns
+    # sync fix have stored created_at from get_now() (a separate wall-
+    # clock call), which can differ from the session ID's timestamp by
+    # milliseconds — enough to cause sort mismatches in the TUI.
+    from agentpool.utils.identifiers import extract_timestamp_ms
+
+    id_ts = extract_timestamp_ms(data.session_id)
+    if id_ts is not None:
+        created_ms = id_ts
     # Extract revert/share from metadata if present
     revert = None
     share = None

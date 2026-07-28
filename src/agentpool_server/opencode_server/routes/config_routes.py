@@ -107,7 +107,7 @@ async def _get_configured_variants(
 ) -> dict[str, dict[str, Any]]:
     """Get model variants from manifest configuration.
 
-    Returns empty dict if manifest or model_variants is None/empty.
+    Returns variants dict or manifest or model_variants is None/empty.
 
     Args:
         manifest: The agents manifest containing model_variants configuration.
@@ -120,8 +120,11 @@ async def _get_configured_variants(
     # Check manifest model_variants
     if manifest and manifest.model_variants:
         for name, config in manifest.model_variants.items():
+            # Prefer explicit provider field, fall back to identifier parse
+            provider = config.provider or _extract_provider(config)
             variants[name] = {
-                "provider": _extract_provider(config),
+                "provider": provider,
+                "context_length": config.context_length,
             }
 
     return variants
@@ -150,6 +153,10 @@ def _build_providers_from_configured(
                 models={},
             )
 
+        # Use configured context_length or fall back to defaults
+        ctx = variant_config.get("context_length")
+        context_limit = float(ctx) if ctx is not None else DEFAULT_MODEL_CONTEXT_LIMIT
+
         providers_by_name[provider_name].models[variant_name] = Model(
             id=variant_name,
             name=variant_name,
@@ -159,7 +166,7 @@ def _build_providers_from_configured(
                 output=DEFAULT_MODEL_OUTPUT_COST,
             ),
             limit=ModelLimit(
-                context=DEFAULT_MODEL_CONTEXT_LIMIT,
+                context=context_limit,
                 output=DEFAULT_MODEL_OUTPUT_LIMIT,
             ),
         )

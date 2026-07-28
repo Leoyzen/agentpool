@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agentpool.agents.events.events import StepUsageEvent
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -124,6 +126,29 @@ class BaseAgentAGUIAdapter:
             prompt = self._get_user_prompt()
 
             async for agent_event in self.agent.run_stream(prompt, store_history=False):  # type: ignore[attr-defined]
+                # Intercept StepUsageEvent before passing to AGUIEventStream.
+                # AGUIEventStream doesn't know about StepUsageEvent and would
+                # silently ignore it. Emit it as a custom AG-UI event instead.
+                if isinstance(agent_event, StepUsageEvent):
+                    from ag_ui.core import CustomEvent
+
+                    yield CustomEvent(
+                        name="step_usage",
+                        value={
+                            "step_index": agent_event.step_index,
+                            "step_usage": {
+                                "input_tokens": agent_event.step_usage.input_tokens,
+                                "output_tokens": agent_event.step_usage.output_tokens,
+                                "total_tokens": agent_event.step_usage.total_tokens,
+                            },
+                            "cumulative_usage": {
+                                "input_tokens": agent_event.cumulative_usage.input_tokens,
+                                "output_tokens": agent_event.cumulative_usage.output_tokens,
+                                "total_tokens": agent_event.cumulative_usage.total_tokens,
+                            },
+                        },
+                    )
+                    continue
                 # Transform compatible events through AGUIEventStream
                 # Our RichAgentStreamEvent is a superset - AGUIEventStream handles
                 # the pydantic-ai compatible events and ignores unknown types

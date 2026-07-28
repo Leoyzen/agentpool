@@ -132,15 +132,33 @@ class ServerState:
     def resolve_default_model_info(self) -> tuple[str, str]:
         """Resolve default (model_id, provider_id) from the configured agent.
 
-        Parses ``self.agent.model_name`` (e.g. ``"openai:gpt-4o"``) by
-        splitting on the first colon. Falls back to ``("default",
-        "agentpool")`` when the model name is ``None`` or missing a
-        provider prefix.
+        Priority:
+        1. If agent's resolved model matches a configured variant → use variant
+           name as model_id and configured provider as provider_id.
+        2. Parses ``self.agent.model_name`` (e.g. ``"openai:gpt-4o"``) by
+           splitting on the first colon.
+        3. Falls back to ``("default", "agentpool")``.
 
         Returns:
             Tuple of ``(model_id, provider_id)``.
         """
-        return self.parse_model_info(self.agent.model_name)
+        agent_model = self.agent.model_name
+        # Try variant-aware resolution first
+        if agent_model and self._pool is not None:
+            manifest = self._pool.manifest
+            if manifest and manifest.model_variants:
+                from agentpool_server.shared.model_utils import (
+                    _extract_provider,
+                    _find_variant_name,
+                )
+
+                matched = _find_variant_name(manifest.model_variants, agent_model)
+                if matched:
+                    config = manifest.model_variants[matched]
+                    provider = _extract_provider(config)
+                    return matched, provider
+
+        return self.parse_model_info(agent_model)
 
     def __post_init__(self) -> None:
         """Initialize derived state."""

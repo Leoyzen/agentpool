@@ -166,6 +166,12 @@ class OpenCodeEventBridgeMixin:
         session_state = self.session_pool.sessions.get_session(session_id)
         if session_state is not None:
             agent_name = session_state.agent_name
+            # Team member sessions: use the member's display name as the
+            # mode so the TUI footer shows e.g. "Critic-1" instead of the
+            # registered agent name (e.g. "artisan").
+            team_member_name = session_state.metadata.get("team_member_name")
+            if team_member_name is not None:
+                agent_name = team_member_name
             # For child sessions that bypass route_message(), resolve model
             # from the session's agent instance instead of the server default
             # (which is the parent/lead agent's model).  _pending_message_metadata
@@ -354,7 +360,7 @@ class OpenCodeEventBridgeMixin:
             # block ToolPart creation or assistant message registration.
             try:
                 await self._ensure_child_session_visible(session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to ensure child session visible",
                     session_id=session_id,
@@ -412,11 +418,34 @@ class OpenCodeEventBridgeMixin:
         user message here would cause double-rendering in the TUI.
         """
         child_session_id = spawn_event.child_session_id
-        await ensure_session(
+        # Use source_name (ASCII registered name) for the @xxx subagent pattern
+        # so the TUI regex @(\w+) subagent matches. display_name may contain
+        # non-ASCII characters (e.g. Chinese) that \w cannot match.
+        source_name = spawn_event.source_name
+        # Team members get a richer title with team name and role
+        team_id = spawn_event.metadata.get("team_id")
+        if team_id is not None:
+            team_name = spawn_event.metadata.get("team_name", "")
+            team_role = spawn_event.metadata.get("team_role", "member")
+            role_label = "Lead" if team_role == "lead" else "Member"
+            team_prefix = f"Team '{team_name}' · {role_label} " if team_name else ""
+            title = f"{team_prefix}(@{source_name} subagent)"
+        else:
+            title = f"(@{source_name} subagent)"
+        session = await ensure_session(
             self.server_state,
             child_session_id,
             parent_id=parent_session_id,
+            title=title,
         )
+        # ensure_session does not update the title if the session already
+        # exists (fast path / store-first path). Update it explicitly so the
+        # TUI shows the enriched title (e.g. "Team 'X' · Member (@Y subagent)").
+        if title is not None and session.title != title:
+            session.title = title
+            from agentpool_server.opencode_server.models import SessionUpdatedEvent
+
+            await self.server_state.broadcast_event(SessionUpdatedEvent.create(session))
 
     async def _handle_event(  # noqa: PLR0915
         self, session_id: str, envelope: EventEnvelope
@@ -642,7 +671,15 @@ class OpenCodeEventBridgeMixin:
                 msg_info = ctx.assistant_msg.info
                 if isinstance(msg_info, AssistantMessage):
                     msg_info.agent = event.agent_name
-                    msg_info.mode = event.agent_name
+                    # Team member sessions: prefer team_member_name over the
+                    # registered agent name for the TUI footer display.
+                    display_mode = event.agent_name
+                    session_state = self.session_pool.sessions.get_session(session_id)
+                    if session_state is not None:
+                        team_member_name = session_state.metadata.get("team_member_name")
+                        if team_member_name is not None:
+                            display_mode = team_member_name
+                    msg_info.mode = display_mode
             # NOTE: Do NOT overwrite ctx.assistant_msg_id from event.message_id.
             # NativeTurn generates its own UUID for _message_id (uuid4().hex)
             # which is different from the canonical assistant_msg_id generated
