@@ -451,6 +451,10 @@ class SessionPoolMessagingMixin:
         # Use self.event_bus (SessionPoolMessagingMixin property, always set by
         # SessionPool.__init__) instead of session._event_bus (SessionState's
         # field, only set by _initialize_lifecycle_and_recovery).
+        #
+        # Generate message_id ONCE and share with steer() so that
+        # EnqueuedMessagesEvent-derived event uses the same ID for dedup.
+        message_id = ascending("message")
         event_bus = self.event_bus
         if event_bus is not None:
             with logfire.span(
@@ -462,7 +466,7 @@ class SessionPoolMessagingMixin:
                 try:
                     event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
                         session_id=session_id,
-                        message_id=ascending("message"),
+                        message_id=message_id,
                         content=message,
                         delivery="steer",
                         source="internal",
@@ -476,7 +480,7 @@ class SessionPoolMessagingMixin:
         # Try injecting into the active RunHandle.
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
-            return run_handle.steer(message, emit_user_message=False)
+            return run_handle.steer(message, message_id=message_id, emit_user_message=False)
         # No active run — enqueue for next RunHandle via feedback_queue.
         fb = Feedback(content=message, is_steer=True)
         session.feedback_queue.put_nowait(fb)
