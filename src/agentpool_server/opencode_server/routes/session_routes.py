@@ -575,6 +575,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
             existing_msgs = state.messages.get(session_id, [])
             if not existing_msgs:
                 default_model_id, default_provider_id = state.resolve_default_model_info()
+                model_variants = state.model_variants
                 await set_messages_for_session(
                     state,
                     session_id,
@@ -584,8 +585,9 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                             session_id=session_id,
                             working_dir=state.working_dir,
                             agent_name=agent.name,
-                            model_id=chat_msg.model_name or default_model_id,
-                            provider_id=chat_msg.provider_name or default_provider_id,
+                            model_id=default_model_id,
+                            provider_id=default_provider_id,
+                            model_variants=model_variants,
                         )
                         for chat_msg in agent.conversation.chat_messages
                     ],
@@ -629,6 +631,7 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
         all_existing_msgs = state.messages.get(session_id, [])
         if not all_existing_msgs:
             default_model_id, default_provider_id = state.resolve_default_model_info()
+            model_variants = state.model_variants
             await set_messages_for_session(
                 state,
                 session_id,
@@ -638,8 +641,9 @@ async def get_or_load_session(state: ServerState, session_id: str) -> Session | 
                         session_id=session_id,
                         working_dir=state.working_dir,
                         agent_name=agent.name,
-                        model_id=chat_msg.model_name or default_model_id,
-                        provider_id=chat_msg.provider_name or default_provider_id,
+                        model_id=default_model_id,
+                        provider_id=default_provider_id,
+                        model_variants=model_variants,
                     )
                     for chat_msg in agent.conversation.chat_messages
                 ],

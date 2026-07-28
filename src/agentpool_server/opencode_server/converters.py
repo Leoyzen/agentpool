@@ -63,6 +63,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.common_types import MCPConnectionStatus, MCPServerStatus, PathReference
+    from agentpool.models.model_configs import AnyModelConfig
     from agentpool_server.opencode_server.models import ToolState
     from agentpool_server.opencode_server.models.mcp import (
         MCPConnectionStatus as OpenCodeMCPConnectionStatus,
@@ -220,6 +221,7 @@ def chat_message_to_opencode(  # noqa: PLR0915
     agent_name: str = "default",
     model_id: str = "unknown",
     provider_id: str = "agentpool",
+    model_variants: dict[str, AnyModelConfig] | None = None,
 ) -> MessageWithParts:
     """Convert a ChatMessage to OpenCode MessageWithParts.
 
@@ -228,8 +230,11 @@ def chat_message_to_opencode(  # noqa: PLR0915
         session_id: OpenCode session ID
         working_dir: Working directory for path context
         agent_name: Name of the agent
-        model_id: Model identifier
-        provider_id: Provider identifier
+        model_id: Model identifier (fallback when model_variants is None)
+        provider_id: Provider identifier (fallback when model_variants is None)
+        model_variants: Optional dict of variant name → config from manifest.
+            When provided and non-empty, resolves model_id/provider_id from
+            the message's raw model_name/provider_name via variant lookup.
 
     Returns:
         OpenCode MessageWithParts with appropriate info and parts
@@ -270,12 +275,23 @@ def chat_message_to_opencode(  # noqa: PLR0915
             completed_ms = created_ms + int(msg.response_time * 1000)
 
         tokens = Tokens.from_pydantic_ai(msg.usage)
+        if model_variants:
+            from agentpool_server.shared.model_utils import resolve_model_info_from_response
+
+            resolved_id, resolved_provider = resolve_model_info_from_response(
+                msg.model_name, msg.provider_name, model_variants
+            )
+            model_id = resolved_id
+            provider_id = resolved_provider
+        else:
+            model_id = msg.model_name or model_id
+            provider_id = msg.provider_name or provider_id
         result = MessageWithParts.assistant(
             message_id=message_id,
             session_id=session_id,
             parent_id="",  # Would need to track parent user message
-            model_id=msg.model_name or model_id,
-            provider_id=msg.provider_name or provider_id,
+            model_id=model_id,
+            provider_id=provider_id,
             agent_name=msg.name or agent_name,
             path=MessagePath(cwd=working_dir, root=working_dir),
             time=MessageTime(created=created_ms, completed=completed_ms),

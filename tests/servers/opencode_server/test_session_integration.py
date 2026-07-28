@@ -146,7 +146,11 @@ def server_state(tmp_project_dir: Any) -> ServerState:
     agent.model_name = None  # resolve_default_model_info() fallback
     agent.name = "test-agent"
     agent.storage = Mock()
-    return ServerState(working_dir=str(tmp_project_dir), agent=agent)
+    state = ServerState(working_dir=str(tmp_project_dir), agent=agent)
+    # No real pool in tests — _pool would be a Mock from agent._agent_pool,
+    # which breaks model_variants property and resolve_default_model_info().
+    state._pool = None  # type: ignore[assignment]
+    return state
 
 
 @pytest.fixture
