@@ -201,10 +201,10 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         lines.append("-" * len(header))
 
         # ResourceAccess providers
-        for cap in registry.get_resource_access(scope):
-            source = type(cap).__name__
+        for resource_cap in registry.get_resource_access(scope):
+            source = type(resource_cap).__name__
             try:
-                entries = await cap.list_resources()
+                resource_entries = await resource_cap.list_resources()
             except Exception:  # noqa: BLE001
                 logfire.warning(
                     "Failed to list resources from {source}",
@@ -214,14 +214,14 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             lines.extend(
                 f"{source:<25} {entry.uri:<45} {entry.name:<20} "
                 f"{entry.description:<30} {entry.mime_type:<15}"
-                for entry in entries
+                for entry in resource_entries
             )
 
         # SkillResource providers
-        for cap in registry.get_skill_resources(scope):
-            source = type(cap).__name__
+        for skill_cap in registry.get_skill_resources(scope):
+            source = type(skill_cap).__name__
             try:
-                entries = await cap.list_skills()
+                skill_entries = await skill_cap.list_skills()
             except Exception:  # noqa: BLE001
                 logfire.warning(
                     "Failed to list skills from {source}",
@@ -229,9 +229,9 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                 )
                 continue
             lines.extend(
-                f"{source:<25} {str(entry.skill_path or entry.uri) or '':<45} "
-                f"{entry.name:<20} {entry.description:<30} {'':<15}"
-                for entry in entries
+                f"{source:<25} {str(s_entry.skill_path or s_entry.uri) or '':<45} "
+                f"{s_entry.name:<20} {s_entry.description:<30} {'':<15}"
+                for s_entry in skill_entries
             )
 
         if len(lines) <= _HEADER_LINE_COUNT:
@@ -268,23 +268,23 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         # Route skill:// URIs to SkillResource providers
         if uri.startswith("skill://"):
             skill_name = self._extract_skill_name(uri)
-            for cap in registry.get_skill_resources(scope):
+            for skill_cap in registry.get_skill_resources(scope):
                 try:
-                    exists = await cap.skill_exists(skill_name)
+                    exists = await skill_cap.skill_exists(skill_name)
                 except Exception:  # noqa: BLE001
                     continue
                 if not exists:
                     continue
-                content = await cap.read_skill(skill_name)
+                content = await skill_cap.read_skill(skill_name)
                 if content is None:
                     continue
                 return ToolReturn(return_value=content, content=[content])
             return ToolReturn(return_value=f"Resource not found: {uri}")
 
         # Route other URIs to ResourceAccess providers
-        for cap in registry.get_resource_access(scope):
+        for resource_cap in registry.get_resource_access(scope):
             try:
-                contents = await cap.read_resource(uri)
+                contents = await resource_cap.read_resource(uri)
             except Exception:  # noqa: BLE001
                 continue
             if contents is None:
@@ -337,17 +337,17 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
 
         if uri.startswith("skill://"):
             skill_name = self._extract_skill_name(uri)
-            for cap in registry.get_skill_resources(scope):
+            for skill_cap in registry.get_skill_resources(scope):
                 try:
-                    if await cap.skill_exists(skill_name):
+                    if await skill_cap.skill_exists(skill_name):
                         return True
                 except Exception:  # noqa: BLE001
                     continue
             return False
 
-        for cap in registry.get_resource_access(scope):
+        for resource_cap in registry.get_resource_access(scope):
             try:
-                if await cap.resource_exists(uri):
+                if await resource_cap.resource_exists(uri):
                     return True
             except Exception:  # noqa: BLE001
                 continue

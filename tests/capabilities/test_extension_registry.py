@@ -303,7 +303,7 @@ class TestTypedQueries:
         reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
         reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
 
-        with pytest.warns(DeprecationWarning, match="McpResource is deprecated"):
+        with pytest.warns(DeprecationWarning, match="get_mcp_resources.*deprecated"):
             mcps = reg.get_mcp_resources(Scope(level=ScopeLevel.POOL))
         assert mcp_cap in mcps
         assert skill_cap not in mcps
@@ -314,7 +314,7 @@ class TestTypedQueries:
         mcp_cap = FakeMcpResource()
         reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
 
-        with pytest.warns(DeprecationWarning, match="McpResource is deprecated"):
+        with pytest.warns(DeprecationWarning, match="get_mcp_resources.*deprecated"):
             deprecated_result = reg.get_mcp_resources(Scope(level=ScopeLevel.POOL))
         new_result = reg.get_resource_access(Scope(level=ScopeLevel.POOL))
 

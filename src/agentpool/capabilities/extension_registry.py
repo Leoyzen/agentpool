@@ -528,9 +528,9 @@ class ExtensionRegistry:
         if uri.startswith("mcp://"):
             from agentpool.capabilities.resource_protocols import TextResourceContent
 
-            for cap in self.get_resource_access(scope):
+            for resource_cap in self.get_resource_access(scope):
                 try:
-                    contents = await cap.read_resource(uri)
+                    contents = await resource_cap.read_resource(uri)
                     if contents is None:
                         continue
                     for c in contents:
@@ -541,7 +541,7 @@ class ExtensionRegistry:
                     logger.warning(
                         "Failed to resolve MCP URI %r via %s",
                         uri,
-                        type(cap).__name__,
+                        type(resource_cap).__name__,
                         exc_info=True,
                     )
             return None
