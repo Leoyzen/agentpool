@@ -393,7 +393,14 @@ class SessionPoolMessagingMixin:
             return run_handle.followup(str(message))
         return None
 
-    async def steer(self, session_id: str, message: str, **kwargs: Any) -> str | None:
+    async def steer(
+        self,
+        session_id: str,
+        message: str,
+        *,
+        emit_user_message: bool = True,
+        **kwargs: Any,
+    ) -> str | None:
         """Inject a steer message with agent-type-aware routing.
 
         Delegates to ``RunHandle.steer()`` when an active run exists.
@@ -401,6 +408,9 @@ class SessionPoolMessagingMixin:
         Args:
             session_id: Target session.
             message: The steer message to deliver.
+            emit_user_message: When ``True`` (default), publish a
+                ``UserMessageInsertedEvent`` so protocol frontends display
+                the injected message.  Set to ``False`` to suppress.
             **kwargs: Additional arguments (ignored).
 
         Returns:
@@ -408,7 +418,7 @@ class SessionPoolMessagingMixin:
         """
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
-            return run_handle.steer(message)
+            return run_handle.steer(message, emit_user_message=emit_user_message)
         return None
 
     async def steer_from_background_task(self, session_id: str, message: str) -> str | None:

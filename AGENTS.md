@@ -151,7 +151,7 @@ The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
   - `agents/` - Agent implementations (native, ACP)
-  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
+  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
   - `lifecycle/` - RunLoop lifecycle dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
   - `messaging/` - Message processing, MessageNode abstraction, compaction
@@ -236,6 +236,8 @@ In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai
 | `CombinedToolsetCapability` | `AggregatingResourceProvider` | `capabilities/combined_toolset.py` |
 | `FilteredToolsetCapability` | `FilteringResourceProvider` | `capabilities/filtered_toolset.py` |
 | `CodeModeCapability` | `CodeModeResourceProvider` | `capabilities/code_mode_capability.py` |
+| `DynamicContextPruningCapability` | — (new) | `capabilities/dcp/capability.py` |
+| `ToolOutputBudgetCapability` | — (new) | `capabilities/tool_output_budget.py` |
 
 **Supporting types:**
 - `ResourceSource` (`capabilities/resource_source.py`) — `@runtime_checkable Protocol` for read-only data access (`list()`, `read(uri)`, `exists(uri)`, `on_change()`). Orthogonal to `AbstractCapability` — same object can implement both.
@@ -1307,8 +1309,10 @@ The project uses entry points for extensibility:
 - `src/agentpool/skills/registry.py` - Skill discovery
 - `src/agentpool/skills/capability.py` - `SkillCapability(AbstractCapability)` with `ResourceSource` implementation
 - `src/agentpool/skills/instruction_provider.py` - `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
-- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability)
+- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability)
 - `src/agentpool/capabilities/agent_context.py` - `AgentContext` frozen dataclass
+- `src/agentpool/capabilities/dcp/` - Dynamic Context Pruning (DCP) capability package — `DynamicContextPruningCapability`, `DCPConfig`, `DCPState`, 3 model-facing tools (prune/distill/decompress), 4-level watermark, auto-strategies (dedup, purge_errors), prunable-tools list, nudge injection, clear thinking
+- `src/agentpool/capabilities/tool_output_budget.py` - `ToolOutputBudgetCapability` — truncates large tool outputs with configurable suffix
 - `src/agentpool/capabilities/delegation.py` - `DelegationService` Protocol
 - `src/agentpool/capabilities/resource_source.py` - `ResourceSource` Protocol + `AggregatedResourceSource`
 - `src/agentpool/capabilities/registry.py` - Entry-point capability discovery
