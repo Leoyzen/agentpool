@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
     ImageUrl,
     TextContent,
     ThinkingPart,
+    UploadedFile,
     VideoUrl,
 )
 
@@ -159,17 +160,19 @@ def get_model_category(current_model: str, models: list[ModelInfo]) -> ModeCateg
     )
 
 
-def _summarize_content_block(block: Any) -> str:  # noqa: PLR0911
+def _summarize_content_block(block: Any) -> str:
     """Produce a short text summary of a content block for logging/display.
 
     Handles all pydantic-ai UserContent variant types, producing meaningful
     placeholders instead of raw ``repr()`` output for binary/URL types.
+    Delegates multimodal content description to
+    :func:`describe_multimodal_content`.
 
     Args:
         block: A content block from ``UserPromptPart.content`` — may be a
             ``str``, ``TextContent``, ``BinaryImage``, ``BinaryContent``,
-            ``ImageUrl``, ``AudioUrl``, ``VideoUrl``, ``DocumentUrl``, or
-            any other object.
+            ``ImageUrl``, ``AudioUrl``, ``VideoUrl``, ``DocumentUrl``,
+            ``UploadedFile``, or any other object.
 
     Returns:
         A short text string suitable for display in logs, ChatMessage.content,
@@ -179,15 +182,11 @@ def _summarize_content_block(block: Any) -> str:  # noqa: PLR0911
         return block
     if isinstance(block, TextContent):
         return block.content
-    if isinstance(block, BinaryImage | BinaryContent):
-        media = block.media_type
-        return f"[{media}]"
-    if isinstance(block, ImageUrl):
-        return f"[image: {block.url}]"
-    if isinstance(block, AudioUrl):
-        return f"[audio: {block.url}]"
-    if isinstance(block, VideoUrl):
-        return f"[video: {block.url}]"
-    if isinstance(block, DocumentUrl):
-        return f"[document: {block.url}]"
+    if isinstance(
+        block,
+        BinaryImage | BinaryContent | ImageUrl | AudioUrl | VideoUrl | DocumentUrl | UploadedFile,
+    ):
+        from agentpool.capabilities.modality_utils import describe_multimodal_content
+
+        return describe_multimodal_content(block)
     return f"[{type(block).__name__}]"

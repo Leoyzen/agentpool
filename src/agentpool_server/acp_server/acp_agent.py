@@ -376,6 +376,18 @@ class AgentPoolACPAgent(ACPAgent):
         # Gate turn_complete advertisement on client's declared support
         client_caps = params.client_capabilities
         turn_complete = bool(client_caps.turn_complete) if client_caps is not None else False
+        # Derive audio/image modality support from the default agent's model
+        # capabilities. When capabilities are not declared (None), default to
+        # True (optimistic) to preserve backward-compatible behavior.
+        audio_prompts = True
+        image_prompts = True
+        from agentpool.models.model_configs import BaseModelConfig
+
+        model_config = self.default_agent.config.model
+        if isinstance(model_config, BaseModelConfig) and model_config.capabilities is not None:
+            caps = model_config.capabilities
+            audio_prompts = caps.audio_input if caps.audio_input is not None else True
+            image_prompts = caps.image_input if caps.image_input is not None else True
         return InitializeResponse.create(
             protocol_version=version,
             name="agentpool",
@@ -389,9 +401,9 @@ class AgentPoolACPAgent(ACPAgent):
             http_mcp_servers=True,
             sse_mcp_servers=True,
             acp_mcp_servers=True,
-            audio_prompts=True,
+            audio_prompts=audio_prompts,
             embedded_context_prompts=True,
-            image_prompts=True,
+            image_prompts=image_prompts,
             providers=True,
             turn_complete=turn_complete,
         )

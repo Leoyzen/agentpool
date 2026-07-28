@@ -28,6 +28,7 @@ KNOWN_CAPABILITY_TYPES: frozenset[str] = frozenset({
     "dcp",
     "skill_activation",
     "memory",
+    "modality_filter",
 })
 
 IMPORT_MAP: dict[str, str] = {
@@ -37,6 +38,7 @@ IMPORT_MAP: dict[str, str] = {
     "dcp": "agentpool.capabilities.dcp.DynamicContextPruningCapability",
     "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
+    "modality_filter": "agentpool.capabilities.modality_filter.ModalityFilterCapability",
 }
 
 
@@ -133,6 +135,26 @@ class MemoryCapabilityConfig(BaseModel):
     """Config for ``MemoryCapability``."""
 
     type: Literal["memory"] = "memory"
+
+
+class ModalityFilterCapabilityConfig(BaseModel):
+    """Config for ``ModalityFilterCapability``.
+
+    Provides per-modality degradation strategies for models that lack
+    certain input modalities. When a tool returns content the model
+    cannot process (e.g. image for a text-only model), the capability
+    degrades it according to the configured strategy.
+    """
+
+    type: Literal["modality_filter"] = "modality_filter"
+    image_strategy: Literal["describe", "drop", "pass"] = "describe"
+    """Degradation strategy for unsupported image content."""
+    audio_strategy: Literal["describe", "drop", "pass"] = "describe"
+    """Degradation strategy for unsupported audio content."""
+    video_strategy: Literal["describe", "drop", "pass"] = "describe"
+    """Degradation strategy for unsupported video content."""
+    document_strategy: Literal["describe", "drop", "pass"] = "describe"
+    """Degradation strategy for unsupported document content."""
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +270,8 @@ BuiltinCapabilityConfig = Annotated[
     | ToolOutputBudgetCapabilityConfig
     | DCPCapabilityConfig
     | SkillActivationCapabilityConfig
-    | MemoryCapabilityConfig,
+    | MemoryCapabilityConfig
+    | ModalityFilterCapabilityConfig,
     Field(discriminator="type"),
 ]
 
@@ -306,6 +329,18 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
             return _import_and_instantiate(IMPORT_MAP["skill_activation"], config)
         case MemoryCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["memory"], config)
+        case ModalityFilterCapabilityConfig():
+            from agentpool.capabilities.modality_filter import ModalityFilterCapability
+            from agentpool_config.model_capabilities import ModelCapabilities
+
+            # The capabilities field is injected by AgentFactory at runtime.
+            # For YAML-configured instances, we create a placeholder that will
+            # be populated by the factory's user-config precedence logic (D14).
+            kwargs = config.model_dump(exclude={"type"})
+            return ModalityFilterCapability(
+                capabilities=ModelCapabilities(),  # placeholder — factory will replace
+                **kwargs,
+            )
         case _ as unreachable:
             from typing import assert_never
 
