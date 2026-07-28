@@ -204,6 +204,9 @@ lint = [
   "types-jsonschema>=4.25.1.20251009",
   # Only add below (Copier)
 ]
+viking = [
+  "openviking-sdk>=0.1.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.8.22"]

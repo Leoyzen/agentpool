@@ -188,6 +188,9 @@ lint = [
     { name = "types-pygments" },
     { name = "types-pyyaml" },
 ]
+viking = [
+    { name = "openviking-sdk" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -316,6 +319,7 @@ lint = [
     { name = "types-pygments" },
     { name = "types-pyyaml" },
 ]
+viking = [{ name = "openviking-sdk", specifier = ">=0.1.0" }]
 
 [[package]]
 name = "aiofile"
@@ -3385,6 +3389,18 @@ source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/50/fc/c47bb04a1d8a941a4061307e1eddfa331ed4d0ab13d8a9781e6db256940a/opentelemetry_util_http-0.60b1.tar.gz", hash = "sha256:0d97152ca8c8a41ced7172d29d3622a219317f74ae6bb3027cfbdcf22c3cc0d6", size = 11053, upload-time = "2025-12-11T13:37:25.115Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/16/5c/d3f1733665f7cd582ef0842fb1d2ed0bc1fba10875160593342d22bba375/opentelemetry_util_http-0.60b1-py3-none-any.whl", hash = "sha256:66381ba28550c91bee14dcba8979ace443444af1ed609226634596b4b0faf199", size = 8947, upload-time = "2025-12-11T13:36:37.151Z" },
+]
+
+[[package]]
+name = "openviking-sdk"
+version = "0.1.5"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e4/9c/b75da8d956bbfaf39288dd3cf7c734ba9225fba34e44362d02fbdb9a871d/openviking_sdk-0.1.5.tar.gz", hash = "sha256:f017dec938267aaea659122165f2872e189933a5604ba6d9ec0ae867b558ecaf", size = 33652, upload-time = "2026-07-23T06:18:56.211Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/53/c0/481ec44e2f98cf1afd47d4c115756dd4b1fa674caa4b99b0f72723d6fc33/openviking_sdk-0.1.5-py3-none-any.whl", hash = "sha256:f29af1c56e1a4477c881d584fa5178b5a34600847926cfe21fddd333ccb576ec", size = 21740, upload-time = "2026-07-23T06:18:54.864Z" },
 ]
 
 [[package]]

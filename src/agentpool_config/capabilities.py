@@ -29,6 +29,7 @@ KNOWN_CAPABILITY_TYPES: frozenset[str] = frozenset({
     "skill_activation",
     "memory",
     "modality_filter",
+    "viking",
 })
 
 IMPORT_MAP: dict[str, str] = {
@@ -39,6 +40,7 @@ IMPORT_MAP: dict[str, str] = {
     "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
     "modality_filter": "agentpool.capabilities.modality_filter.ModalityFilterCapability",
+    "viking": "agentpool.capabilities.viking.VikingCapability",
 }
 
 
@@ -157,6 +159,35 @@ class ModalityFilterCapabilityConfig(BaseModel):
     """Degradation strategy for unsupported document content."""
 
 
+class VikingCapabilityConfig(BaseModel):
+    """Config for ``VikingCapability``."""
+
+    type: Literal["viking"] = "viking"
+    mode: Literal["retrieve", "write", "graph", "all"] = "all"
+    """Tool exposure mode — retrieve (7 tools), write (6 tools), graph (2 tools), all (15 tools)."""
+    url: str | None = None
+    """Viking server URL. If None, SDK resolves from OPENVIKING_URL env var
+    or ~/.openviking/ovcli.conf."""
+    api_key: str | None = None
+    """Viking API key. If None, SDK resolves from env vars."""
+    account: str | None = None
+    """Viking account ID. If None, SDK resolves from env vars."""
+    user: str | None = None
+    """Viking user ID. If None, SDK resolves from env vars."""
+    timeout: float | None = None
+    """Request timeout in seconds. If None, SDK uses default (60s)."""
+    skills_uri: str | None = None
+    """Override for skills URI. Default: viking://user/{user or 'default'}/skills/"""
+    resources_uri: str | None = None
+    """Override for resources URI."""
+    multimodal_bridge: bool = False
+    """Enable multimodal bridge (Phase 6, not yet implemented)."""
+    uploads_uri: str | None = None
+    """Override for uploads URI."""
+    public_download_base_url: str | None = None
+    """Base URL for public download links."""
+
+
 # ---------------------------------------------------------------------------
 # Entry-point-based config
 # ---------------------------------------------------------------------------
@@ -271,7 +302,8 @@ BuiltinCapabilityConfig = Annotated[
     | DCPCapabilityConfig
     | SkillActivationCapabilityConfig
     | MemoryCapabilityConfig
-    | ModalityFilterCapabilityConfig,
+    | ModalityFilterCapabilityConfig
+    | VikingCapabilityConfig,
     Field(discriminator="type"),
 ]
 
@@ -331,6 +363,8 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
             return _import_and_instantiate(IMPORT_MAP["memory"], config)
         case ModalityFilterCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["modality_filter"], config)
+        case VikingCapabilityConfig():
+            return _import_and_instantiate(IMPORT_MAP["viking"], config)
         case _ as unreachable:
             from typing import assert_never
 
