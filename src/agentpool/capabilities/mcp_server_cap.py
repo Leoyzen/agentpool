@@ -8,8 +8,8 @@ Implements:
     - ``McpResource``: list_tools, call_tool, list_resources, read_resource, resource_exists
     - ``SkillResource``: list_skills, read_skill, skill_exists (MCP resources → skills)
     - ``CommandResource``: list_commands, get_command (MCP prompts → commands)
-    - ``ChangeObservable``: on_change yields ChangeEvent for tools/list_changed
-      and resources/list_changed
+    - ``ChangeObservable``: on_change yields ChangeEvent for tools/list_changed,
+      resources/list_changed, resources/updated, and prompts/list_changed
 """
 
 from __future__ import annotations
@@ -183,11 +183,20 @@ class McpServerCap(
                 for q in list(self._change_queues):
                     await q.put(event)
 
-            async def _on_resources_changed() -> None:
+            async def _on_resource_list_changed() -> None:
                 event = ChangeEvent(
                     capability_name=self._name,
-                    kind="resources_changed",
+                    kind="resource_list_changed",
                     source_uri=f"mcp://{self._name}",
+                )
+                for q in list(self._change_queues):
+                    await q.put(event)
+
+            async def _on_resource_updated(uri: str) -> None:
+                event = ChangeEvent(
+                    capability_name=self._name,
+                    kind="resource_updated",
+                    source_uri=uri,
                 )
                 for q in list(self._change_queues):
                     await q.put(event)
@@ -202,7 +211,8 @@ class McpServerCap(
                     await q.put(event)
 
             client._tool_change_callback = _on_tools_changed
-            client._resource_change_callback = _on_resources_changed
+            client._resource_list_changed_callback = _on_resource_list_changed
+            client._resource_updated_callback = _on_resource_updated
             client._prompt_change_callback = _on_prompts_changed
             self._client = client
             return client
@@ -261,9 +271,14 @@ class McpServerCap(
         """Yield ``ChangeEvent`` when the MCP server's tools or resources change.
 
         Events yielded:
-            - ``ChangeEvent(kind="tools_changed")`` on ``notifications/tools/list_changed``
-            - ``ChangeEvent(kind="resources_changed")`` on ``notifications/resources/list_changed``
-            - ``ChangeEvent(kind="prompts_changed")`` on ``notifications/prompts/list_changed``
+            - ``ChangeEvent(kind="tools_changed")`` on
+              ``notifications/tools/list_changed``
+            - ``ChangeEvent(kind="resource_list_changed")`` on
+              ``notifications/resources/list_changed``
+            - ``ChangeEvent(kind="resource_updated", source_uri=uri)`` on
+              ``notifications/resources/updated``
+            - ``ChangeEvent(kind="prompts_changed")`` on
+              ``notifications/prompts/list_changed``
 
         Returns:
             An async iterator yielding ``ChangeEvent`` instances, or

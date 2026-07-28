@@ -5,7 +5,9 @@ Tests cover:
 - Resource templates: list_resource_templates, complete_resource_template
 - Multimodal read_resource (text + blob)
 - Lazy init: no connection at construct, connection on first list_tools
-- Change notification mapping: tools/list_changed → ChangeEvent
+- Change notification mapping: tools/list_changed, resource_list_changed, resource_updated
+- MCPMessageHandler dispatch with real MCP notification types
+- MCPClient subscribe/unsubscribe via low-level ClientSession
 """
 
 from __future__ import annotations
@@ -13,8 +15,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import mcp.types
+from pydantic import AnyUrl
 import pytest
 
 from agentpool.capabilities.change_event import ChangeEvent
@@ -32,6 +36,7 @@ from agentpool.capabilities.resource_protocols import (
     ToolAccess,
     ToolEntry,
 )
+from agentpool.mcp_server.message_handler import MCPMessageHandler
 
 
 pytestmark = pytest.mark.unit
@@ -57,6 +62,11 @@ class FakeMCPClient:
     _completion_result: Any = None
     _connected: bool = False
     _tool_change_callback: Any = None
+    _resource_list_changed_callback: Any = None
+    _resource_updated_callback: Any = None
+    _prompt_change_callback: Any = None
+    _subscribed_uris: list[str] = field(default_factory=list)
+    _unsubscribed_uris: list[str] = field(default_factory=list)
     config: Any = None
 
     async def __aenter__(self) -> Self:
@@ -110,6 +120,22 @@ class FakeMCPClient:
         """Simulate MCP server sending notifications/tools/list_changed."""
         if self._tool_change_callback is not None:
             await self._tool_change_callback()
+
+    async def trigger_resource_list_changed(self) -> None:
+        """Simulate notifications/resources/list_changed."""
+        if self._resource_list_changed_callback is not None:
+            await self._resource_list_changed_callback()
+
+    async def trigger_resource_updated(self, uri: str) -> None:
+        """Simulate notifications/resources/updated."""
+        if self._resource_updated_callback is not None:
+            await self._resource_updated_callback(uri)
+
+    async def subscribe_resource(self, uri: str) -> None:
+        self._subscribed_uris.append(uri)
+
+    async def unsubscribe_resource(self, uri: str) -> None:
+        self._unsubscribed_uris.append(uri)
 
 
 class FakeSessionPool:
@@ -591,3 +617,290 @@ def test_get_instructions_returns_none() -> None:
         session_pool=FakeSessionPool(FakeMCPClient()),
     )
     assert cap.get_instructions() is None
+
+
+# ---------------------------------------------------------------------------
+# Change event tests: resource_list_changed and resource_updated
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_change_event_resource_list_changed() -> None:
+    """resource_list_changed notification emits ChangeEvent with correct kind."""
+    client = FakeMCPClient()
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    # Force client init to wire callbacks
+    await cap.list_tools()
+
+    stream = cap.on_change()
+    assert stream is not None
+
+    await client.trigger_resource_list_changed()
+
+    async with asyncio.timeout(1.0):
+        event = await stream.__anext__()
+
+    assert isinstance(event, ChangeEvent)
+    assert event.kind == "resource_list_changed"
+    assert event.capability_name == cap.name
+    assert event.source_uri == f"mcp://{cap.name}"
+
+
+@pytest.mark.anyio
+async def test_change_event_resource_updated_carries_uri() -> None:
+    """resource_updated notification emits ChangeEvent with the specific resource URI."""
+    client = FakeMCPClient()
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    await cap.list_tools()
+
+    stream = cap.on_change()
+    assert stream is not None
+
+    updated_uri = "mcp://github/issues/42"
+    await client.trigger_resource_updated(updated_uri)
+
+    async with asyncio.timeout(1.0):
+        event = await stream.__anext__()
+
+    assert isinstance(event, ChangeEvent)
+    assert event.kind == "resource_updated"
+    assert event.source_uri == updated_uri
+    assert event.capability_name == cap.name
+
+
+@pytest.mark.anyio
+async def test_change_event_resource_updated_different_uris() -> None:
+    """Multiple resource_updated events carry distinct source_uri values."""
+    client = FakeMCPClient()
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    await cap.list_tools()
+
+    stream = cap.on_change()
+    assert stream is not None
+
+    uri1 = "mcp://server/file_a.txt"
+    uri2 = "mcp://server/file_b.txt"
+
+    await client.trigger_resource_updated(uri1)
+    await client.trigger_resource_updated(uri2)
+
+    events: list[ChangeEvent] = []
+    async with asyncio.timeout(1.0):
+        events.append(await stream.__anext__())
+        events.append(await stream.__anext__())
+
+    assert events[0].source_uri == uri1
+    assert events[1].source_uri == uri2
+    assert all(e.kind == "resource_updated" for e in events)
+
+
+@pytest.mark.anyio
+async def test_change_event_resource_list_changed_no_listeners() -> None:
+    """Triggering resource_list_changed with no active stream does not raise."""
+    client = FakeMCPClient()
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    await cap.list_tools()
+
+    # No on_change() stream created — should not raise
+    await client.trigger_resource_list_changed()
+
+
+@pytest.mark.anyio
+async def test_change_event_resource_updated_no_listeners() -> None:
+    """Triggering resource_updated with no active stream does not raise."""
+    client = FakeMCPClient()
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    await cap.list_tools()
+
+    # No on_change() stream created — should not raise
+    await client.trigger_resource_updated("mcp://server/whatever")
+
+
+# ---------------------------------------------------------------------------
+# MCPMessageHandler tests with real MCP notification types
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_message_handler_resource_list_changed_calls_callback() -> None:
+    """on_resource_list_changed calls the renamed callback."""
+    called = False
+
+    async def callback() -> None:
+        nonlocal called
+        called = True
+
+    handler = MCPMessageHandler(
+        client=MagicMock(),
+        resource_list_changed_callback=callback,
+    )
+
+    notification = mcp.types.ResourceListChangedNotification()
+    await handler.on_resource_list_changed(notification)
+
+    assert called
+
+
+@pytest.mark.anyio
+async def test_message_handler_resource_updated_calls_callback_with_uri() -> None:
+    """on_resource_updated calls the callback with the URI from the notification."""
+    received_uri: str | None = None
+
+    async def callback(uri: str) -> None:
+        nonlocal received_uri
+        received_uri = uri
+
+    handler = MCPMessageHandler(
+        client=MagicMock(),
+        resource_updated_callback=callback,
+    )
+
+    expected_uri = "mcp://server/important-resource.txt"
+    notification = mcp.types.ResourceUpdatedNotification(
+        params=mcp.types.ResourceUpdatedNotificationParams(
+            uri=AnyUrl(expected_uri),
+        ),
+    )
+    await handler.on_resource_updated(notification)
+
+    assert received_uri == expected_uri
+
+
+@pytest.mark.anyio
+async def test_message_handler_resource_list_changed_no_callback() -> None:
+    """on_resource_list_changed does not raise when callback is None."""
+    handler = MCPMessageHandler(client=MagicMock())
+
+    notification = mcp.types.ResourceListChangedNotification()
+    await handler.on_resource_list_changed(notification)
+
+
+@pytest.mark.anyio
+async def test_message_handler_resource_updated_no_callback() -> None:
+    """on_resource_updated does not raise when callback is None."""
+    handler = MCPMessageHandler(client=MagicMock())
+
+    notification = mcp.types.ResourceUpdatedNotification(
+        params=mcp.types.ResourceUpdatedNotificationParams(
+            uri=AnyUrl("mcp://server/some-resource"),
+        ),
+    )
+    await handler.on_resource_updated(notification)
+
+
+@pytest.mark.anyio
+async def test_message_handler_dispatches_resource_updated_via_call() -> None:
+    """Full __call__ dispatch routes ResourceUpdatedNotification to on_resource_updated."""
+    received_uris: list[str] = []
+
+    async def callback(uri: str) -> None:
+        received_uris.append(uri)
+
+    handler = MCPMessageHandler(
+        client=MagicMock(),
+        resource_updated_callback=callback,
+    )
+
+    server_notification = mcp.types.ServerNotification(
+        root=mcp.types.ResourceUpdatedNotification(
+            params=mcp.types.ResourceUpdatedNotificationParams(
+                uri=AnyUrl("mcp://server/dispatched.txt"),
+            ),
+        ),
+    )
+
+    await handler(server_notification)
+
+    assert received_uris == ["mcp://server/dispatched.txt"]
+
+
+@pytest.mark.anyio
+async def test_message_handler_dispatches_resource_list_changed_via_call() -> None:
+    """Full __call__ dispatch routes ResourceListChangedNotification correctly."""
+    call_count = 0
+
+    async def callback() -> None:
+        nonlocal call_count
+        call_count += 1
+
+    handler = MCPMessageHandler(
+        client=MagicMock(),
+        resource_list_changed_callback=callback,
+    )
+
+    server_notification = mcp.types.ServerNotification(
+        root=mcp.types.ResourceListChangedNotification(),
+    )
+
+    await handler(server_notification)
+
+    assert call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# MCPClient subscribe/unsubscribe tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_mcpclient_subscribe_resource_delegates_to_session() -> None:
+    """subscribe_resource calls ClientSession.subscribe_resource with AnyUrl."""
+    from agentpool.mcp_server.client import MCPClient
+    from agentpool_config.mcp_server import StdioMCPServerConfig
+
+    config = StdioMCPServerConfig(command="echo", args=["test"])
+    client = MCPClient(config)
+
+    mock_session = MagicMock()
+    mock_session.subscribe_resource = AsyncMock(return_value=None)
+    mock_fastmcp_client = MagicMock()
+    mock_fastmcp_client.session = mock_session
+    client._client = mock_fastmcp_client
+
+    test_uri = "mcp://server/resource.txt"
+    await client.subscribe_resource(test_uri)
+
+    mock_session.subscribe_resource.assert_called_once()
+    called_arg = mock_session.subscribe_resource.call_args[0][0]
+    assert str(called_arg) == test_uri
+
+
+@pytest.mark.anyio
+async def test_mcpclient_unsubscribe_resource_delegates_to_session() -> None:
+    """unsubscribe_resource calls ClientSession.unsubscribe_resource with AnyUrl."""
+    from agentpool.mcp_server.client import MCPClient
+    from agentpool_config.mcp_server import StdioMCPServerConfig
+
+    config = StdioMCPServerConfig(command="echo", args=["test"])
+    client = MCPClient(config)
+
+    mock_session = MagicMock()
+    mock_session.unsubscribe_resource = AsyncMock(return_value=None)
+    mock_fastmcp_client = MagicMock()
+    mock_fastmcp_client.session = mock_session
+    client._client = mock_fastmcp_client
+
+    test_uri = "mcp://server/resource.txt"
+    await client.unsubscribe_resource(test_uri)
+
+    mock_session.unsubscribe_resource.assert_called_once()
+    called_arg = mock_session.unsubscribe_resource.call_args[0][0]
+    assert str(called_arg) == test_uri
+
+
+@pytest.mark.anyio
+async def test_mcpclient_subscribe_resource_not_connected_raises() -> None:
+    """subscribe_resource raises RuntimeError when not connected."""
+    from agentpool.mcp_server.client import MCPClient
+    from agentpool_config.mcp_server import StdioMCPServerConfig
+
+    config = StdioMCPServerConfig(command="echo", args=["test"])
+    client = MCPClient(config)
+
+    with pytest.raises(RuntimeError, match="Not connected"):
+        await client.subscribe_resource("mcp://server/resource.txt")

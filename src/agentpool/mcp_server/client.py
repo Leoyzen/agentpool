@@ -77,7 +77,8 @@ class MCPClient:
         accessible_roots: list[str] | None = None,
         tool_change_callback: Callable[[], Awaitable[None]] | None = None,
         prompt_change_callback: Callable[[], Awaitable[None]] | None = None,
-        resource_change_callback: Callable[[], Awaitable[None]] | None = None,
+        resource_list_changed_callback: Callable[[], Awaitable[None]] | None = None,
+        resource_updated_callback: Callable[[str], Awaitable[None]] | None = None,
         client_name: str | None = None,
         client_title: str | None = None,
         client_website_url: str | None = None,
@@ -93,7 +94,8 @@ class MCPClient:
         self._accessible_roots = accessible_roots or []
         self._tool_change_callback = tool_change_callback
         self._prompt_change_callback = prompt_change_callback
-        self._resource_change_callback = resource_change_callback
+        self._resource_list_changed_callback = resource_list_changed_callback
+        self._resource_updated_callback = resource_updated_callback
         self._client_name = client_name
         self._client_title = client_title
         self._client_website_url = client_website_url
@@ -285,7 +287,8 @@ class MCPClient:
             self,
             self._tool_change_callback,
             self._prompt_change_callback,
-            self._resource_change_callback,
+            self._resource_list_changed_callback,
+            self._resource_updated_callback,
         )
 
         # Build client_info if client_name is provided
@@ -327,7 +330,8 @@ class MCPClient:
             self,
             self._tool_change_callback,
             self._prompt_change_callback,
-            self._resource_change_callback,
+            self._resource_list_changed_callback,
+            self._resource_updated_callback,
         )
 
         client_info: Implementation | None = None
@@ -423,6 +427,35 @@ class MCPClient:
             return await self._client.read_resource(uri)
         except Exception as e:
             raise RuntimeError(f"Failed to read resource {uri!r}: {e}") from e
+
+    async def subscribe_resource(self, uri: str) -> None:
+        """Subscribe to updates for a specific resource.
+
+        Uses the low-level ``ClientSession.subscribe_resource()`` since
+        FastMCP's high-level ``Client`` does not wrap this method. After
+        subscribing, the server will send ``notifications/resources/updated``
+        when the resource content changes.
+
+        Args:
+            uri: The URI of the resource to subscribe to.
+        """
+        from pydantic import AnyUrl
+
+        self._ensure_connected()
+        session = self._client.session
+        await session.subscribe_resource(AnyUrl(uri))
+
+    async def unsubscribe_resource(self, uri: str) -> None:
+        """Unsubscribe from updates for a specific resource.
+
+        Args:
+            uri: The URI of the resource to unsubscribe from.
+        """
+        from pydantic import AnyUrl
+
+        self._ensure_connected()
+        session = self._client.session
+        await session.unsubscribe_resource(AnyUrl(uri))
 
     async def complete(
         self,
