@@ -59,6 +59,7 @@ def _make_integration(
         server_state = Mock()
         server_state.working_dir = "/tmp"
         server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.model_variants = {}
     return OpenCodeSessionPoolIntegration(session_pool, server_state)
 
 
@@ -264,6 +265,7 @@ class TestBeforeConsumerLoopChildSession:
         server_state = Mock()
         server_state.working_dir = "/tmp"
         server_state.resolve_default_model_info = Mock(return_value=("gpt-4o", "openai"))
+        server_state.model_variants = {}
 
         integration = _make_integration(session_pool=session_pool, server_state=server_state)
 
@@ -295,6 +297,7 @@ class TestBeforeConsumerLoopChildSession:
         server_state = Mock()
         server_state.working_dir = "/tmp"
         server_state.resolve_default_model_info = Mock(return_value=("gpt-4o", "openai"))
+        server_state.model_variants = {}
 
         integration = _make_integration(session_pool=session_pool, server_state=server_state)
 
@@ -336,6 +339,7 @@ class TestReconstructToolPartsAgentName:
         server_state = Mock()
         server_state.working_dir = "/tmp"
         server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.model_variants = {}
         server_state.pool = pool
         server_state.messages = {}
 
@@ -374,6 +378,7 @@ class TestReconstructToolPartsAgentName:
         server_state = Mock()
         server_state.working_dir = "/tmp"
         server_state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        server_state.model_variants = {}
         server_state.pool = pool
         server_state.messages = {}
 

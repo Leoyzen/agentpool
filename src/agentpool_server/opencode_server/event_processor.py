@@ -970,14 +970,16 @@ class EventProcessor:
         # model), emit a MessageUpdatedEvent so the TUI receives the correction.
         model_changed = False
         if isinstance(ctx.assistant_msg.info, AssistantMessage):
-            if msg.model_name is not None and ctx.assistant_msg.info.model_id != msg.model_name:
-                ctx.assistant_msg.info.model_id = msg.model_name
+            from agentpool_server.shared.model_utils import resolve_model_info_from_response
+
+            resolved_model_id, resolved_provider_id = resolve_model_info_from_response(
+                msg.model_name, msg.provider_name, ctx.state.model_variants
+            )
+            if resolved_model_id != ctx.assistant_msg.info.model_id:
+                ctx.assistant_msg.info.model_id = resolved_model_id
                 model_changed = True
-            if (
-                msg.provider_name is not None
-                and ctx.assistant_msg.info.provider_id != msg.provider_name
-            ):
-                ctx.assistant_msg.info.provider_id = msg.provider_name
+            if resolved_provider_id != ctx.assistant_msg.info.provider_id:
+                ctx.assistant_msg.info.provider_id = resolved_provider_id
                 model_changed = True
             if model_changed:
                 yield MessageUpdatedEvent.create(ctx.assistant_msg.info)

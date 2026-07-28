@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
     from agentpool.agents.base_agent import BaseAgent
     from agentpool.delegation import AgentPool
+    from agentpool.models.model_configs import AnyModelConfig
     from agentpool.orchestrator.core import SessionController
     from agentpool.storage import StorageManager
     from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
@@ -128,6 +129,16 @@ class ServerState:
             provider, model = model_name.split(":", 1)
             return model, provider
         return "default", "agentpool"
+
+    @property
+    def model_variants(self) -> dict[str, AnyModelConfig]:
+        """Return configured model variants from the pool manifest.
+
+        Returns an empty dict when the pool or manifest is not available.
+        """
+        if self._pool is not None and self._pool.manifest is not None:
+            return self._pool.manifest.model_variants
+        return {}
 
     def resolve_default_model_info(self) -> tuple[str, str]:
         """Resolve default (model_id, provider_id) from the configured agent.
