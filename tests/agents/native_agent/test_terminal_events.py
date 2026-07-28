@@ -194,18 +194,19 @@ async def test_runtime_error_generator_exit_yields_stream_complete() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Path #7b: Generic exception (no history) → RunErrorEvent + StreamCompleteEvent
+# Path #7b: Generic exception (no history) → RunErrorEvent (terminal)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_generic_exception_yields_run_error_and_stream_complete() -> None:
-    """Generic exception with no message history yields RunErrorEvent then StreamCompleteEvent.
+async def test_generic_exception_yields_run_error_as_terminal() -> None:
+    """Generic exception with no message history yields RunErrorEvent as terminal.
 
     This tests path #7b: when an unexpected exception occurs and there's no
     message history to recover, we yield RunErrorEvent (with step_error metadata)
-    followed by StreamCompleteEvent(cancelled=True) as the terminal event.
+    as the terminal event. RunErrorEvent IS the terminal — no trailing
+    StreamCompleteEvent is needed because consumers already treat it as terminal.
     """
     agent = Agent(
         name="test-generic-exc",
@@ -239,23 +240,14 @@ async def test_generic_exception_yields_run_error_and_stream_complete() -> None:
         assert run_errors[0].step_error.exception_type == "ValueError"
         assert run_errors[0].step_error.exception_message == "unexpected error"
 
+        # RunErrorEvent is the terminal event — no StreamCompleteEvent follows
         stream_completes = [e for e in events if isinstance(e, StreamCompleteEvent)]
-        assert len(stream_completes) == 1, (
-            f"Expected exactly 1 StreamCompleteEvent, got {len(stream_completes)}"
-        )
-        assert stream_completes[0].cancelled is True, (
-            "StreamCompleteEvent should have cancelled=True after RunErrorEvent"
+        assert len(stream_completes) == 0, (
+            "Expected 0 StreamCompleteEvent — RunErrorEvent is terminal"
         )
 
-        # RunErrorEvent must come before StreamCompleteEvent
-        run_error_idx = events.index(run_errors[0])
-        stream_complete_idx = events.index(stream_completes[0])
-        assert run_error_idx < stream_complete_idx, (
-            "RunErrorEvent must come before StreamCompleteEvent"
-        )
-
-        # Last event must be StreamCompleteEvent
-        assert isinstance(events[-1], StreamCompleteEvent), "Last event must be StreamCompleteEvent"
+        # Last event must be RunErrorEvent
+        assert isinstance(events[-1], RunErrorEvent), "Last event must be RunErrorEvent"
 
 
 # ---------------------------------------------------------------------------

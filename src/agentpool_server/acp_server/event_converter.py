@@ -266,15 +266,6 @@ class ACPEventConverter:
     last_usage: Usage | None = field(default=None, init=False)
     """Usage from the last completed stream, if available."""
 
-    _run_error_emitted: bool = field(default=False, init=False)
-    """Guard flag: True after RunErrorEvent emits TurnCompleteUpdate.
-
-    When True, the subsequent StreamCompleteEvent skips its
-    TurnCompleteUpdate to avoid a double terminal signal.
-    Reset on RunStartedEvent (turn boundary) and after
-    StreamCompleteEvent processing.
-    """
-
     _displayed_message_ids: set[str] = field(default_factory=set, init=False)
     """Per-session set of message_ids already displayed as UserMessageChunk.
 
@@ -921,11 +912,7 @@ class ACPEventConverter:
                 # See: https://github.com/agentclientprotocol/agent-client-protocol/pull/644
                 async for cancel_update in self.cancel_pending_tools():
                     yield cancel_update
-                # Skip TurnCompleteUpdate if RunErrorEvent already emitted one
-                # to prevent a double terminal signal.
-                if self._run_error_emitted:
-                    self._run_error_emitted = False
-                elif self.client_supports_turn_complete:
+                if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(
                         stop_reason="cancelled" if cancelled else "end_turn",
                     )
@@ -984,8 +971,6 @@ class ACPEventConverter:
             case RunStartedEvent(run_id=run_id, agent_name=agent_name):
                 # ACP has no explicit "run started" notification.
                 # Log for debugging; clients infer start from first event.
-                # Reset the double-terminal guard for the new turn.
-                self._run_error_emitted = False
                 logger.debug("Run started", run_id=run_id, agent_name=agent_name)
 
             case SubAgentEvent(
@@ -1066,9 +1051,6 @@ class ACPEventConverter:
                     yield cancel_update
                 if self.client_supports_turn_complete:
                     yield TurnCompleteUpdate(stop_reason="refusal")
-                # Set guard so the following StreamCompleteEvent does not
-                # emit a second TurnCompleteUpdate.
-                self._run_error_emitted = True
 
             case RunFailedEvent(run_id=run_id, exception=exc):
                 # Display run failure as agent text and signal turn completion.

@@ -58,11 +58,6 @@ except ImportError:  # pragma: no cover
     ENQUEUED_MESSAGES_AVAILABLE = False
 
 
-# Maximum number of events allowed after RunErrorEvent before the defensive
-# guard breaks the loop (waiting for a trailing StreamCompleteEvent).
-_MAX_EVENTS_AFTER_ERROR = 3
-
-
 def _has_invalid_json_args(part: Any) -> bool:
     """Check if a ToolCallPart has invalid JSON string arguments.
 
@@ -589,7 +584,6 @@ class RunHandle:
         self._current_turn_failed = False
         turn_failed = False
         stream_complete_saved = False
-        events_since_error = 0
         with safe_span(
             "orchestration.run_handle.execute_turn",
             turn_id=turn_id,
@@ -614,19 +608,7 @@ class RunHandle:
                         yield event
                         if isinstance(event, RunErrorEvent):
                             turn_failed = True
-                            events_since_error = 0
-                            # Do NOT break — continue consuming to get the
-                            # trailing StreamCompleteEvent that finalizes
-                            # the turn and sets complete_event.
-                        elif turn_failed:
-                            events_since_error += 1
-                            if events_since_error >= _MAX_EVENTS_AFTER_ERROR:
-                                logger.warning(
-                                    "RunErrorEvent not followed by "
-                                    "StreamCompleteEvent within 3 events, "
-                                    "breaking"
-                                )
-                                break
+                            break
                         if isinstance(event, StreamCompleteEvent):
                             break
             except (GeneratorExit, asyncio.CancelledError):

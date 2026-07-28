@@ -509,17 +509,6 @@ class NativeTurn(HookAwareTurn, Turn):
                         run_id=self._run_ctx.run_id,
                         step_error=step_error,
                     )
-                    yield StreamCompleteEvent(
-                        message=ChatMessage(
-                            content="",
-                            role="assistant",
-                            name=self._agent.name,
-                            message_id=self._message_id,
-                            session_id=self._run_ctx.session_id,
-                            parent_id=self._parent_id,
-                        ),
-                        cancelled=True,
-                    )
                     return
 
                 finally:
