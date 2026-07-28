@@ -221,9 +221,20 @@ def _apply_action_immediately(
 
 def prune_tool(
     ctx: RunContext[AgentContext],
-    ids: list[str] | None = None,
-    reason: str | None = None,
-    clear_thinking: bool | None = None,
+    ids: Annotated[
+        list[str] | None,
+        "Numeric string IDs from the <prunable-tools> list, "
+        "e.g. ['0', '2']. If None, no pruning is performed.",
+    ] = None,
+    reason: Annotated[
+        str | None,
+        "Optional reason for pruning (logged only, not shown to user).",
+    ] = None,
+    clear_thinking: Annotated[
+        bool | None,
+        "Toggle thinking-content stripping: "
+        "True=enable, False=disable, None=no change.",
+    ] = None,
 ) -> dict[str, object]:
     """Prune tool outputs and/or toggle thinking clearing.
 
@@ -345,7 +356,12 @@ def prune_tool(
 
 def distill_tool(
     ctx: RunContext[AgentContext],
-    targets: list[DistillTargetInput],
+    targets: Annotated[
+        list[DistillTargetInput],
+        "List of distill targets. Each target has 'id' (numeric string "
+        "from <prunable-tools>) and 'distillation' (complete technical "
+        "summary replacing the original output).",
+    ],
 ) -> dict[str, object]:
     """Record a distill action to replace tool outputs with summaries.
 
@@ -452,7 +468,11 @@ def distill_tool(
 
 def decompress_tool(
     ctx: RunContext[AgentContext],
-    tool_id: str,
+    tool_id: Annotated[
+        str,
+        "Numeric ID (as string) from the <prunable-tools> list. "
+        "Must correspond to a [pruned] or [distilled] entry.",
+    ],
 ) -> dict[str, object]:
     """Restore original content from a pruned tool output by numeric ID.
 
