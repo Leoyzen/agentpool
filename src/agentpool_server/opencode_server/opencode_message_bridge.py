@@ -148,14 +148,16 @@ async def get_messages_for_session(
             if existing_agent is not None:
                 agent = existing_agent
             default_model_id, default_provider_id = state.resolve_default_model_info()
+            model_variants = state.model_variants
             converted = [
                 chat_message_to_opencode(
                     chat_msg,
                     session_id=session_id,
                     working_dir=state.working_dir,
                     agent_name=agent.name,
-                    model_id=getattr(chat_msg, "model_name", None) or default_model_id,
-                    provider_id=getattr(chat_msg, "provider_name", None) or default_provider_id,
+                    model_id=default_model_id,
+                    provider_id=default_provider_id,
+                    model_variants=model_variants,
                 )
                 for chat_msg in sp_messages
             ]

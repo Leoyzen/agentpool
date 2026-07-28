@@ -77,21 +77,21 @@ class SessionControllerRunsMixin:
         Catches all exceptions and logs a warning — emission failures
         must never break the routing path.
 
-        When ``source == "protocol"`` and a ``ProtocolChannel`` is available
-        on the active run handle, the event is published through the
-        channel (which journals before publishing to the EventBus) instead
-        of direct ``EventBus.publish()``. This ensures the event is
-        journaled for crash-recovery replay and avoids double-publish when
-        the channel already publishes to the EventBus.
+        When a ``ProtocolChannel`` is available on the active run handle,
+        the event is published through the channel (which journals before
+        publishing to the EventBus) instead of direct ``EventBus.publish()``.
+        This ensures the event is journaled for crash-recovery replay and
+        avoids double-publish when the channel already publishes to the
+        EventBus.
 
-        For idle sessions (no active run) or non-protocol sources, the
-        event is published directly to the EventBus (existing behavior).
+        For idle sessions (no active run), the event is published directly
+        to the EventBus (existing behavior).
 
         Args:
             session_id: The session the message was inserted into.
             content: Message content (text or multi-modal part list).
             delivery: ``"initial"``, ``"steer"``, or ``"followup"``.
-            source: ``"protocol"``, ``"background_task"``, or ``"internal"``.
+            source: ``"internal"`` (fire-and-forget fallback display).
             message_id: Optional message ID; auto-generated if ``None``.
             meta: Optional protocol-specific metadata for rich user message
                 display. When set, protocol event consumers use it to
@@ -118,18 +118,16 @@ class SessionControllerRunsMixin:
                 if self._event_bus is None:
                     return
 
-                # P2: When source is "protocol" and a ProtocolChannel is
-                # available on the active run, route through the channel
-                # so the event is journaled and published to the EventBus
-                # by the channel (avoiding double-publish).
-                if source == "protocol":
-                    comm_channel = self._get_protocol_channel(session_id)
-                    if comm_channel is not None:
-                        await comm_channel.publish(event)
-                        return
+                # P2: When a ProtocolChannel is available on the active
+                # run, route through the channel so the event is journaled
+                # and published to the EventBus by the channel (avoiding
+                # double-publish).
+                comm_channel = self._get_protocol_channel(session_id)
+                if comm_channel is not None:
+                    await comm_channel.publish(event)
+                    return
 
-                # Fall back: direct EventBus publish (idle session or
-                # non-protocol source).
+                # Fall back: direct EventBus publish (idle session).
                 await self._event_bus.publish(session_id, event)
             except Exception:
                 logger.warning(
@@ -276,7 +274,7 @@ class SessionControllerRunsMixin:
         """Notify the lead (parent) session when a team member crashes.
 
         Routes a concise notification through the unified ``_route_message``
-        path with ``source="team"`` so it appears in the lead's conversation
+        path with ``source="internal"`` so it appears in the lead's conversation
         history and the lead's LLM can act on it in the next turn.
 
         Silently skips if the session is not a team member, has no parent,
@@ -309,7 +307,7 @@ class SessionControllerRunsMixin:
                 parent_session_id,
                 notification,
                 priority="when_idle",
-                source="team",
+                source="internal",
             )
         except Exception:
             logger.warning(
@@ -492,7 +490,7 @@ class SessionControllerRunsMixin:
         message_id: str | None = None,
         delivery: str | None = None,
         meta: Any = None,
-        source: str = "protocol",
+        source: str = "internal",
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 

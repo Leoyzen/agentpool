@@ -970,14 +970,16 @@ class EventProcessor:
         # model), emit a MessageUpdatedEvent so the TUI receives the correction.
         model_changed = False
         if isinstance(ctx.assistant_msg.info, AssistantMessage):
-            if msg.model_name is not None and ctx.assistant_msg.info.model_id != msg.model_name:
-                ctx.assistant_msg.info.model_id = msg.model_name
+            from agentpool_server.shared.model_utils import resolve_model_info_from_response
+
+            resolved_model_id, resolved_provider_id = resolve_model_info_from_response(
+                msg.model_name, msg.provider_name, ctx.state.model_variants
+            )
+            if resolved_model_id != ctx.assistant_msg.info.model_id:
+                ctx.assistant_msg.info.model_id = resolved_model_id
                 model_changed = True
-            if (
-                msg.provider_name is not None
-                and ctx.assistant_msg.info.provider_id != msg.provider_name
-            ):
-                ctx.assistant_msg.info.provider_id = msg.provider_name
+            if resolved_provider_id != ctx.assistant_msg.info.provider_id:
+                ctx.assistant_msg.info.provider_id = resolved_provider_id
                 model_changed = True
             if model_changed:
                 yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
@@ -1073,6 +1075,11 @@ class EventProcessor:
         both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
         because there is no ``sync()`` to load parts from DB.
 
+        Dedup: If ``message_id`` is already in ``ctx.displayed_message_ids``,
+        the event is skipped. This prevents duplicate user message display
+        when both the fire-and-forget emission from ``steer()``/``followup()``
+        and the ``EnqueuedMessagesEvent`` produce events with the same ID.
+
         Args:
             ctx: The event processor context.
             message_id: Unique ID for the inserted user message.
@@ -1087,6 +1094,10 @@ class EventProcessor:
             ``MessageUpdatedEvent`` for the user message, followed by
             ``PartUpdatedEvent`` for each part (internal sources only).
         """
+        # Dedup: skip if this message_id was already displayed.
+        if message_id and message_id in ctx.displayed_message_ids:
+            return
+
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
 
@@ -1144,6 +1155,10 @@ class EventProcessor:
         # duplicate risk for new messages.
         for part in user_msg_with_parts.parts:
             yield PartUpdatedEvent.create(part)
+
+        # Mark this message_id as displayed for dedup.
+        if message_id:
+            ctx.displayed_message_ids.add(message_id)
 
 
 def _deserialize_part(

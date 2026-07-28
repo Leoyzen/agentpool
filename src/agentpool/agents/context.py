@@ -198,6 +198,20 @@ class AgentRunContext:
     and the OpenCode message ID are different ID spaces.
     """
 
+    _pending_enqueue_message_ids: list[str] = field(default_factory=list)
+    """FIFO queue of message_ids from ``steer()``/``followup()`` calls.
+
+    When ``steer()`` or ``followup()`` enqueues a message to
+    ``agent_run``, the ``message_id`` is appended here BEFORE the
+    ``enqueue()`` call. When ``EnqueuedMessagesEvent`` fires and
+    ``EventMapper.handle_enqueued_messages()`` runs, it pops from this
+    queue to reuse the same ``message_id`` instead of generating a new
+    UUID. This ensures the fire-and-forget ``UserMessageInsertedEvent``
+    (emitted by ``_schedule_user_message_emission()``) and the
+    ``EnqueuedMessagesEvent``-derived event share the same
+    ``message_id``, enabling converter-level dedup.
+    """
+
     async def complete_background_task(self, child_session_id: str, message: str) -> None:
         """Signal that a background child task has completed.
 

@@ -1361,21 +1361,22 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             variant_name,
                         )
                         break
-            # Validate model exists (check both tokonomics models and model_variants)
+            # Validate model exists — check model_variants FIRST to avoid
+            # slow tokonomics network fetch when the model is configured locally.
             is_valid = False
-            if models := await self.get_available_models():
-                valid_ids = [m.pydantic_ai_id for m in models]
-                if mode_id in valid_ids:
-                    is_valid = True
-                    self.log.info("Model %s validated against tokonomics", mode_id)
-            # Also check model_variants from manifest (by variant name or identifier)
-            if not is_valid and ctx and variant_name in ctx.manifest.model_variants:
+            if ctx and variant_name in ctx.manifest.model_variants:
                 is_valid = True
                 self.log.info(
                     "Model %s validated against model_variants (variant: %s)",
                     mode_id,
                     variant_name,
                 )
+            # Fall back to tokonomics discovery only if not in manifest
+            if not is_valid and (models := await self.get_available_models()):
+                valid_ids = [m.pydantic_ai_id for m in models]
+                if mode_id in valid_ids:
+                    is_valid = True
+                    self.log.info("Model %s validated against tokonomics", mode_id)
             if not is_valid:
                 available = list(ctx.manifest.model_variants.keys()) if ctx else "N/A"
                 self.log.warning(

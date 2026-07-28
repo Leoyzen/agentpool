@@ -60,6 +60,10 @@ async def test_steer_to_acp_converter_pipeline() -> None:
 
     mock_agent_run = MagicMock()
     handle.active_agent_run = mock_agent_run
+    # Force fire-and-forget emission path — the test uses a mock agent_run
+    # that won't trigger EnqueuedMessagesEvent, so the skip-emission logic
+    # would suppress the event.
+    handle._enqueued_messages_available = False
 
     # Subscribe to EventBus (returns asyncio.Queue[EventEnvelope])
     queue = await bus.subscribe("integ-session", scope="session")

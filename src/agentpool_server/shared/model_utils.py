@@ -157,6 +157,40 @@ def _find_variant_name(
     return None
 
 
+def resolve_model_info_from_response(
+    model_name: str | None,
+    provider_name: str | None,
+    model_variants: dict[str, AnyModelConfig],
+) -> tuple[str, str]:
+    """Resolve (model_id, provider_id) from a pydantic-ai API response.
+
+    Reconstructs the combined identifier that ``_find_variant_name()`` expects
+    (``"{provider_name}:{model_name}"``), reverse-maps it to the configured
+    variant name, and returns the variant name + configured provider.
+
+    When no variant matches (or inputs are ``None``), falls back to raw names
+    with ``"unknown"`` / ``"agentpool"`` defaults for ``None`` values.
+
+    Args:
+        model_name: Raw model name from ``result.response.model_name``
+            (e.g. ``"svc/kimi-k2"``).
+        provider_name: Raw provider name from ``result.response.provider_name``
+            (e.g. ``"openai-chat"``).
+        model_variants: Dict of variant name → config from manifest.
+
+    Returns:
+        Tuple of ``(model_id, provider_id)`` using variant names when matched.
+    """
+    if model_name and provider_name and model_variants:
+        full_id = f"{provider_name}:{model_name}"
+        variant_name = _find_variant_name(model_variants, full_id)
+        if variant_name:
+            config = model_variants[variant_name]
+            return variant_name, _extract_provider(config)
+        logger.debug("No variant match for %s", full_id)
+    return model_name or "unknown", provider_name or "agentpool"
+
+
 def _build_providers_from_tokonomics(toko_models: list[TokoModelInfo]) -> list[Provider]:
     """Build providers list from tokonomics discovery results.
 

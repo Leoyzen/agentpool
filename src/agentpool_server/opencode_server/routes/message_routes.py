@@ -628,25 +628,29 @@ async def _route_message_locked(  # noqa: PLR0915
         logger.info("Model selection requested", provider=provider_id, model_id=model_id)
 
         try:
-            available_models = await session_agent.get_available_models()
             is_valid = False
 
             # Check 1: Is model_id a variant name in manifest?
+            # Check this FIRST to avoid slow tokonomics network fetch when
+            # the model is already configured locally.
             if state.pool and model_id in state.pool.manifest.model_variants:
                 is_valid = True
                 logger.info("Model found as manifest variant", model_id=model_id)
-            # Check 2: Is it in tokonomics models?
-            elif available_models:
-                valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
-                # Try both "provider:model" format and just model_id
-                full_id = f"{provider_id}:{model_id}"
-                if full_id in valid_ids:
-                    is_valid = True
-                    requested_model = full_id
-                    logger.info("Model found in available models", model_id=full_id)
-                elif model_id in valid_ids:
-                    is_valid = True
-                    logger.info("Model found in available models", model_id=model_id)
+            # Check 2: Is it in tokonomics models? (network fetch — only if
+            # not found in manifest variants)
+            else:
+                available_models = await session_agent.get_available_models()
+                if available_models:
+                    valid_ids = [m.id_override if m.id_override else m.id for m in available_models]
+                    # Try both "provider:model" format and just model_id
+                    full_id = f"{provider_id}:{model_id}"
+                    if full_id in valid_ids:
+                        is_valid = True
+                        requested_model = full_id
+                        logger.info("Model found in available models", model_id=full_id)
+                    elif model_id in valid_ids:
+                        is_valid = True
+                        logger.info("Model found in available models", model_id=model_id)
 
             if is_valid:
                 logger.info(
