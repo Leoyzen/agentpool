@@ -91,7 +91,7 @@ class SessionControllerRunsMixin:
             session_id: The session the message was inserted into.
             content: Message content (text or multi-modal part list).
             delivery: ``"initial"``, ``"steer"``, or ``"followup"``.
-            source: ``"internal"`` (fire-and-forget fallback display).
+            source: ``"accepted"`` (accept-time routing display).
             message_id: Optional message ID; auto-generated if ``None``.
             meta: Optional protocol-specific metadata for rich user message
                 display. When set, protocol event consumers use it to
@@ -274,7 +274,7 @@ class SessionControllerRunsMixin:
         """Notify the lead (parent) session when a team member crashes.
 
         Routes a concise notification through the unified ``_route_message``
-        path with ``source="internal"`` so it appears in the lead's conversation
+        path with ``source="accepted"`` so it appears in the lead's conversation
         history and the lead's LLM can act on it in the next turn.
 
         Silently skips if the session is not a team member, has no parent,
@@ -307,7 +307,7 @@ class SessionControllerRunsMixin:
                 parent_session_id,
                 notification,
                 priority="when_idle",
-                source="internal",
+                source="accepted",
             )
         except Exception:
             logger.warning(
@@ -490,7 +490,7 @@ class SessionControllerRunsMixin:
         message_id: str | None = None,
         delivery: str | None = None,
         meta: Any = None,
-        source: str = "internal",
+        source: str = "accepted",
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 
@@ -516,8 +516,9 @@ class SessionControllerRunsMixin:
                 and priority.
             meta: Optional protocol-specific metadata carried through to
                 ``UserMessageInsertedEvent`` for rich user message display.
-            source: Originator of the message — ``"protocol"`` (default)
-                for protocol handler requests, ``"team"`` for team-mode
+            source: Originator of the message — ``"accepted"`` (default)
+                for all message sources including protocol handler
+                requests and team-mode messages.
                 coordination messages. Passed to
                 ``UserMessageInsertedEvent.source``.
 
@@ -525,6 +526,12 @@ class SessionControllerRunsMixin:
             The ``message_id`` string on success, ``None`` for rejection.
         """
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
+        # Generate message_id once so both _emit_user_message_inserted() and
+        # steer()/followup() share the same ID for dedup.
+        if message_id is None:
+            from agentpool.utils.identifiers import ascending
+
+            message_id = ascending("message")
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None

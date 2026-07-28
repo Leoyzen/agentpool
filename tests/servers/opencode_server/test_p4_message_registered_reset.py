@@ -64,6 +64,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._resume_contexts: dict[str, dict[str, Any]] = {}
         self._pending_message_ids: dict[str, str] = {}
         self._pending_message_metadata: dict[str, dict[str, str | None]] = {}
+        self._steer_split_ids: dict[str, set[str]] = {}
         self.set_session_context_data = self._resume_contexts.__setitem__
         self.get_session_context_data = lambda sid: self._resume_contexts.pop(sid, None)
 

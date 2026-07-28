@@ -20,7 +20,7 @@ def test_construction_with_all_fields() -> None:
         message_id="msg-1",
         content="hello world",
         delivery="steer",
-        source="enqueued",
+        source="processed",
         timestamp=1234567890.0,
     )
 
@@ -28,7 +28,7 @@ def test_construction_with_all_fields() -> None:
     assert event.message_id == "msg-1"
     assert event.content == "hello world"
     assert event.delivery == "steer"
-    assert event.source == "enqueued"
+    assert event.source == "processed"
     assert event.timestamp == 1234567890.0
 
 
@@ -36,7 +36,7 @@ def test_defaults_are_empty_and_initial() -> None:
     """Default values match the spec.
 
     - session_id='', message_id='', content=''
-    - delivery='initial', source='internal'
+    - delivery='initial', source='accepted'
     - timestamp auto-generated via time.time
     """
     event = UserMessageInsertedEvent()
@@ -45,7 +45,7 @@ def test_defaults_are_empty_and_initial() -> None:
     assert event.message_id == ""
     assert event.content == ""
     assert event.delivery == "initial"
-    assert event.source == "internal"
+    assert event.source == "accepted"
     assert isinstance(event.timestamp, float)
 
 
@@ -74,7 +74,7 @@ def test_all_delivery_values(delivery: str) -> None:
     assert event.delivery == delivery
 
 
-@pytest.mark.parametrize("source", ["enqueued", "internal"])
+@pytest.mark.parametrize("source", ["accepted", "processed"])
 def test_all_source_values(source: str) -> None:
     """UserMessageInsertedEvent accepts both source literals."""
     event = UserMessageInsertedEvent(source=source)  # type: ignore[arg-type]
@@ -104,7 +104,7 @@ def test_json_roundtrip_preserves_all_fields() -> None:
         message_id="msg-rt",
         content="roundtrip text",
         delivery="followup",
-        source="internal",
+        source="accepted",
         timestamp=99.0,
     )
 

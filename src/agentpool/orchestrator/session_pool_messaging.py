@@ -183,7 +183,7 @@ class SessionPoolMessagingMixin:
         deps: Any = None,
         input_provider: Any = None,
         meta: Any = None,
-        source: str = "protocol",
+        source: str = "accepted",
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 
@@ -212,7 +212,7 @@ class SessionPoolMessagingMixin:
                 uses it to reconstruct the full user message (e.g. OpenCode
                 parts, ACP content blocks) instead of falling back to
                 text-only content.
-            source: Originator of the message — ``"protocol"`` (default)
+            source: Originator of the message — ``"accepted"`` (default)
                 for protocol handler requests, ``"team"`` for team-mode
                 coordination messages. Passed through to
                 ``UserMessageInsertedEvent.source`` so protocol frontends
@@ -426,7 +426,7 @@ class SessionPoolMessagingMixin:
 
         This is the preferred entry point for background task capabilities
         (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because:
-        - It emits ``UserMessageInsertedEvent(source="internal")``
+        - It emits ``UserMessageInsertedEvent(source="accepted")``
           for TUI display
         - It injects into the active RunHandle when one exists
         - It falls back to ``feedback_queue`` when no run is active
@@ -451,21 +451,25 @@ class SessionPoolMessagingMixin:
         # Use self.event_bus (SessionPoolMessagingMixin property, always set by
         # SessionPool.__init__) instead of session._event_bus (SessionState's
         # field, only set by _initialize_lifecycle_and_recovery).
+        #
+        # Generate message_id ONCE and share with steer() so that
+        # EnqueuedMessagesEvent-derived event uses the same ID for dedup.
+        message_id = ascending("message")
         event_bus = self.event_bus
         if event_bus is not None:
             with logfire.span(
                 "event.user_message_inserted.emit",
                 session_id=session_id,
                 delivery="steer",
-                source="internal",
+                source="accepted",
             ):
                 try:
                     event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
                         session_id=session_id,
-                        message_id=ascending("message"),
+                        message_id=message_id,
                         content=message,
                         delivery="steer",
-                        source="internal",
+                        source="accepted",
                     )
                     await event_bus.publish(session_id, event)
                 except Exception:
@@ -476,7 +480,7 @@ class SessionPoolMessagingMixin:
         # Try injecting into the active RunHandle.
         run_handle = self._get_active_run_handle(session_id)
         if run_handle is not None:
-            return run_handle.steer(message, emit_user_message=False)
+            return run_handle.steer(message, message_id=message_id, emit_user_message=False)
         # No active run — enqueue for next RunHandle via feedback_queue.
         fb = Feedback(content=message, is_steer=True)
         session.feedback_queue.put_nowait(fb)

@@ -187,7 +187,7 @@ async def test_steer_with_agent_run_emits_user_message_inserted_event() -> None:
 
     When ``_enqueued_messages_available=True`` and ``active_agent_run`` is
     set, the display event comes from ``handle_enqueued_messages()`` with
-    ``source="enqueued"`` instead of the fire-and-forget
+    ``source="processed"`` instead of the fire-and-forget
     ``_schedule_user_message_emission()`` path.
     """
     from agentpool.agents.events.events import UserMessageInsertedEvent

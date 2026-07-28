@@ -210,7 +210,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 target_sid,
                 self._wrap_notice_content(wrapped),
                 mode=self._notice_mode,
-                source="team",
+                source="accepted",
                 meta={"from": "system", "team_id": team_id},
             )
         except Exception:  # noqa: BLE001
@@ -544,7 +544,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     target_sid,
                     self._wrap_notice_content(msg_body),
                     mode=mode,
-                    source="team",
+                    source="accepted",
                     meta={"from": self._agent_name, "team_id": team_id},
                 )
                 # Distinguish None-as-queued from None-as-failure:
@@ -623,7 +623,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             target_sid,
             self._wrap_notice_content(msg_body),
             mode=mode,
-            source="team",
+            source="accepted",
             meta={"from": self._agent_name, "team_id": team_id},
         )
         # Distinguish None-as-queued from None-as-failure:
@@ -1840,7 +1840,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     member_session_id,
                     full_prompt,
                     mode=DeliveryMode.QUEUE,
-                    source="team",
+                    source="accepted",
                     meta={"from": self._agent_name, "team_id": team_id},
                 )
         except Exception as exc:  # noqa: BLE001
@@ -2250,7 +2250,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             member_session_id,
             initial_prompt,
             mode=DeliveryMode.QUEUE,
-            source="team",
+            source="accepted",
             meta={"from": self._agent_name, "team_id": team_id},
         )
 
@@ -2306,7 +2306,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                     existing_sid,
                     self._wrap_notice_content(broadcast_msg),
                     mode=self._notice_mode,
-                    source="team",
+                    source="accepted",
                     meta={"from": self._agent_name, "team_id": team_id},
                 )
 
@@ -2653,7 +2653,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 agent_ctx.session.session_id,
                 self._wrap_notice_content(msg_body),
                 mode=DeliveryMode.QUEUE,
-                source="team",
+                source="accepted",
                 meta={"from": "system", "team_id": team_id},
             )
             agent_ctx.session.metadata["_task_reminder_count"] = reminder_count + 1

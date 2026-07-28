@@ -339,3 +339,39 @@ async def test_run_error_does_not_broadcast_session_error() -> None:
         "SessionErrorEvent must NOT be broadcast from the match block — "
         "EventProcessor.process() already handles it"
     )
+
+
+# =============================================================================
+# Bug 5 regression guard: RunErrorEvent transitions session to idle
+# =============================================================================
+
+
+@pytest.mark.anyio
+async def test_run_error_event_transitions_session_to_idle() -> None:
+    """RunErrorEvent sets session status to 'idle' in the event bridge.
+
+    Bug 5 regression guard: When a RunErrorEvent is the terminal event
+    (no trailing StreamCompleteEvent), the session must transition to
+    'idle' so the TUI can accept new prompts. Without this, the session
+    stays 'busy' forever after an error.
+    """
+    session_id = "sess-bug5-idle"
+    bridge, _ctx, _broadcast = _setup_bridge(session_id)
+
+    event = RunErrorEvent(
+        message="Bug 5: session stuck in busy",
+        run_id="run-bug5",
+        agent_name="test-agent",
+    )
+
+    with _patch_set_session_status() as mock_set_status:
+        await bridge._handle_event(session_id, _make_envelope(session_id, event))
+
+    mock_set_status.assert_called_once()
+    _args, kwargs = mock_set_status.call_args
+    status = kwargs.get("status") or (_args[2] if len(_args) > 2 else None)
+    assert status is not None
+    assert status.type == "idle", (
+        f"Bug 5 regression: session status should be 'idle' after RunErrorEvent, "
+        f"got '{status.type}'"
+    )

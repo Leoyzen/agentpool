@@ -269,6 +269,11 @@ class EventProcessor:
                     error_message=run_error_event.message,
                 )
 
+            case UserMessageInsertedEvent(source="processed"):
+                # Processing-time event: do NOT create UserMessage.
+                # Split is handled by opencode_event_bridge, not EventProcessor.
+                return
+
             case UserMessageInsertedEvent(
                 message_id=mid,
                 content=event_content,
@@ -1051,7 +1056,7 @@ class EventProcessor:
         content: str | list[Any],
         timestamp: float,
         meta: Any = None,
-        source: str = "protocol",
+        source: str = "internal",
     ) -> AsyncIterator[Event]:
         """Process a UserMessageInsertedEvent into OpenCode SSE events.
 
@@ -1064,21 +1069,14 @@ class EventProcessor:
         When ``meta`` is ``None``, falls back to text-only ``content`` →
         ``TextPart``.
 
-        For ``source="protocol"`` messages (from REST handler), only
-        ``MessageUpdatedEvent`` is yielded — parts come from the TUI's
-        ``sync.session.sync()`` which loads from DB. Sending
-        ``PartUpdatedEvent`` with original part IDs would conflict with
-        the DB-reconstructed parts (which have different IDs from
-        ``chat_message_to_opencode``), causing duplicate text rendering.
+        For ``source="accepted"`` messages (fire-and-forget from
+        ``steer()``/``followup()``), both ``MessageUpdatedEvent`` and
+        ``PartUpdatedEvent`` are yielded because there is no ``sync()``
+        to load parts from DB.
 
-        For internal sources (``"background_task"``, ``"internal"``),
-        both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
-        because there is no ``sync()`` to load parts from DB.
-
-        Dedup: If ``message_id`` is already in ``ctx.displayed_message_ids``,
-        the event is skipped. This prevents duplicate user message display
-        when both the fire-and-forget emission from ``steer()``/``followup()``
-        and the ``EnqueuedMessagesEvent`` produce events with the same ID.
+        ``source="processed"`` events never reach this method — they are
+        filtered out by the match-case in ``process()`` and handled
+        exclusively by ``opencode_event_bridge`` for steer split.
 
         Args:
             ctx: The event processor context.
@@ -1087,17 +1085,13 @@ class EventProcessor:
             timestamp: Wall-clock time the event was created (epoch seconds).
             meta: Optional protocol-specific metadata carrying serialized
                 Part data for rich user message reconstruction.
-            source: Where the message originated — ``"protocol"``,
-                ``"background_task"``, or ``"internal"``.
+            source: Where the message originated — ``"accepted"``
+                (fire-and-forget emission from steer()/followup()).
 
         Yields:
             ``MessageUpdatedEvent`` for the user message, followed by
-            ``PartUpdatedEvent`` for each part (internal sources only).
+            ``PartUpdatedEvent`` for each part.
         """
-        # Dedup: skip if this message_id was already displayed.
-        if message_id and message_id in ctx.displayed_message_ids:
-            return
-
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
 
@@ -1155,10 +1149,6 @@ class EventProcessor:
         # duplicate risk for new messages.
         for part in user_msg_with_parts.parts:
             yield PartUpdatedEvent.create(part)
-
-        # Mark this message_id as displayed for dedup.
-        if message_id:
-            ctx.displayed_message_ids.add(message_id)
 
 
 def _deserialize_part(

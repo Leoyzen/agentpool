@@ -98,12 +98,18 @@ class OpenCodeEventBridgeMixin:
     _contexts: dict[str, EventProcessorContext]
     _adapters: dict[str, OpenCodeEventAdapter]
     _message_registered: dict[str, bool]
+    _steer_split_ids: dict[str, set[str]]
     _child_to_parent: dict[str, str]
     _child_spawns: dict[str, SpawnSessionStart]
     _children_of: dict[str, set[str]]
     _resume_contexts: dict[str, dict[str, Any]]
     _pending_message_ids: dict[str, str]
     _pending_message_metadata: dict[str, dict[str, str | None]]
+
+    # Crash recovery replay guard: when True, skip side-effectful actions
+    # like steer split (events are being replayed, not live). Set by the
+    # ProtocolEventConsumerMixin during crash recovery replay.
+    _replaying: bool = False
 
     if TYPE_CHECKING:
 
@@ -721,6 +727,7 @@ class OpenCodeEventBridgeMixin:
                 ctx.stream_start_ms = now_ms()
 
                 self._message_registered[session_id] = False
+                self._steer_split_ids.pop(session_id, None)
 
             # Update assistant message with real agent info from RunStartedEvent.
             # RunStartedEvent is the first event in a run and carries the real
@@ -749,25 +756,24 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Steer split: When EnqueuedMessagesEvent fires (mapped to
-            # UserMessageInsertedEvent with source="enqueued"), the steer
-            # message has entered run history and the model is about to process
-            # it. This is the precise moment to split the logical turn:
-            # finalize the current assistant message (A1) and create a new one
-            # (A2) with a fresh message ID, so the steer user message sorts
-            # between A1 and A2 in the TUI's lexicographic message ID ordering.
+            # Steer split: When a steer UserMessageInsertedEvent arrives,
+            # split the logical turn: finalize A1, create A2 with fresh ID.
             #
-            # source="enqueued" means the event came from
-            # handle_enqueued_messages() → EnqueuedMessagesEvent → actual drain
-            # time. source="internal" means it came from fire-and-forget
-            # _schedule_user_message_emission() → send time (not a split
-            # trigger).
+            # Only source="processed" events trigger the split. These are
+            # processing-time events from EnqueuedMessagesEvent mapping.
+            # source="accepted" events (fire-and-forget from steer()/followup())
+            # are handled by the EventProcessor which creates UserMessage + SSE.
+            # Dedup by message_id via _steer_split_ids prevents double splits
+            # when both events fire for the same steer message.
             if (
                 isinstance(event, UserMessageInsertedEvent)
                 and event.delivery == "steer"
-                and event.source == "enqueued"
+                and event.source == "processed"
+                and not self._replaying
                 and self._message_registered.get(session_id, False)
+                and event.message_id not in self._steer_split_ids.setdefault(session_id, set())
             ):
+                self._steer_split_ids[session_id].add(event.message_id)
                 await self._finalize_assistant_time(session_id)
 
                 assistant_msg_id, assistant_msg = self._create_assistant_message(session_id)

@@ -82,6 +82,7 @@ class OpenCodeSessionPoolIntegration(
         self._contexts: dict[str, EventProcessorContext] = {}
         self._adapters: dict[str, OpenCodeEventAdapter] = {}
         self._message_registered: dict[str, bool] = {}
+        self._steer_split_ids: dict[str, set[str]] = {}
         self._child_to_parent: dict[str, str] = {}
         self._child_spawns: dict[str, SpawnSessionStart] = {}
         self._children_of: dict[str, set[str]] = {}
