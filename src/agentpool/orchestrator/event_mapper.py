@@ -20,7 +20,6 @@ from __future__ import annotations
 import dataclasses
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
-import uuid
 
 from pydantic_ai import (
     BaseToolCallPart,
@@ -251,7 +250,11 @@ class EventMapper:
         if self._enqueue_message_ids:
             message_id = self._enqueue_message_ids.pop(0)
         else:
-            message_id = str(uuid.uuid4())
+            # FIFO queue is empty — this EnqueuedMessagesEvent came from
+            # pydantic-ai's internal flow (e.g. model retries, tool result
+            # processing), not from our steer()/followup(). Drop it to avoid
+            # spurious display events with random UUID message IDs.
+            return None
 
         return UserMessageInsertedEvent(
             session_id="",

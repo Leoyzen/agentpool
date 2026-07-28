@@ -347,7 +347,13 @@ async def _process_message(
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-        await persist_message_to_storage(state, user_msg_with_parts, session_id)
+        # NOTE: persist_message_to_storage is NOT called here for the user
+        # message. The EventProcessor's append_message_to_session() handles
+        # both DB persistence and in-memory append when it receives the
+        # UserMessageInsertedEvent from _route_message(). Calling
+        # persist_message_to_storage here would write to storage twice,
+        # causing duplicate 0-parts user messages in the TUI.
+        # This matches the send_message_async pattern (see line ~1017).
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts

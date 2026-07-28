@@ -4,9 +4,15 @@ Tests the ``handle_enqueued_messages`` method on :class:`EventMapper`,
 which maps pydantic-ai's ``EnqueuedMessagesEvent`` to AgentPool's
 :class:`UserMessageInsertedEvent` with delivery inference based on
 the current node type.
+
+Only events with a matching FIFO message_id are mapped — empty FIFO
+means the EnqueuedMessagesEvent came from pydantic-ai's internal flow
+(not from steer()/followup()) and is dropped.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from pydantic_ai.messages import (
     EnqueuedMessagesEvent,
@@ -29,10 +35,18 @@ def _make_enqueued_event(content: str = "Hello, steer me!") -> EnqueuedMessagesE
     )
 
 
+def _make_mapper(fifo: list[str] | None = None) -> EventMapper:
+    """Build an EventMapper with optional FIFO queue."""
+    kwargs: dict[str, Any] = {"agent_name": "test-agent", "message_id": "msg-001"}
+    if fifo is not None:
+        kwargs["_enqueue_message_ids"] = fifo
+    return EventMapper(**kwargs)
+
+
 @pytest.mark.unit
 def test_enqueued_messages_steer_delivery_for_model_request_node() -> None:
     """EnqueuedMessagesEvent during ModelRequestNode → delivery='steer'."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = _make_enqueued_event("Steer this conversation!")
 
     result = mapper.map_event(event, current_node_type="ModelRequestNode")
@@ -42,7 +56,7 @@ def test_enqueued_messages_steer_delivery_for_model_request_node() -> None:
     assert result.delivery == "steer"
     assert result.source == "enqueued"
     assert result.content == "Steer this conversation!"
-    assert result.message_id  # non-empty UUID string
+    assert result.message_id == "test-msg-id"
     assert result.session_id == ""
     assert result.meta is None
 
@@ -50,7 +64,7 @@ def test_enqueued_messages_steer_delivery_for_model_request_node() -> None:
 @pytest.mark.unit
 def test_enqueued_messages_followup_delivery_for_call_tools_node() -> None:
     """EnqueuedMessagesEvent during CallToolsNode → delivery='followup'."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = _make_enqueued_event("Followup message")
 
     result = mapper.map_event(event, current_node_type="CallToolsNode")
@@ -65,7 +79,7 @@ def test_enqueued_messages_followup_delivery_for_call_tools_node() -> None:
 @pytest.mark.unit
 def test_enqueued_messages_followup_delivery_for_end_node() -> None:
     """EnqueuedMessagesEvent during End node → delivery='followup'."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = _make_enqueued_event("After-turn message")
 
     result = mapper.map_event(event, current_node_type="End")
@@ -79,7 +93,7 @@ def test_enqueued_messages_followup_delivery_for_end_node() -> None:
 @pytest.mark.unit
 def test_enqueued_messages_unknown_node_type_defaults_to_steer() -> None:
     """EnqueuedMessagesEvent with unknown node type defaults to delivery='steer'."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = _make_enqueued_event("Unknown context")
 
     result = mapper.map_event(event, current_node_type="unknown")
@@ -92,7 +106,7 @@ def test_enqueued_messages_unknown_node_type_defaults_to_steer() -> None:
 @pytest.mark.unit
 def test_enqueued_messages_empty_messages_returns_none() -> None:
     """EnqueuedMessagesEvent with empty messages tuple returns None."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = EnqueuedMessagesEvent(enqueue_id="eq-empty", messages=())
 
     result = mapper.map_event(event, current_node_type="ModelRequestNode")
@@ -103,11 +117,35 @@ def test_enqueued_messages_empty_messages_returns_none() -> None:
 @pytest.mark.unit
 def test_enqueued_messages_no_user_prompt_part_returns_none() -> None:
     """EnqueuedMessagesEvent containing only ModelResponse (no UserPromptPart) returns None."""
-    mapper = EventMapper(agent_name="test-agent", message_id="msg-001")
+    mapper = _make_mapper(fifo=["test-msg-id"])
     event = EnqueuedMessagesEvent(
         enqueue_id="eq-no-user",
         messages=(ModelResponse(parts=[TextPart(content="Assistant response")]),),
     )
+
+    result = mapper.map_event(event, current_node_type="ModelRequestNode")
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_enqueued_messages_empty_fifo_returns_none() -> None:
+    """Empty FIFO queue means EnqueuedMessagesEvent came from pydantic-ai
+    internal flow, not from steer()/followup(). Drop it.
+    """  # noqa: D205
+    mapper = _make_mapper(fifo=[])
+    event = _make_enqueued_event("Spontaneous internal enqueue")
+
+    result = mapper.map_event(event, current_node_type="ModelRequestNode")
+
+    assert result is None
+
+
+@pytest.mark.unit
+def test_enqueued_messages_no_fifo_param_returns_none() -> None:
+    """No FIFO queue parameter means no steer/followup preceded the enqueue."""
+    mapper = _make_mapper()
+    event = _make_enqueued_event("No FIFO queue")
 
     result = mapper.map_event(event, current_node_type="ModelRequestNode")
 
@@ -125,11 +163,7 @@ def test_enqueued_messages_reuses_message_id_from_fifo_queue() -> None:
     FIFO queue instead of generating a new UUID.
     """  # noqa: D205
     fifo: list[str] = ["steer-msg-123"]
-    mapper = EventMapper(
-        agent_name="test-agent",
-        message_id="msg-001",
-        _enqueue_message_ids=fifo,
-    )
+    mapper = _make_mapper(fifo=fifo)
     event = _make_enqueued_event("Steer content")
 
     result = mapper.map_event(event, current_node_type="ModelRequestNode")
@@ -142,34 +176,10 @@ def test_enqueued_messages_reuses_message_id_from_fifo_queue() -> None:
 
 
 @pytest.mark.unit
-def test_enqueued_messages_generates_uuid_when_fifo_empty() -> None:
-    """handle_enqueued_messages() generates a new UUID when the FIFO queue
-    is empty (no steer/followup preceded the enqueue).
-    """  # noqa: D205
-    mapper = EventMapper(
-        agent_name="test-agent",
-        message_id="msg-001",
-        _enqueue_message_ids=[],
-    )
-    event = _make_enqueued_event("Spontaneous enqueue")
-
-    result = mapper.map_event(event, current_node_type="ModelRequestNode")
-
-    assert result is not None
-    assert isinstance(result, UserMessageInsertedEvent)
-    assert result.message_id  # non-empty
-    assert result.message_id != "msg-001"  # not the mapper's internal ID
-
-
-@pytest.mark.unit
 def test_enqueued_messages_fifo_pop_order() -> None:
     """Multiple message_ids in FIFO are popped in FIFO order (first in, first out)."""
     fifo: list[str] = ["msg-a", "msg-b", "msg-c"]
-    mapper = EventMapper(
-        agent_name="test-agent",
-        message_id="msg-001",
-        _enqueue_message_ids=fifo,
-    )
+    mapper = _make_mapper(fifo=fifo)
 
     result1 = mapper.map_event(_make_enqueued_event("first"), current_node_type="ModelRequestNode")
     result2 = mapper.map_event(_make_enqueued_event("second"), current_node_type="ModelRequestNode")
