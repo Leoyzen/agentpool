@@ -513,11 +513,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         """
         if len(text) <= limit:
             return text
-        return (
-            text[:limit]
-            + f"\n\n... [truncated: {len(text)} chars total, "
-            f"showing first {limit}]"
-        )
+        return text[:limit] + f"\n\n... [truncated: {len(text)} chars total, showing first {limit}]"
 
     @staticmethod
     def _format_completion_result(result: CompletionResult) -> str:
@@ -534,8 +530,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         lines.extend(f"  - {value}" for value in values)
         if len(result.values) > _MAX_COMPLETION_SUGGESTIONS:
             lines.append(
-                f"  ... ({len(result.values)} total, "
-                f"showing first {_MAX_COMPLETION_SUGGESTIONS})"
+                f"  ... ({len(result.values)} total, showing first {_MAX_COMPLETION_SUGGESTIONS})"
             )
         elif result.has_more:
             lines.append(f"  ... ({result.total} total, more available)")
