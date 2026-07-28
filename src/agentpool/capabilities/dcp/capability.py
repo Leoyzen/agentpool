@@ -172,8 +172,8 @@ class DynamicContextPruningCapability(AbstractCapability[Any]):
         warning_threshold: float = 0.75,
         critical_threshold: float = 0.90,
         max_context_tokens: int = 128_000,
-    inject_role: str = "user",
-    nudge_role: str = "user",
+        inject_role: str = "user",
+        nudge_role: str = "user",
         nudge_visible: bool = True,
         nudge_turn_frequency: int = 3,
         nudge_step_frequency: int = 50,
@@ -225,8 +225,8 @@ class DynamicContextPruningCapability(AbstractCapability[Any]):
             warning_threshold=warning_threshold,
             critical_threshold=critical_threshold,
             max_context_tokens=max_context_tokens,
-        inject_role=inject_role if inject_role in ("system", "user") else "user",
-        nudge_role=nudge_role if nudge_role in ("system", "user") else "user",
+            inject_role=inject_role if inject_role in ("system", "user") else "user",
+            nudge_role=nudge_role if nudge_role in ("system", "user") else "user",
             nudge_visible=nudge_visible,
             nudge_turn_frequency=nudge_turn_frequency,
             nudge_step_frequency=nudge_step_frequency,
@@ -740,9 +740,7 @@ class DynamicContextPruningCapability(AbstractCapability[Any]):
             session_id = self._get_session_id(ctx)
             steer_id: str | None = None
             host_ctx = ctx.deps.node.host_context
-            session_pool = (
-                host_ctx.session_pool if host_ctx is not None else None
-            )
+            session_pool = host_ctx.session_pool if host_ctx is not None else None
             if session_pool is not None:
                 steer_id = await session_pool.steer(
                     session_id,

@@ -270,8 +270,7 @@ def prune_tool(
     ] = None,  # type: ignore[assignment]
     clear_thinking: Annotated[
         bool,  # noqa: RUF013
-        "When True, immediately strip all ThinkingPart from "
-        "message history (one-shot action).",
+        "When True, immediately strip all ThinkingPart from message history (one-shot action).",
     ] = None,  # type: ignore[assignment]
 ) -> dict[str, object]:
     """Prune tool outputs and/or toggle thinking clearing.
