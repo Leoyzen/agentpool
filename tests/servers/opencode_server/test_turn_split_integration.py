@@ -89,6 +89,7 @@ class _FakeBridge(OpenCodeEventBridgeMixin):
         self._contexts: dict[str, EventProcessorContext] = {}
         self._adapters: dict[str, OpenCodeEventAdapter] = {}
         self._message_registered: dict[str, bool] = {}
+        self._steer_split_ids: dict[str, set[str]] = {}
         self._child_to_parent: dict[str, str] = {}
         self._child_spawns: dict[str, SpawnSessionStart] = {}
         self._children_of: dict[str, set[str]] = {}
@@ -606,23 +607,19 @@ async def test_split_triggers_on_enqueued_steer_event(
 
 
 # =============================================================================
-# TEST 8: Split does NOT trigger on internal steer event (fire-and-forget)
+# TEST 8: Split DOES trigger on internal steer event (fire-and-forget fallback)
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_split_does_not_trigger_on_internal_steer_event(
+async def test_split_triggers_on_internal_steer_event(
     server_state: ServerState,
 ) -> None:
-    """UserMessageInsertedEvent(source="internal", delivery="steer") does NOT split.
+    """UserMessageInsertedEvent(source="internal", delivery="steer") DOES split.
 
-    Given: A real EventProcessor with an active turn that receives an internal
-        steer UserMessageInsertedEvent (from fire-and-forget
-        _schedule_user_message_emission() send time, not EnqueuedMessagesEvent
-        drain time).
-    When: Events are fed through _handle_event.
-    Then: Session has only 1 assistant message (no split), because internal
-        source means send time, not drain time.
+    source="internal" (fire-and-forget) is a fallback when
+    EnqueuedMessagesEvent is not available. The split triggers on
+    both sources to ensure the turn boundary is created.
     """
     session_id = "test-split-8"
     bridge = _FakeBridge(server_state, server_state.pool.session_pool)
@@ -650,8 +647,8 @@ async def test_split_does_not_trigger_on_internal_steer_event(
     await _feed_events(bridge, session_id, events)
 
     assistant_msgs = _assistant_messages(server_state, session_id)
-    assert len(assistant_msgs) == 1, (
-        f"Expected 1 assistant message (no split for internal source), got {len(assistant_msgs)}"
+    assert len(assistant_msgs) == 2, (
+        f"Expected 2 assistant messages (split on internal source), got {len(assistant_msgs)}"
     )
 
 
