@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, Mock
 
@@ -49,6 +50,10 @@ async def test_init_session_routes_through_session_pool_with_correct_args(
 
     assert response.status_code == 200
     assert response.json() is True
+
+    # The init runs as a background task — yield control to let it execute
+    await asyncio.sleep(0.1)
+
     assert receive_request_called is True
 
     # Verify correct session_id and prompt were passed
@@ -73,6 +78,9 @@ async def test_init_session_routes_through_session_pool(
 
     assert response.status_code == 200
     assert response.json() is True
+
+    # The init runs as a background task — yield control to let it execute
+    await asyncio.sleep(0.1)
 
     # Verify session_pool.receive_request was called
     assert hasattr(mock_pool.session_pool.send_message, "call_count")

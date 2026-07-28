@@ -268,7 +268,7 @@ async def test_multiple_requests_share_one_consumer(
     "turn 2 reuses turn 1's assistant_msg_id instead of generating a new one. "
     "This is a protocol-server-side issue independent of the per-prompt RunHandle "
     "migration. Fix: reset _message_registered on RunStartedEvent in the "
-    "OpenCode event bridge.",
+    "OpenCode event bridge. (#199)",
     strict=False,
     raises=AssertionError,
 )

@@ -105,7 +105,6 @@ async def test_token_tracking():
         assert talk.stats.token_count > 0  # Actual number depends on model
 
 
-@pytest.mark.skip(reason="Flaky: fails due to cross-test state pollution in batch runs")
 async def test_group_stats_aggregation():
     """Test GroupStats aggregation of multiple connections."""
     async with (
@@ -113,7 +112,6 @@ async def test_group_stats_aggregation():
         Agent[str](model="test", name="target1") as target1,
         Agent[str](model="test", name="target2") as target2,
     ):
-        # Create team connection
         team = [target1, target2]
         team_talk = source.connect_to(team)
 

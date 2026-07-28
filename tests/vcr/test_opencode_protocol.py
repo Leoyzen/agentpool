@@ -84,7 +84,7 @@ async def opencode_client(opencode_app: FastAPI) -> AsyncIterator[TestClient]:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_session_create"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_session_create(opencode_client: TestClient, tmp_path: Path) -> None:
     """POST /session creates a new session with a non-empty ID."""
@@ -105,7 +105,7 @@ async def test_session_create(opencode_client: TestClient, tmp_path: Path) -> No
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_prompt_sse_stream"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_prompt_sse_stream(opencode_client: TestClient, opencode_state: ServerState) -> None:
     """POST /session/{id}/message streams SSE events back to the client.
@@ -141,7 +141,7 @@ async def test_prompt_sse_stream(opencode_client: TestClient, opencode_state: Se
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_tool_call_events"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_tool_call_events(opencode_client: TestClient) -> None:
     """Tool-call events appear in the SSE stream when the agent invokes a tool."""
@@ -166,7 +166,7 @@ async def test_tool_call_events(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_subagent_events"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_subagent_events(opencode_client: TestClient) -> None:
     """Subagent spawn/complete events appear in the SSE stream."""
@@ -191,7 +191,7 @@ async def test_subagent_events(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_session_close"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_session_close(opencode_client: TestClient) -> None:
     """DELETE /session/{id} closes the session."""
@@ -213,7 +213,7 @@ async def test_session_close(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_error_handling"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_error_handling(opencode_client: TestClient) -> None:
     """Malformed requests produce structured error responses, not crashes."""
@@ -227,7 +227,7 @@ async def test_error_handling(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_model_api_rate_limit"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_model_api_rate_limit(opencode_client: TestClient) -> None:
     """Model API returns 429 rate limit — error propagates as SSE error event.
@@ -246,7 +246,7 @@ async def test_model_api_rate_limit(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_model_api_server_error"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_model_api_server_error(opencode_client: TestClient) -> None:
     """Model API returns 500 server error — error propagates through OpenCode SSE."""
@@ -259,7 +259,7 @@ async def test_model_api_server_error(opencode_client: TestClient) -> None:
 
 @pytest.mark.skipif(
     not cassette_exists(_MODULE_STEM, "test_model_api_malformed_stream"),
-    reason="Cassette not recorded yet — run with --record-mode=once",
+    reason="Cassette not recorded — see issue #234. Run with --record-mode=once and OPENAI_API_KEY",
 )
 async def test_model_api_malformed_stream(opencode_client: TestClient) -> None:
     """Model API returns malformed streaming response — error propagates gracefully.

@@ -1,6 +1,6 @@
 """Test history processor functions used by test_history_processors.py.
 
-These are imported via string paths like ``tests.test_processors:keep_recent``
+These are imported via string paths like ``tests._helpers.test_processors:keep_recent``
 by NativeAgentConfig.get_history_processors().
 """
 

@@ -239,12 +239,6 @@ async def test_session_not_found(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    reason="Fork endpoint returns 500 — deeper issue beyond OTel fix",
-    strict=False,
-    raises=AssertionError,
-)
-@pytest.mark.known_bug
 @pytest.mark.parametrize(
     "subprocess_server",
     [{"serve_command": "serve-opencode", "is_stdio": False, "health_path": "/session"}],
