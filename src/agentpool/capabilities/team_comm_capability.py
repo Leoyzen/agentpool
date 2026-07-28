@@ -2093,7 +2093,8 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             str,
             Field(
                 description="Display name for the new member. If empty, "
-                "falls back to the agent's display_name (or agent name)"
+                "falls back to the agent's display_name. Prefer semantic "
+                "name reflecting the member's purpose."
             ),
         ],
         agent: Annotated[str, Field(description="Registered agent name to use as the member")],
