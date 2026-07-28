@@ -174,9 +174,7 @@ async def test_run_error_sets_session_idle() -> None:
     _args, kwargs = mock_set_status.call_args
     status = kwargs.get("status") or (_args[2] if len(_args) > 2 else None)
     assert status is not None
-    assert status.type == "idle", (
-        f"Expected session status 'idle', got '{status.type}'"
-    )
+    assert status.type == "idle", f"Expected session status 'idle', got '{status.type}'"
 
 
 # =============================================================================
@@ -224,14 +222,11 @@ async def test_run_error_sets_aborted_error() -> None:
     assert info.error is not None, "assistant_msg.info.error must be set"
     assert isinstance(info.error, MessageAbortedError)
     assert info.error.data.message == error_message, (
-        f"Expected error message '{error_message}', "
-        f"got '{info.error.data.message}'"
+        f"Expected error message '{error_message}', got '{info.error.data.message}'"
     )
 
     # Verify a MessageUpdatedEvent was broadcast with the error
-    updated_events = [
-        e for e in broadcast_calls if e.__class__.__name__ == "MessageUpdatedEvent"
-    ]
+    updated_events = [e for e in broadcast_calls if e.__class__.__name__ == "MessageUpdatedEvent"]
     assert len(updated_events) >= 1, (
         "MessageUpdatedEvent must be broadcast after setting aborted error"
     )
