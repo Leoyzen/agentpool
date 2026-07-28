@@ -841,7 +841,7 @@ class EventProcessor:
             new_state = ToolStateError(error=error_string, input=tool_input, time=t)
         else:
             new_state = ToolStateCompleted(
-                title=f"Completed {existing.tool}",
+                title="Completed",
                 input=tool_input,
                 output=result_str,
                 metadata=event_metadata or {},
@@ -921,23 +921,19 @@ class EventProcessor:
         ctx.assistant_msg.parts.append(step_finish)
         yield PartUpdatedEvent.create(step_finish)
 
-        # Update the message-level `tokens` field with cumulative values.
-        # The TUI sidebar reads this field to show current token usage.
-        cumulative = event.cumulative_usage
-        cumul_input = cumulative.input_tokens or 0
-        cumul_output = cumulative.output_tokens or 0
-        cumul_details = cumulative.details or {}
-        cumul_reasoning = cumul_details.get("reasoning_tokens", 0)
-        ctx.update_tokens(cumul_input, cumul_output)
+        # Update the message-level `tokens` field with per-step delta
+        # values.  The TUI sidebar reads this field to show per-step
+        # token cost.  Using per-step deltas (not cumulative) so the
+        # user sees the actual cost of each step rather than the
+        # running total which grows quickly because each LLM request
+        # re-sends the entire context (system prompt + history).
+        ctx.update_tokens(input_tokens, output_tokens)
         if isinstance(ctx.assistant_msg.info, AssistantMessage):
             ctx.assistant_msg.info.tokens = Tokens(
-                cache=TokenCache(
-                    read=cumulative.cache_read_tokens or 0,
-                    write=cumulative.cache_write_tokens or 0,
-                ),
-                input=cumul_input,
-                output=cumul_output,
-                reasoning=cumul_reasoning,
+                cache=cache,
+                input=input_tokens,
+                output=output_tokens,
+                reasoning=reasoning_tokens,
             )
             yield MessageUpdatedEvent.create(ctx.assistant_msg.info)
 
@@ -1119,6 +1115,15 @@ class EventProcessor:
                     text_val = item["text"]
                     if isinstance(text_val, str) and text_val:
                         user_msg_with_parts.add_text_part(text_val)
+                elif hasattr(item, "parts") and isinstance(item.parts, list):
+                    # Handle ModelRequest containing SystemPromptPart etc.
+                    for part in item.parts:
+                        if hasattr(part, "content") and isinstance(part.content, str):
+                            user_msg_with_parts.add_text_part(part.content)
+                elif hasattr(item, "content") and isinstance(item.content, str):
+                    # Handle pydantic-ai ModelRequestPart (e.g. SystemPromptPart)
+                    # by extracting its content as text for TUI display.
+                    user_msg_with_parts.add_text_part(item.content)
 
         # Append to session state
         from agentpool_server.opencode_server.opencode_message_bridge import (

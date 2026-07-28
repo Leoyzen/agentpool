@@ -131,7 +131,7 @@ class SessionControllerRunsMixin:
                 # Fall back: direct EventBus publish (idle session or
                 # non-protocol source).
                 await self._event_bus.publish(session_id, event)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.warning(
                     "Failed to emit UserMessageInsertedEvent",
                     exc_info=True,
@@ -159,7 +159,7 @@ class SessionControllerRunsMixin:
             return comm_channel
         return None
 
-    async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:
+    async def _consume_run(self, run_handle: RunHandle, initial_prompt: str | list[Any]) -> None:  # noqa: PLR0915
         """Drive RunHandle execution to completion, chaining prompts.
 
         In the per-prompt model, each RunHandle executes exactly one turn
@@ -220,6 +220,13 @@ class SessionControllerRunsMixin:
                             )
                         turn_failed = True
 
+                        # Notify parent (lead) session if this is a team
+                        # member that crashed.  Skip when the session is
+                        # being closed (team_delete, shutdown_request, etc.)
+                        # — that's a normal shutdown, not a crash.
+                        if session is not None and not session.is_closing:
+                            await self._notify_lead_of_member_crash(session, exc)
+
                     # Generator terminated naturally — clean up this RunHandle.
                     self._runs.pop(current_handle.run_id, None)
 
@@ -238,6 +245,8 @@ class SessionControllerRunsMixin:
                     async with session._request_lock:
                         if session.current_run_id == current_handle.run_id:
                             session.set_current_run_id(None)
+                        if session.is_closing:
+                            break  # Session is closing — don't chain.
                         if session.prompt_queue.empty():
                             break  # No more prompts, session goes idle.
                         try:
@@ -258,6 +267,57 @@ class SessionControllerRunsMixin:
                 detach(ctx_token)
             if run_handle._run_span is not None:
                 run_handle._run_span.end()
+
+    async def _notify_lead_of_member_crash(
+        self,
+        session: SessionState,
+        exc: BaseException,
+    ) -> None:
+        """Notify the lead (parent) session when a team member crashes.
+
+        Routes a concise notification through the unified ``_route_message``
+        path with ``source="team"`` so it appears in the lead's conversation
+        history and the lead's LLM can act on it in the next turn.
+
+        Silently skips if the session is not a team member, has no parent,
+        or the parent session is unavailable.  Any notification failure is
+        logged as a warning and never re-raised.
+        """
+        parent_session_id = session.parent_session_id
+        if parent_session_id is None:
+            return
+        if session.metadata.get("team_role") != "member":
+            return
+        member_name = session.metadata.get("team_member_name", session.agent_name)
+        error_detail = f"{type(exc).__name__}: {exc}"
+        notification = (
+            f'\u26a0\ufe0f Member "{member_name}" exited abnormally:'
+            f" {error_detail}. Use team_status to check details."
+        )
+        try:
+            parent_session = self.get_session(parent_session_id)
+            if parent_session is None or parent_session.is_closing:
+                return
+            parent_agent = await self.get_or_create_session_agent(  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+                parent_session_id,
+            )
+            if parent_agent is None:
+                return
+            await self._route_message(
+                parent_session,
+                parent_agent,
+                parent_session_id,
+                notification,
+                priority="when_idle",
+                source="team",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to notify lead session %s of member %s abnormal exit",
+                parent_session_id,
+                member_name,
+                exc_info=True,
+            )
 
     def _create_per_prompt_handle(
         self,
@@ -432,6 +492,7 @@ class SessionControllerRunsMixin:
         message_id: str | None = None,
         delivery: str | None = None,
         meta: Any = None,
+        source: str = "protocol",
     ) -> str | None:
         """Route a message to the appropriate handler based on session state.
 
@@ -457,6 +518,10 @@ class SessionControllerRunsMixin:
                 and priority.
             meta: Optional protocol-specific metadata carried through to
                 ``UserMessageInsertedEvent`` for rich user message display.
+            source: Originator of the message — ``"protocol"`` (default)
+                for protocol handler requests, ``"team"`` for team-mode
+                coordination messages. Passed to
+                ``UserMessageInsertedEvent.source``.
 
         Returns:
             The ``message_id`` string on success, ``None`` for rejection.
@@ -478,7 +543,7 @@ class SessionControllerRunsMixin:
                     session_id,
                     content,
                     delivery=inferred_delivery,
-                    source="protocol",
+                    source=source,
                     message_id=message_id,
                     meta=meta,
                 )
@@ -501,7 +566,7 @@ class SessionControllerRunsMixin:
                         session_id,
                         content,
                         delivery=inferred_delivery,
-                        source="protocol",
+                        source=source,
                         message_id=message_id,
                         meta=meta,
                     )
@@ -512,7 +577,7 @@ class SessionControllerRunsMixin:
                     session_id,
                     content,
                     delivery=inferred_delivery,
-                    source="protocol",
+                    source=source,
                     message_id=message_id,
                     meta=meta,
                 )

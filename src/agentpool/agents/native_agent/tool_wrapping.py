@@ -96,7 +96,7 @@ def wrap_tool[TReturn](
 
         async def wrapped(  # pyright: ignore[reportRedeclaration]
             ctx: RunContext, *args: Any, **kwargs: Any
-        ) -> TReturn | None | ToolReturn:  # pyright: ignore
+        ) -> TReturn | ToolReturn | None:  # pyright: ignore
             if agent_ctx.data is None:
                 agent_ctx.data = ctx.deps
 
@@ -146,7 +146,7 @@ def wrap_tool[TReturn](
 
     else:
 
-        async def wrapped(*args: Any, **kwargs: Any) -> TReturn | None | ToolReturn:  # type: ignore[misc]
+        async def wrapped(*args: Any, **kwargs: Any) -> TReturn | ToolReturn | None:  # type: ignore[misc]
             if tool.deferred:
                 try:
                     return cast(

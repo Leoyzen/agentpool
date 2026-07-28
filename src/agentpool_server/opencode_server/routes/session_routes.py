@@ -15,6 +15,7 @@ from slashed import CommandContext
 from agentpool.log import get_logger
 from agentpool.repomap import RepoMap, find_src_files
 from agentpool.utils import identifiers as identifier
+from agentpool.utils.identifiers import extract_timestamp_ms
 from agentpool.utils.time_utils import now_ms
 from agentpool_server.opencode_server.command_validation import validate_command
 from agentpool_server.opencode_server.converters import (
@@ -753,7 +754,7 @@ async def list_sessions(  # noqa: PLR0915
                         sessions_by_id[session_id] = cached
 
                 sessions = list(sessions_by_id.values())
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # D7: Store query failure — degrade to in-memory only
                 logger.warning(
                     "Failed to query store for sessions, falling back to in-memory only",
@@ -802,8 +803,8 @@ async def list_sessions(  # noqa: PLR0915
 @router.post("")
 async def create_session(state: StateDep, request: SessionCreateRequest | None = None) -> Session:
     """Create a new session and persist to storage."""
-    now = now_ms()
-    session_id = identifier.ascending("session")
+    session_id = identifier.descending("session")
+    now = extract_timestamp_ms(session_id) or now_ms()
     base_path = state.base_path
     project_id = helpers.compute_project_id(base_path)
     agent_name = _resolve_session_create_agent(state, request.agent if request else None)
@@ -1095,7 +1096,7 @@ async def abort_session(session_id: str, state: StateDep) -> bool:
                     await session_agent.interrupt()
                     # Give a moment for the cancellation to propagate
                     await asyncio.sleep(0.1)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.warning(
                         "interrupt() failed for session %s during abort",
                         session_id,
@@ -1177,8 +1178,8 @@ async def fork_session(  # noqa: D417
         messages_to_copy = list(original_messages)
 
     # Create the new forked session
-    now = now_ms()
-    new_session_id = identifier.ascending("session")
+    new_session_id = identifier.descending("session")
+    now = extract_timestamp_ms(new_session_id) or now_ms()
     # Use provided directory or inherit from original session
     fork_directory = directory if directory else original_session.directory
     forked_session = Session(
@@ -1310,11 +1311,15 @@ async def init_session(  # noqa: D417,PLR0915
         "1. Build/lint/test commands - especially for running a single test",
         "2. Code style guidelines (imports, formatting, types, naming conventions, error handling)",
         "",
-        "The file will be given to AI coding agents working in this repository. "
-        "Keep it around 150 lines.",
+        (
+            "The file will be given to AI coding agents working in this repository. "
+            "Keep it around 150 lines."
+        ),
         "",
-        "If there are existing rules (.cursor/rules/, .cursorrules, "
-        ".github/copilot-instructions.md), incorporate them.",
+        (
+            "If there are existing rules (.cursor/rules/, .cursorrules, "
+            ".github/copilot-instructions.md), incorporate them."
+        ),
     ])
 
     init_prompt = "\n".join(prompt_parts)
@@ -1874,7 +1879,7 @@ async def _ensure_session_idle(state: ServerState, session_id: str) -> None:
         try:
             session_pool.cancel_run(run_id)
             cancel_succeeded = True
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "cancel_run(%s) failed for session %s — force-clearing current_run_id",
                 run_id,
@@ -1897,7 +1902,7 @@ async def _ensure_session_idle(state: ServerState, session_id: str) -> None:
                 session_id,
                 _IDLE_WAIT_TIMEOUT,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "wait_for_completion(%s) raised for session %s — force-clearing current_run_id",
                 run_id,

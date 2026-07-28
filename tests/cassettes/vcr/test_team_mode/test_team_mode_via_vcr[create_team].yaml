@@ -1,0 +1,1405 @@
+interactions:
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '13576'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are team_lead.
+
+
+          You are a team lead. Use team tools to coordinate members.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through
+          something before or during a change." />
+
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete."
+          />
+
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete
+          proposal with design, specs, and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team,
+          create a single agent, or create a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up
+          Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure
+          + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;,
+          &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;,
+          &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning
+          team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements."
+          />
+
+          </available-skills>
+
+          You are team_lead, a member of team "unknown".
+
+          Your role is: lead.
+
+
+          ## Team Communication Protocol
+
+
+          1. Use `send_message` to communicate with other team members.
+
+          2. Use `task_create` and `task_update` to track work items.
+
+          3. Use `read_blackboard` and `write_blackboard` to share context.
+
+          4. Use `team_status` to check the status of all members.
+
+          5. If you are the lead, you may use `team_create` and `team_delete`.
+
+
+          ## Guidelines
+
+
+          - Keep messages concise and actionable.
+
+          - Update task status promptly when work is completed.
+
+          - Check the blackboard before starting new work to avoid duplication.
+
+          - Report blockers to the lead via `send_message` with message_type="escalation".
+
+
+
+          ## Your Capabilities (Lead)
+
+
+          - You can broadcast to all members via `send_message` with `to="*"`.
+
+          - You can create and delete teams, delete blackboard keys, and shut down members.
+
+
+
+          ## Eligible Agents
+
+
+          The following agents can be used as team members in `team_create`:
+
+          - `team_lead`: You are a team lead. Use team tools to coordinate members.
+
+          - `team_member`: You are a team member. Follow instructions from the lead.'
+        role: system
+      - content:
+        - text: 'Create a team named "test_team" with one member: name="assistant", agent="team_member"'
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\nArgs:\n    ctx: Agent context providing access to pool and skills\n    skill_name: Name of the skill to load, or a skill://\
+            \ URI.\n        Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n    arguments: Optional space-separated arguments for substitution\n\nReturns:\n\
+            \    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Send a message to a teammate's inbox.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    to: Recipient member name. ``\"*\"`` broadcasts to all members\n        (lead-only\
+            \ -- returns error for non-lead agents).\n    body: Message body text.\n    urgent: If True, deliver via steer (mid-turn injection);\n        otherwise queue for next turn.\n    message_type:\
+            \ Optional message type tag. If the type is in\n        ``config.auto_urgent``, ``urgent`` is forced to ``True``.\n\nReturns:\n    Success or error message string."
+          name: send_message
+          parameters:
+            additionalProperties: false
+            properties:
+              body:
+                description: Message body text.
+                type: string
+              message_type:
+                default: ''
+                description: 'Optional message type tag. If the type is in
+
+                  ``config.auto_urgent``, ``urgent`` is forced to ``True``.'
+                type: string
+              to:
+                description: 'Recipient member name. ``"*"`` broadcasts to all members
+
+                  (lead-only -- returns error for non-lead agents).'
+                type: string
+              urgent:
+                default: false
+                description: 'If True, deliver via steer (mid-turn injection);
+
+                  otherwise queue for next turn.'
+                type: boolean
+            required:
+            - to
+            - body
+            type: object
+        type: function
+      - function:
+          description: "Create a task on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    subject: Short task title.\n    description: Optional longer description.\n   \
+            \ blocked_by: Optional list of task_ids this task depends on.\n\nReturns:\n    Success message with task_id, or error string."
+          name: task_create
+          parameters:
+            additionalProperties: false
+            properties:
+              blocked_by:
+                anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: 'null'
+                default: null
+                description: Optional list of task_ids this task depends on.
+              description:
+                default: ''
+                description: Optional longer description.
+                type: string
+              subject:
+                description: Short task title.
+                type: string
+            required:
+            - subject
+            type: object
+        type: function
+      - function:
+          description: "List all tasks on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of tasks (pretty-printed), or error string."
+          name: task_list
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Update a task's status or owner on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    task_id: ID of the task to update.\n    status: New status (e.g.\
+            \ \"in_progress\", \"completed\"). Empty = no change.\n    owner: New owner name. Empty = no change.\n\nReturns:\n    Updated task as JSON, or error string."
+          name: task_update
+          parameters:
+            additionalProperties: false
+            properties:
+              owner:
+                default: ''
+                description: New owner name. Empty = no change.
+                type: string
+              status:
+                default: ''
+                description: New status (e.g. "in_progress", "completed"). Empty = no change.
+                type: string
+              task_id:
+                description: ID of the task to update.
+                type: string
+            required:
+            - task_id
+            type: object
+        type: function
+      - function:
+          description: "Read a key from the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to read.\n\nReturns:\n    JSON value + metadata, or \"Key not\
+            \ found\" / error string."
+          name: read_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              key:
+                description: Blackboard key to read.
+                type: string
+            required:
+            - key
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: "Write a key to the shared blackboard with optimistic locking.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to write.\n    value: Value to store.\n\
+            \    expected_version: Expected current version for optimistic locking.\n        If None, no version check is performed.\n\nReturns:\n    \"Written, version=N\" on success, or \"Conflict: current\
+            \ version is N\"."
+          name: write_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              expected_version:
+                anyOf:
+                - type: integer
+                - type: 'null'
+                default: null
+                description: 'Expected current version for optimistic locking.
+
+                  If None, no version check is performed.'
+              key:
+                description: Blackboard key to write.
+                type: string
+              value:
+                description: Value to store.
+                type: string
+            required:
+            - key
+            - value
+            type: object
+        type: function
+      - function:
+          description: "List all keys on the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of key names, or error string."
+          name: list_blackboard
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Get the current status of the team.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    Formatted status string with team name, members, and status."
+          name: team_status
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Create a new team with eligible members (lead-only).\n\nPass ``members`` as a list of dicts with ``agent`` (registered agent\nname) and ``name`` (display name) keys. Only agents\
+            \ listed in\n``member_eligible`` can be used. If ``defaults`` is configured and\n``members`` is empty, default members from config are used.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\
+            \    name: Human-readable team name.\n    members: List of member dicts, each with ``agent`` and ``name``\n        keys.\n\nReturns:\n    Success message with team_id, or error string."
+          name: team_create
+          parameters:
+            additionalProperties: false
+            properties:
+              members:
+                description: 'List of member dicts, each with ``agent`` and ``name``
+
+                  keys.'
+                items:
+                  additionalProperties:
+                    type: string
+                  properties: {}
+                  type: object
+                type: array
+              name:
+                description: Human-readable team name.
+                type: string
+            required:
+            - name
+            - members
+            type: object
+        type: function
+      - function:
+          description: "Delete the current team and close all member sessions (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    ``\"Team deleted\"`` on success, or error\
+            \ string."
+          name: team_delete
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Delete a key from the shared blackboard (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to delete.\n\nReturns:\n    ``\"Blackboard key\
+            \ '{key}' deleted\"`` on success, or error string."
+          name: delete_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              key:
+                description: Blackboard key to delete.
+                type: string
+            required:
+            - key
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: "Shut down a specific team member (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    member_name: Name of the member to shut down.\n\nReturns:\n    ``\"Shutdown\
+            \ completed for {member_name}\"`` on success, or error."
+          name: shutdown_request
+          parameters:
+            additionalProperties: false
+            properties:
+              member_name:
+                description: Name of the member to shut down.
+                type: string
+            required:
+            - member_name
+            type: object
+          strict: true
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-8a2474be3c3dde9a","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" user wants me to
+        create a team named"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"test_team\" with
+        one member"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". Let me do"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" that using"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" the team_create
+        function"}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"."}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-8f5f7dd15c2278c6","function":{"arguments":"","name":"team_create"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"{\"name\":
+        \""},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"test_team"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"\",
+        \"members\": "},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"function":{"arguments":"[{\"name\":
+        \"assistant\", \"agent\": \"team_member\"}]}"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+
+        data: {"id":"chatcmpl-8a2474be3c3dde9a","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":107,"prompt_tokens":3229,"total_tokens":3336,"completion_tokens_details":{"reasoning_tokens":27}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784374858551'
+      req-cost-time:
+      - '469'
+      resp-start-time:
+      - '1784374859021'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '14154'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are team_lead.
+
+
+          You are a team lead. Use team tools to coordinate members.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through
+          something before or during a change." />
+
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete."
+          />
+
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete
+          proposal with design, specs, and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team,
+          create a single agent, or create a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up
+          Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure
+          + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;,
+          &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;,
+          &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning
+          team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements."
+          />
+
+          </available-skills>
+
+          You are team_lead, a member of team "unknown".
+
+          Your role is: lead.
+
+
+          ## Team Communication Protocol
+
+
+          1. Use `send_message` to communicate with other team members.
+
+          2. Use `task_create` and `task_update` to track work items.
+
+          3. Use `read_blackboard` and `write_blackboard` to share context.
+
+          4. Use `team_status` to check the status of all members.
+
+          5. If you are the lead, you may use `team_create` and `team_delete`.
+
+
+          ## Guidelines
+
+
+          - Keep messages concise and actionable.
+
+          - Update task status promptly when work is completed.
+
+          - Check the blackboard before starting new work to avoid duplication.
+
+          - Report blockers to the lead via `send_message` with message_type="escalation".
+
+
+
+          ## Your Capabilities (Lead)
+
+
+          - You can broadcast to all members via `send_message` with `to="*"`.
+
+          - You can create and delete teams, delete blackboard keys, and shut down members.
+
+
+
+          ## Eligible Agents
+
+
+          The following agents can be used as team members in `team_create`:
+
+          - `team_lead`: You are a team lead. Use team tools to coordinate members.
+
+          - `team_member`: You are a team member. Follow instructions from the lead.'
+        role: system
+      - content:
+        - text: 'Create a team named "test_team" with one member: name="assistant", agent="team_member"'
+          type: text
+        role: user
+      - content: null
+        reasoning_content: The user wants me to create a team named "test_team" with one member. Let me do that using the team_create function.
+        role: assistant
+        tool_calls:
+        - function:
+            arguments: '{"name": "test_team", "members": [{"name": "assistant", "agent": "team_member"}]}'
+            name: team_create
+          id: chatcmpl-tool-8f5f7dd15c2278c6
+          type: function
+      - content: Team 'test_team' created with 1 members. team_id=bc71ec7d-3c48-4052-8c1d-2b55e176d2c9
+        role: tool
+        tool_call_id: chatcmpl-tool-8f5f7dd15c2278c6
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\nArgs:\n    ctx: Agent context providing access to pool and skills\n    skill_name: Name of the skill to load, or a skill://\
+            \ URI.\n        Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n    arguments: Optional space-separated arguments for substitution\n\nReturns:\n\
+            \    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Send a message to a teammate's inbox.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    to: Recipient member name. ``\"*\"`` broadcasts to all members\n        (lead-only\
+            \ -- returns error for non-lead agents).\n    body: Message body text.\n    urgent: If True, deliver via steer (mid-turn injection);\n        otherwise queue for next turn.\n    message_type:\
+            \ Optional message type tag. If the type is in\n        ``config.auto_urgent``, ``urgent`` is forced to ``True``.\n\nReturns:\n    Success or error message string."
+          name: send_message
+          parameters:
+            additionalProperties: false
+            properties:
+              body:
+                description: Message body text.
+                type: string
+              message_type:
+                default: ''
+                description: 'Optional message type tag. If the type is in
+
+                  ``config.auto_urgent``, ``urgent`` is forced to ``True``.'
+                type: string
+              to:
+                description: 'Recipient member name. ``"*"`` broadcasts to all members
+
+                  (lead-only -- returns error for non-lead agents).'
+                type: string
+              urgent:
+                default: false
+                description: 'If True, deliver via steer (mid-turn injection);
+
+                  otherwise queue for next turn.'
+                type: boolean
+            required:
+            - to
+            - body
+            type: object
+        type: function
+      - function:
+          description: "Create a task on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    subject: Short task title.\n    description: Optional longer description.\n   \
+            \ blocked_by: Optional list of task_ids this task depends on.\n\nReturns:\n    Success message with task_id, or error string."
+          name: task_create
+          parameters:
+            additionalProperties: false
+            properties:
+              blocked_by:
+                anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: 'null'
+                default: null
+                description: Optional list of task_ids this task depends on.
+              description:
+                default: ''
+                description: Optional longer description.
+                type: string
+              subject:
+                description: Short task title.
+                type: string
+            required:
+            - subject
+            type: object
+        type: function
+      - function:
+          description: "List all tasks on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of tasks (pretty-printed), or error string."
+          name: task_list
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Update a task's status or owner on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    task_id: ID of the task to update.\n    status: New status (e.g.\
+            \ \"in_progress\", \"completed\"). Empty = no change.\n    owner: New owner name. Empty = no change.\n\nReturns:\n    Updated task as JSON, or error string."
+          name: task_update
+          parameters:
+            additionalProperties: false
+            properties:
+              owner:
+                default: ''
+                description: New owner name. Empty = no change.
+                type: string
+              status:
+                default: ''
+                description: New status (e.g. "in_progress", "completed"). Empty = no change.
+                type: string
+              task_id:
+                description: ID of the task to update.
+                type: string
+            required:
+            - task_id
+            type: object
+        type: function
+      - function:
+          description: "Read a key from the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to read.\n\nReturns:\n    JSON value + metadata, or \"Key not\
+            \ found\" / error string."
+          name: read_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              key:
+                description: Blackboard key to read.
+                type: string
+            required:
+            - key
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: "Write a key to the shared blackboard with optimistic locking.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to write.\n    value: Value to store.\n\
+            \    expected_version: Expected current version for optimistic locking.\n        If None, no version check is performed.\n\nReturns:\n    \"Written, version=N\" on success, or \"Conflict: current\
+            \ version is N\"."
+          name: write_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              expected_version:
+                anyOf:
+                - type: integer
+                - type: 'null'
+                default: null
+                description: 'Expected current version for optimistic locking.
+
+                  If None, no version check is performed.'
+              key:
+                description: Blackboard key to write.
+                type: string
+              value:
+                description: Value to store.
+                type: string
+            required:
+            - key
+            - value
+            type: object
+        type: function
+      - function:
+          description: "List all keys on the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of key names, or error string."
+          name: list_blackboard
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Get the current status of the team.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    Formatted status string with team name, members, and status."
+          name: team_status
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Create a new team with eligible members (lead-only).\n\nPass ``members`` as a list of dicts with ``agent`` (registered agent\nname) and ``name`` (display name) keys. Only agents\
+            \ listed in\n``member_eligible`` can be used. If ``defaults`` is configured and\n``members`` is empty, default members from config are used.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\
+            \    name: Human-readable team name.\n    members: List of member dicts, each with ``agent`` and ``name``\n        keys.\n\nReturns:\n    Success message with team_id, or error string."
+          name: team_create
+          parameters:
+            additionalProperties: false
+            properties:
+              members:
+                description: 'List of member dicts, each with ``agent`` and ``name``
+
+                  keys.'
+                items:
+                  additionalProperties:
+                    type: string
+                  properties: {}
+                  type: object
+                type: array
+              name:
+                description: Human-readable team name.
+                type: string
+            required:
+            - name
+            - members
+            type: object
+        type: function
+      - function:
+          description: "Delete the current team and close all member sessions (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    ``\"Team deleted\"`` on success, or error\
+            \ string."
+          name: team_delete
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Delete a key from the shared blackboard (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to delete.\n\nReturns:\n    ``\"Blackboard key\
+            \ '{key}' deleted\"`` on success, or error string."
+          name: delete_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              key:
+                description: Blackboard key to delete.
+                type: string
+            required:
+            - key
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: "Shut down a specific team member (lead-only).\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    member_name: Name of the member to shut down.\n\nReturns:\n    ``\"Shutdown\
+            \ completed for {member_name}\"`` on success, or error."
+          name: shutdown_request
+          parameters:
+            additionalProperties: false
+            properties:
+              member_name:
+                description: Name of the member to shut down.
+                type: string
+            required:
+            - member_name
+            type: object
+          strict: true
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"The"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" team has been created
+        successfully. Let me"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" inform the user"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":".","content":"Team
+        **"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"test"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"_team** has been created successfully!\n\n"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"**"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"Details"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":":**\n- **Team ID:** `"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"bc71ec7d-3"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"c48-4052"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"-8c1d-2"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"b55e176d2"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"c9`\n- **Members:"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"**\n "}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" - **"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"assistant** (agent"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":": `team_member`)"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" — the sole"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" member of the"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" team\n\nWould"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" you like me"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" to take"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" any further actions,"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" such as assigning"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" tasks or"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" broadcasting"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" a"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" message to the member"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"?"}}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","object":"chat.completion.chunk","created":1784374859,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+
+        data: {"id":"chatcmpl-9cb06dbd1dafe424","created":1784374859,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":113,"prompt_tokens":3389,"total_tokens":3502,"completion_tokens_details":{"reasoning_tokens":13}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784374859669'
+      req-cost-time:
+      - '141'
+      resp-start-time:
+      - '1784374859811'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+- request:
+    headers:
+      accept:
+      - application/json
+      accept-encoding:
+      - gzip, deflate, br, zstd
+      connection:
+      - keep-alive
+      content-length:
+      - '11744'
+      content-type:
+      - application/json
+      host:
+      - api.ai.rootcloud.info
+    method: POST
+    parsed_body:
+      messages:
+      - content: 'You are team_member.
+
+
+          You are a team member. Follow instructions from the lead.
+
+          <available-skills>
+
+          <skill name="example-skill" description="A simple example skill that demonstrates the basic structure and functionality. Use when you need to show how skills work or test skill loading." />
+
+          <skill name="openspec-apply-change" description="Implement tasks from an OpenSpec change. Use when the user wants to start implementing, continue implementation, or work through tasks." />
+
+          <skill name="openspec-explore" description="Enter explore mode - a thinking partner for exploring ideas, investigating problems, and clarifying requirements. Use when the user wants to think through
+          something before or during a change." />
+
+          <skill name="openspec-archive-change" description="Archive a completed change in the experimental workflow. Use when the user wants to finalize and archive a change after implementation is complete."
+          />
+
+          <skill name="openspec-propose" description="Propose a new change with all artifacts generated in one step. Use when the user wants to quickly describe what they want to build and get a complete
+          proposal with design, specs, and tasks ready for implementation." />
+
+          <skill name="systematic-debugging" description="Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes" />
+
+          <skill name="metaskill" description="The meta-skill: create AI agent teams, individual agents, or custom skills for any project. Use when the user wants to generate a complete .claude/ agent team,
+          create a single agent, or create a single skill." />
+
+          <skill name="uv-package-manager" description="Master the uv package manager for fast Python dependency management, virtual environments, and modern Python project workflows. Use when setting up
+          Python projects, managing dependencies, or optimizing Python development workflows with uv." />
+
+          <skill name="darwin-skill" description="Darwin Skill (达尔文.skill): autonomous skill optimizer inspired by Karpathy&#x27;s autoresearch. Evaluates SKILL.md files using an 8-dimension rubric (structure
+          + effectiveness), runs hill-climbing with git version control, validates improvements through test prompts, and generates visual result cards. Use when user mentions &quot;优化skill&quot;, &quot;skill评分&quot;,
+          &quot;自动优化&quot;, &quot;auto optimize&quot;, &quot;skill质量检查&quot;, &quot;达尔文&quot;, &quot;darwin&quot;, &quot;帮我改改skill&quot;, &quot;skill怎么样&quot;, &quot;提升skill质量&quot;, &quot;skill review&quot;,
+          &quot;skill打分&quot;." />
+
+          <skill name="brainstorm-okrs" description="Brainstorm team-level OKRs aligned with company objectives -- qualitative objectives with measurable key results. Use when setting quarterly OKRs, aligning
+          team goals with company strategy, drafting objectives, or learning how to write effective OKRs." />
+
+          <skill name="code-review-expert" description="Expert code review of current git changes with a senior engineer lens. Detects SOLID violations, security risks, and proposes actionable improvements."
+          />
+
+          </available-skills>
+
+          You are assistant, a member of team "unknown".
+
+          Your role is: member.
+
+
+          ## Team Communication Protocol
+
+
+          1. Use `send_message` to communicate with other team members.
+
+          2. Use `task_create` and `task_update` to track work items.
+
+          3. Use `read_blackboard` and `write_blackboard` to share context.
+
+          4. Use `team_status` to check the status of all members.
+
+          5. If you are the lead, you may use `team_create` and `team_delete`.
+
+
+          ## Guidelines
+
+
+          - Keep messages concise and actionable.
+
+          - Update task status promptly when work is completed.
+
+          - Check the blackboard before starting new work to avoid duplication.
+
+          - Report blockers to the lead via `send_message` with message_type="escalation".
+
+
+
+          ## Your Capabilities (Member)
+
+
+          - Use `send_message` to send messages to individual members by name.
+
+          - Broadcast (`to="*"`) is not available to you -- send individual messages to each member instead.
+
+
+
+          ## Eligible Agents
+
+
+          The following agents can be used as team members in `team_create`:
+
+          - `team_lead`: You are a team lead. Use team tools to coordinate members.
+
+          - `team_member`: You are a team member. Follow instructions from the lead.'
+        role: system
+      - content:
+        - text: 'You are assistant, a member of team "test_team".
+
+            Your role is: member.
+
+
+            ## Team Communication Protocol
+
+
+            1. Use `send_message` to communicate with other team members.
+
+            2. Use `task_create` and `task_update` to track work items.
+
+            3. Use `read_blackboard` and `write_blackboard` to share context.
+
+            4. Use `team_status` to check the status of all members.
+
+            5. If you are the lead, you may use `team_create` and `team_delete`.
+
+
+            ## Guidelines
+
+
+            - Keep messages concise and actionable.
+
+            - Update task status promptly when work is completed.
+
+            - Check the blackboard before starting new work to avoid duplication.
+
+            - Report blockers to the lead via `send_message` with message_type="escalation".
+
+            '
+          type: text
+        role: user
+      model: svc/deepseek-v4-flash
+      stream: true
+      stream_options:
+        include_usage: true
+      tool_choice: auto
+      tools:
+      - function:
+          description: "Load a Claude Code Skill and return its instructions.\n\nArgs:\n    ctx: Agent context providing access to pool and skills\n    skill_name: Name of the skill to load, or a skill://\
+            \ URI.\n        Use skill:// URI to load a specific reference file:\n        skill://skill-name/references/file.md\n    arguments: Optional space-separated arguments for substitution\n\nReturns:\n\
+            \    The full skill instructions for execution"
+          name: load_skill
+          parameters:
+            additionalProperties: false
+            properties:
+              arguments:
+                anyOf:
+                - type: string
+                - type: 'null'
+                default: null
+                description: Optional space-separated arguments for substitution
+              skill_name:
+                description: 'Name of the skill to load, or a skill:// URI.
+
+                  Use skill:// URI to load a specific reference file:
+
+                  skill://skill-name/references/file.md'
+                type: string
+            required:
+            - skill_name
+            type: object
+        type: function
+      - function:
+          description: "List all available skills.\n\nReturns:\n    Formatted list of available skills with descriptions and URI information"
+          name: list_skills
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Send a message to a teammate's inbox.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    to: Recipient member name. ``\"*\"`` broadcasts to all members\n        (lead-only\
+            \ -- returns error for non-lead agents).\n    body: Message body text.\n    urgent: If True, deliver via steer (mid-turn injection);\n        otherwise queue for next turn.\n    message_type:\
+            \ Optional message type tag. If the type is in\n        ``config.auto_urgent``, ``urgent`` is forced to ``True``.\n\nReturns:\n    Success or error message string."
+          name: send_message
+          parameters:
+            additionalProperties: false
+            properties:
+              body:
+                description: Message body text.
+                type: string
+              message_type:
+                default: ''
+                description: 'Optional message type tag. If the type is in
+
+                  ``config.auto_urgent``, ``urgent`` is forced to ``True``.'
+                type: string
+              to:
+                description: Recipient member name.
+                pattern: ^[^*]+$
+                type: string
+              urgent:
+                default: false
+                description: 'If True, deliver via steer (mid-turn injection);
+
+                  otherwise queue for next turn.'
+                type: boolean
+            required:
+            - to
+            - body
+            type: object
+        type: function
+      - function:
+          description: "Create a task on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    subject: Short task title.\n    description: Optional longer description.\n   \
+            \ blocked_by: Optional list of task_ids this task depends on.\n\nReturns:\n    Success message with task_id, or error string."
+          name: task_create
+          parameters:
+            additionalProperties: false
+            properties:
+              blocked_by:
+                anyOf:
+                - items:
+                    type: string
+                  type: array
+                - type: 'null'
+                default: null
+                description: Optional list of task_ids this task depends on.
+              description:
+                default: ''
+                description: Optional longer description.
+                type: string
+              subject:
+                description: Short task title.
+                type: string
+            required:
+            - subject
+            type: object
+        type: function
+      - function:
+          description: "List all tasks on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of tasks (pretty-printed), or error string."
+          name: task_list
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Update a task's status or owner on the shared task board.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    task_id: ID of the task to update.\n    status: New status (e.g.\
+            \ \"in_progress\", \"completed\"). Empty = no change.\n    owner: New owner name. Empty = no change.\n\nReturns:\n    Updated task as JSON, or error string."
+          name: task_update
+          parameters:
+            additionalProperties: false
+            properties:
+              owner:
+                default: ''
+                description: New owner name. Empty = no change.
+                type: string
+              status:
+                default: ''
+                description: New status (e.g. "in_progress", "completed"). Empty = no change.
+                type: string
+              task_id:
+                description: ID of the task to update.
+                type: string
+            required:
+            - task_id
+            type: object
+        type: function
+      - function:
+          description: "Read a key from the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to read.\n\nReturns:\n    JSON value + metadata, or \"Key not\
+            \ found\" / error string."
+          name: read_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              key:
+                description: Blackboard key to read.
+                type: string
+            required:
+            - key
+            type: object
+          strict: true
+        type: function
+      - function:
+          description: "Write a key to the shared blackboard with optimistic locking.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n    key: Blackboard key to write.\n    value: Value to store.\n\
+            \    expected_version: Expected current version for optimistic locking.\n        If None, no version check is performed.\n\nReturns:\n    \"Written, version=N\" on success, or \"Conflict: current\
+            \ version is N\"."
+          name: write_blackboard
+          parameters:
+            additionalProperties: false
+            properties:
+              expected_version:
+                anyOf:
+                - type: integer
+                - type: 'null'
+                default: null
+                description: 'Expected current version for optimistic locking.
+
+                  If None, no version check is performed.'
+              key:
+                description: Blackboard key to write.
+                type: string
+              value:
+                description: Value to store.
+                type: string
+            required:
+            - key
+            - value
+            type: object
+        type: function
+      - function:
+          description: "List all keys on the shared blackboard.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    JSON array of key names, or error string."
+          name: list_blackboard
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+      - function:
+          description: "Get the current status of the team.\n\nArgs:\n    ctx: RunContext with AgentContext deps.\n\nReturns:\n    Formatted status string with team name, members, and status."
+          name: team_status
+          parameters:
+            additionalProperties: false
+            properties: {}
+            type: object
+        type: function
+    uri: http://api.ai.rootcloud.info/v1/chat/completions
+  response:
+    body:
+      string: 'data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"role":"assistant","content":""}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"I"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''m part"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" of team"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"test_team"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"\" with role"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" \"member\". I"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" don"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"''t see"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" any specific"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" instructions or
+        tasks"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" yet"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":". Let me check what''s"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" going on -"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" I can"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" look at the team
+        status,"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" blackboard, and
+        any"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" existing"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" tasks to understand
+        what"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" I should"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":" be working on.","content":"Hello!
+        I"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"''m **"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"assistant**, a member of **"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"test"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":"_team**. Let me check"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" the current situation"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" and"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" see if"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" there''s anything I need
+        to work"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{"content":" on.\n\n"}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-b628572ba42d9236","function":{"arguments":"{}","name":"team_status"},"type":"function","index":0}]}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-9cf38503b007dadf","function":{"arguments":"{}","name":"task_list"},"type":"function","index":1}]}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"id":"chatcmpl-tool-94c7d2535704fe8e","function":{"arguments":"{}","name":"list_blackboard"},"type":"function","index":2}]}}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","object":"chat.completion.chunk","created":1784374860,"model":"svc/deepseek-v4-flash","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+
+        data: {"id":"chatcmpl-b11d1212c6ab33ee","created":1784374860,"model":"svc/deepseek-v4-flash","object":"chat.completion.chunk","choices":[{"index":0,"delta":{}}],"usage":{"completion_tokens":150,"prompt_tokens":2788,"total_tokens":2938,"completion_tokens_details":{"reasoning_tokens":57}}}
+
+
+        data: [DONE]
+
+
+        '
+    headers:
+      cache-control:
+      - no-cache
+      content-security-policy:
+      - frame-ancestors 'none'
+      content-type:
+      - text/event-stream; charset=utf-8
+      req-arrive-time:
+      - '1784374859749'
+      req-cost-time:
+      - '304'
+      resp-start-time:
+      - '1784374860054'
+      transfer-encoding:
+      - chunked
+    status:
+      code: 200
+      message: OK
+version: 1

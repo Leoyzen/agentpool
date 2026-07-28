@@ -295,7 +295,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
                     await self._main_task
                 except asyncio.CancelledError:
                     pass
-                except Exception as e:  # noqa: BLE001
+                except Exception as e:
                     self.log.warning("Main task raised during shutdown", exc_info=e)
         finally:
             self._main_task = None

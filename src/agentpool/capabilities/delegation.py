@@ -34,18 +34,22 @@ class AgentNotFoundError(Exception):
 class DelegationService(Protocol):
     """Limited interface for subagent spawning.
 
-    .. deprecated::
-        Use ``ctx.host.session_pool.run_agent()`` instead of
-        ``spawn_subagent()``, and ``ctx.agent_registry.list_names()``
-        instead of ``get_available_agents()``. Concrete implementations
-        emit ``DeprecationWarning`` on each call.
+    ``spawn_subagent()`` and ``get_available_agents()`` are deprecated.
+    Use ``ctx.host.session_pool.run_agent()`` and
+    ``ctx.agent_registry.list_names()`` instead.
+
+    For child session creation, use ``SessionPool.create_child_session()``
+    directly or ``AgentRunContext.create_child_session()`` which also
+    handles agent registration and ``SpawnSessionStart`` emission.
 
     Implemented by RunLoop (M2 task group 15). Tools access this
     through ``ctx.deps.delegation`` on an ``AgentContext`` instance.
 
-    Only two methods are exposed:
-        - ``spawn_subagent(name, prompt)``: initiate a subagent run.
-        - ``get_available_agents()``: list agent names in scope.
+    Methods:
+        - ``spawn_subagent(name, prompt)``: deprecated, use
+          ``ctx.host.session_pool.run_agent()`` instead.
+        - ``get_available_agents()``: deprecated, use
+          ``ctx.agent_registry.list_names()`` instead.
     """
 
     def spawn_subagent(

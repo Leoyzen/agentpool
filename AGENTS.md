@@ -421,6 +421,88 @@ Teams are compiled into pydantic-graph workflows:
 
 See the Graph Architecture section below for full details.
 
+#### Team Mode
+
+Team mode extends AgentPool with LLM-driven dynamic team creation and coordination at runtime through tool calls. Unlike static `graph:` or `teams:` pipelines, team mode lets the model decide team composition, member roles, and coordination strategy based on the task.
+
+**Configuration**: Add a `team_mode:` section at the top level of your YAML manifest:
+
+```yaml
+team_mode:
+  enabled: true                              # Required: enable team mode
+  lead_eligible:                             # Agents allowed to be team leads
+    - coordinator
+  member_eligible:                           # Agents allowed as team members
+    - coordinator
+    - researcher
+    - writer
+  defaults:                                 # Optional: default members for team_create
+    team_name: "default_team"
+    members:
+      - name: "lead"
+        agent: "coordinator"
+        instructions: "You coordinate the team. Assign tasks and track progress."
+      - name: "researcher"
+        agent: "researcher"
+        instructions: "You gather data and write findings to blackboard key 'raw_data'."
+  bounds:                                    # Optional: resource constraints
+    max_members: 6
+    max_parallel_members: 3
+    max_member_turns: 50
+    max_wall_clock_minutes: 180
+  blackboard:                                # Optional: shared team memory
+    write_policy: "lead_only"
+    max_size_mb: 50
+  auto_urgent:                               # Topics treated as urgent
+    - escalation
+    - pricing_approval
+```
+
+**15 Team Mode Tools**: Once team mode is enabled, the lead agent receives these tools. Tools are split into two scopes: Universal (available to all team members) and Lead-only (available only to the team lead).
+
+| Tool | Scope | Description |
+|---|---|---|
+| `send_message` | Universal | Send a message to a specific team member. Supports `persist_to_blackboard` to auto-save the message body to a blackboard key. |
+| `task_create` | Universal | Assign a task to a team member |
+| `task_list` | Universal | List all tasks and their statuses. Supports `mine_only` to filter tasks assigned to the caller. |
+| `task_update` | Universal | Update a task's status, `technical_note`, `handoff_to`, `handoff_context_keys`, `progress_current`, or `progress_total`. |
+| `task_get` | Universal | Get the details of a single task |
+| `read_blackboard` | Universal | Read the team's shared blackboard (persistent across turns) |
+| `write_blackboard` | Universal | Write to the shared blackboard |
+| `list_blackboard` | Universal | List keys on the shared blackboard |
+| `team_status` | Universal | Check team health, member status, and resource usage |
+| `team_create` | Lead-only | Create a new team with members from eligible agents |
+| `team_delete` | Lead-only | Dissolve a team and release its resources |
+| `delete_blackboard` | Lead-only | Delete a key from the shared blackboard |
+| `shutdown_request` | Lead-only | Remove a team member and release its resources |
+| `team_add_member` | Lead-only | Add a new member to an existing team |
+| `task_create_batch` | Lead-only | Create multiple tasks atomically with inter-task dependencies using `#N` or symbolic `id` references |
+
+**Channel Boundaries**: The protocol template defines three distinct channels for team coordination. **Tasks** (task_create, task_get, task_list, task_update, task_create_batch) provide structured work tracking with status, progress, and dependencies. **Blackboard** (read_blackboard, write_blackboard, list_blackboard, delete_blackboard) provides persistent shared state accessible across members and turns. **Messages** (send_message) provide ephemeral communication between members.
+
+**Auto-complete Progress**: When `task_update(status="completed")` is called and `progress_total` is set but `progress_current` is not provided, the system auto-sets `progress_current = progress_total`.
+
+**Handoff Semantics**: `task_update(status="completed", handoff_to="member")` sends a notification to the target member with blackboard context from `handoff_context_keys`. Dependency-resolved notifications are sent automatically when blocking tasks complete.
+
+**Default Members**: When `defaults:` is configured, `team_create` uses these members when the LLM calls it without explicit members. The LLM must still call `team_create` explicitly.
+
+**Relationship to `graph:` and `teams:`**:
+
+Team mode coexists with the existing static team approaches. They serve different use cases:
+
+- `graph:` / `teams:`: Static DAGs for known pipelines and predictable workflows. Best when you know the exact agent topology ahead of time.
+- `team_mode:`: Dynamic LLM-driven teams for ad hoc collaboration. Best when the task demands runtime decisions about who does what.
+
+You can combine both in the same config: use `graph:` for fixed preprocessing pipelines and `team_mode:` for the downstream agent that coordinates collaborators dynamically.
+
+**Key Constraints**:
+
+- Native agents only (ACP agents are not supported as team members).
+- No cross-team blackboard sharing between teams.
+- No multi-user authentication (all team actions run under the same session context).
+
+**Full Example Configs** are available at `site/examples/team-translation/config.yml`, `site/examples/team-sales/config.yml`, and `site/examples/team-dev-squad/config.yml`.
+
 #### Tool System
 Tools follow PydanticAI's tool pattern with AgentPool extensions:
 - Tools are typed functions with Pydantic schemas

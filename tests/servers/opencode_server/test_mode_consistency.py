@@ -82,6 +82,7 @@ async def test_before_consumer_loop_sets_mode_to_agent_name() -> None:
 
     session_state = MagicMock()
     session_state.agent_name = "librarian"
+    session_state.metadata = {}
 
     session_pool = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=session_state)
@@ -184,6 +185,7 @@ async def test_subagent_assistant_mode_matches_child_agent_name() -> None:
 
     child_session_state = MagicMock()
     child_session_state.agent_name = "historian"
+    child_session_state.metadata = {}
 
     session_pool = MagicMock()
     session_pool.sessions.get_session = MagicMock(return_value=child_session_state)

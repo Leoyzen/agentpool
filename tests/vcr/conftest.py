@@ -67,6 +67,27 @@ agents:
     system_prompt: "You are a worker agent. Complete tasks concisely."
 """
 
+# Config with team_mode enabled for dynamic team mode VCR tests.
+VCR_POOL_CONFIG_TEAM_MODE = """\
+agents:
+  team_lead:
+    type: native
+    model: openai:gpt-4o-mini
+    system_prompt: "You are a team lead. Use team tools to coordinate members."
+  team_member:
+    type: native
+    model: openai:gpt-4o-mini
+    system_prompt: "You are a team member. Follow instructions from the lead."
+
+team_mode:
+  enabled: true
+  lead_eligible:
+    - team_lead
+  member_eligible:
+    - team_lead
+    - team_member
+"""
+
 
 def _build_manifest(yaml_text: str) -> AgentsManifest:
     """Parse inline YAML into an ``AgentsManifest``."""
@@ -149,6 +170,24 @@ async def vcr_pool_with_subagent() -> AsyncIterator[AgentPool]:
     async with AgentPool(manifest) as pool:
         _agents = await _precreate_agents(pool)
         _attach_get_agent_compat(pool, _agents)
+        yield pool
+
+
+@pytest.fixture
+async def vcr_team_pool(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AgentPool]:
+    """Real ``AgentPool`` with ``team_mode`` enabled for VCR team-mode tests.
+
+    Two agents: ``team_lead`` (lead-eligible) and ``team_member``
+    (member-eligible). VCR intercepts model API HTTP calls — the pool,
+    agents, capabilities, EventBus, SessionController all run for real.
+
+    A dummy ``OPENAI_API_KEY`` is set via ``monkeypatch`` so the OpenAI
+    client can initialize without error. VCR intercepts all HTTP requests,
+    so the key is never actually used for authentication.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-for-vcr-replay")
+    manifest = _build_manifest(VCR_POOL_CONFIG_TEAM_MODE)
+    async with AgentPool(manifest) as pool:
         yield pool
 
 

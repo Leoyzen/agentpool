@@ -198,7 +198,7 @@ class Talk[TTransmittedData = Any]:
     def on_event(
         self,
         event_type: ConnectionEventType,
-        callback: Callable[[ConnectionEventData[TTransmittedData]], None | Awaitable[None]],
+        callback: Callable[[ConnectionEventData[TTransmittedData]], Awaitable[None] | None],
     ) -> Self:
         """Register callback for connection events."""
         from agentpool.messaging.events import ConnectionEventData

@@ -31,9 +31,7 @@ if TYPE_CHECKING:
 class RunLoopDelegationService:
     """Concrete ``DelegationService`` backed by the AgentPool registry.
 
-    .. deprecated::
-        Use ``ctx.host.session_pool.run_agent()`` and
-        ``ctx.agent_registry.list_names()`` instead.
+    ``spawn_subagent()`` and ``get_available_agents()`` are deprecated.
 
     Constructed by ``RunHandle`` at turn start using the agent's
     ``HostContext`` and the compiled ``AgentRegistry``. Provides

@@ -26,6 +26,7 @@ from agentpool_config.mcp_server import (
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,
 )
+from agentpool_config.team_mode import TeamModeConfig
 
 
 if TYPE_CHECKING:
@@ -261,6 +262,17 @@ class BaseAgentConfig(NodeConfig):
           - type: token_budget
             max_tokens: 100000
         ```
+    """
+
+    team_mode: TeamModeConfig | None = Field(
+        default=None,
+        title="Team mode override",
+    )
+    """Per-agent team mode overlay.
+
+    When non-None, merges with the global ``team_mode`` from the manifest
+    via :func:`agentpool_config.team_mode.resolve_team_mode` to produce
+    the effective team mode config for this agent.
     """
 
     elicitation_timeout: timedelta | None = Field(

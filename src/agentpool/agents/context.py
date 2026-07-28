@@ -408,13 +408,13 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
                                 )
                                 data.touch()
                                 await store.save_session(data)
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug(
                                 "Failed to update session status to checkpointed",
                                 session_id=run_ctx.session_id,
                                 exc_info=True,
                             )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 # Checkpoint failed — the in-process future await still
                 # works, but crash recovery won't be available for this
                 # elicitation. Log prominently so operators know durability
@@ -435,7 +435,7 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # question and the future times out.
         try:
             await provider.broadcast_elicitation_question(handle, params, shared_future=future)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Failed to broadcast elicitation question",
                 session_id=run_ctx.session_id,

@@ -331,9 +331,9 @@ for part in content_parts:
     part_data = {
         "id": f"prt_{generate_id()}",
         "sessionID": session_id,
-        "messageID": message['id'],
-        "type": part['type'],
-        **part['data']
+        "messageID": message["id"],
+        "type": part["type"],
+        **part["data"],
     }
     write_json(f"storage/part/{message['id']}/{part_data['id']}.json", part_data)
 ```
