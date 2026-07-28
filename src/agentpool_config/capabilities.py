@@ -25,7 +25,7 @@ KNOWN_CAPABILITY_TYPES: frozenset[str] = frozenset({
     "loop_detection",
     "token_budget",
     "tool_output_budget",
-    "dynamic_context",
+    "dcp",
     "skill_activation",
     "memory",
 })
@@ -34,7 +34,7 @@ IMPORT_MAP: dict[str, str] = {
     "loop_detection": "agentpool.capabilities.loop_detection.LoopDetectionCapability",
     "token_budget": "agentpool.capabilities.token_budget.TokenBudgetCapability",
     "tool_output_budget": ("agentpool.capabilities.tool_output_budget.ToolOutputBudgetCapability"),
-    "dynamic_context": "agentpool.capabilities.dynamic_context.DynamicContextCapability",
+    "dcp": "agentpool.capabilities.dcp.capability:DynamicContextPruningCapability",
     "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
 }
@@ -67,16 +67,60 @@ class ToolOutputBudgetCapabilityConfig(BaseModel):
     type: Literal["tool_output_budget"] = "tool_output_budget"
     max_output_chars: int = 10_000
     """Maximum characters per tool output before truncation."""
+    truncation_suffix: str = "\n[Tool output truncated by ToolOutputBudgetCapability]"
+    """Suffix appended to truncated tool output to indicate truncation."""
 
 
-class DynamicContextCapabilityConfig(BaseModel):
-    """Config for ``DynamicContextCapability``."""
+class DCPCapabilityConfig(BaseModel):
+    """Config for ``DynamicContextPruningCapability`` (DCP).
 
-    type: Literal["dynamic_context"] = "dynamic_context"
-    max_messages: int = 50
-    """Max messages before compaction triggers."""
-    compaction_threshold: float = 0.8
-    """Fraction of ``max_messages`` that triggers compaction (0 < t <= 1)."""
+    DCP provides dynamic context pruning to manage context window usage
+    by tracking watermarks, deduplicating tool outputs, and injecting
+    nudges to steer the model toward context-efficient behavior.
+    """
+
+    type: Literal["dcp"] = "dcp"
+    enabled: bool = True
+    """Master switch — when ``False``, DCP is loaded but performs no pruning."""
+    expose_tools: bool = True
+    """Whether to expose DCP meta-tools (e.g. ``dcp_status``) to the model."""
+    max_context_tokens: int = 128_000
+    """Maximum context window size in tokens used for watermark calculations."""
+    info_threshold: float = 0.60
+    """Context fill ratio that triggers the ``info`` watermark level."""
+    warning_threshold: float = 0.75
+    """Context fill ratio that triggers the ``warning`` watermark level."""
+    critical_threshold: float = 0.90
+    """Context fill ratio that triggers the ``critical`` watermark level."""
+    auto_dedup: bool = True
+    """Automatically deduplicate repeated tool outputs."""
+    auto_strategy_threshold: str = "info"
+    """Watermark level at which automatic pruning strategies activate.
+
+    One of ``"info"``, ``"warning"``, ``"critical"``.
+    """
+    purge_error_steps: int = 3
+    """Number of error steps to retain before purging older ones."""
+    nudge_turn_frequency: int = 3
+    """Inject a context nudge every N turns (0 disables turn-based nudges)."""
+    nudge_step_frequency: int = 0
+    """Inject a context nudge every N tool-call steps (0 disables step-based nudges)."""
+    nudge_role: Literal["system", "user"] = "user"
+    """Message role for injected nudges."""
+    nudge_visible: bool = True
+    """Whether nudge messages are visible to the frontend via EventBus."""
+    inject_role: Literal["system", "user"] = "user"
+    """Message role for injected pruning notifications."""
+    clear_thinking_enabled: bool = True
+    """Whether to clear thinking/reasoning blocks from older messages."""
+    meta_tool_retention: int = 1
+    """Number of recent meta-tool invocations to retain in context."""
+    step_protection: int = 2
+    """Number of recent steps protected from pruning."""
+    protected_tool_patterns: list[str] = Field(default_factory=list)
+    """Glob patterns matching tool names that should never be pruned."""
+    protected_tools: set[str] = Field(default_factory=set)
+    """Literal tool names that should never be pruned."""
 
 
 class SkillActivationCapabilityConfig(BaseModel):
@@ -202,7 +246,7 @@ BuiltinCapabilityConfig = Annotated[
     LoopDetectionCapabilityConfig
     | TokenBudgetCapabilityConfig
     | ToolOutputBudgetCapabilityConfig
-    | DynamicContextCapabilityConfig
+    | DCPCapabilityConfig
     | SkillActivationCapabilityConfig
     | MemoryCapabilityConfig,
     Field(discriminator="type"),
@@ -256,8 +300,8 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
             return _import_and_instantiate(IMPORT_MAP["token_budget"], config)
         case ToolOutputBudgetCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["tool_output_budget"], config)
-        case DynamicContextCapabilityConfig():
-            return _import_and_instantiate(IMPORT_MAP["dynamic_context"], config)
+        case DCPCapabilityConfig():
+            return _import_and_instantiate(IMPORT_MAP["dcp"], config)
         case SkillActivationCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["skill_activation"], config)
         case MemoryCapabilityConfig():
