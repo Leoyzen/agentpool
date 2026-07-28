@@ -42,6 +42,11 @@ if TYPE_CHECKING:
 # Number of header lines (header + separator) before data rows.
 _HEADER_LINE_COUNT = 2
 
+# Default pagination limits.
+_DEFAULT_LIST_LIMIT = 50
+_DEFAULT_READ_TEXT_LIMIT = 10_000
+_MAX_COMPLETION_SUGGESTIONS = 100
+
 
 class ResourceCapability(AbstractCapability[AgentDepsT]):
     """Unified resource access capability providing 5 agent-facing tools.
@@ -84,13 +89,13 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         """
         return (
             "You have access to resource management tools:\n"
-            "- list_resources: List all available resources from connected "
-            "MCP servers and local skills\n"
+            "- list_resources: List available resources from connected MCP "
+            "servers and local skills (paginated, use offset to page through)\n"
             "- read_resource: Read content from a resource by URI (supports "
-            "text and binary content)\n"
+            "text and binary content; large text is truncated)\n"
             "- resource_exists: Check if a resource exists\n"
             "- list_resource_templates: List URI templates for dynamic "
-            "resource discovery\n"
+            "resource discovery (paginated, use offset to page through)\n"
             "- complete_resource_template: Get completion suggestions for "
             "template parameters\n\n"
             "URI schemes: skill:// for local skills, mcp:// for MCP server "
@@ -183,11 +188,23 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     async def list_resources(
         self,
         ctx: RunContext[AgentDepsT],
+        limit: Annotated[
+            int,
+            Field(description="Maximum number of resources to return (default: 50)"),
+        ] = _DEFAULT_LIST_LIMIT,
+        offset: Annotated[
+            int,
+            Field(description="Number of resources to skip for pagination"),
+        ] = 0,
     ) -> str:
-        """List all available resources from connected MCP servers and local skills.
+        """List available resources from connected MCP servers and local skills.
+
+        Results are paginated. Use ``offset`` to page through large result sets.
 
         Args:
             ctx: The run context providing agent dependencies.
+            limit: Maximum number of resources to return.
+            offset: Number of resources to skip.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         registry = agent_ctx.extension_registry
@@ -195,10 +212,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             return "No resources available."
 
         scope = self._make_scope(agent_ctx)
-        lines: list[str] = []
-        header = f"{'Source':<25} {'URI':<45} {'Name':<20} {'Description':<30} {'MIME Type':<15}"
-        lines.append(header)
-        lines.append("-" * len(header))
+        rows: list[str] = []
 
         # ResourceAccess providers
         for resource_cap in registry.get_resource_access(scope):
@@ -211,7 +225,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                     source=source,
                 )
                 continue
-            lines.extend(
+            rows.extend(
                 f"{source:<25} {entry.uri:<45} {entry.name:<20} "
                 f"{entry.description:<30} {entry.mime_type:<15}"
                 for entry in resource_entries
@@ -228,14 +242,29 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                     source=source,
                 )
                 continue
-            lines.extend(
+            rows.extend(
                 f"{source:<25} {str(s_entry.skill_path or s_entry.uri) or '':<45} "
                 f"{s_entry.name:<20} {s_entry.description:<30} {'':<15}"
                 for s_entry in skill_entries
             )
 
-        if len(lines) <= _HEADER_LINE_COUNT:
+        if not rows:
             return "No resources available."
+
+        total = len(rows)
+        paginated = rows[offset : offset + limit]
+
+        header = f"{'Source':<25} {'URI':<45} {'Name':<20} {'Description':<30} {'MIME Type':<15}"
+        lines = [header, "-" * len(header)]
+        lines.extend(paginated)
+
+        remaining = total - offset - len(paginated)
+        if remaining > 0:
+            lines.append(
+                f"\n... {remaining} more resources. "
+                f"Call list_resources with offset={offset + len(paginated)} to see more."
+            )
+
         return "\n".join(lines)
 
     @logfire.instrument("capability.resource_capability.read_resource")
@@ -278,7 +307,10 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                 content = await skill_cap.read_skill(skill_name)
                 if content is None:
                     continue
-                return ToolReturn(return_value=content, content=[content])
+                return ToolReturn(
+                    return_value=self._truncate_text(content),
+                    content=[self._truncate_text(content)],
+                )
             return ToolReturn(return_value=f"Resource not found: {uri}")
 
         # Route other URIs to ResourceAccess providers
@@ -292,7 +324,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             parts: list[str | BinaryContent] = []
             for c in contents:
                 if isinstance(c, TextResourceContent):
-                    parts.append(c.text)
+                    parts.append(self._truncate_text(c.text))
                 elif isinstance(c, BlobResourceContent):
                     media_type = c.mime_type or "application/octet-stream"
                     parts.append(
@@ -357,11 +389,23 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     async def list_resource_templates(
         self,
         ctx: RunContext[AgentDepsT],
+        limit: Annotated[
+            int,
+            Field(description="Maximum number of templates to return (default: 50)"),
+        ] = _DEFAULT_LIST_LIMIT,
+        offset: Annotated[
+            int,
+            Field(description="Number of templates to skip for pagination"),
+        ] = 0,
     ) -> str:
         """List URI templates for dynamic resource discovery.
 
+        Results are paginated. Use ``offset`` to page through large result sets.
+
         Args:
             ctx: The run context providing agent dependencies.
+            limit: Maximum number of templates to return.
+            offset: Number of templates to skip.
         """
         agent_ctx = self._resolve_agent_context(ctx)
         registry = agent_ctx.extension_registry
@@ -369,13 +413,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             return "No resource templates available."
 
         scope = self._make_scope(agent_ctx)
-        lines: list[str] = []
-        header = (
-            f"{'Source':<25} {'URI Template':<40} {'Name':<20} "
-            f"{'Title':<15} {'Description':<30} {'MIME Type':<15}"
-        )
-        lines.append(header)
-        lines.append("-" * len(header))
+        rows: list[str] = []
 
         for cap in registry.get_resource_template_access(scope):
             source = type(cap).__name__
@@ -387,14 +425,32 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                     source=source,
                 )
                 continue
-            lines.extend(
+            rows.extend(
                 f"{source:<25} {entry.uri_template:<40} {entry.name:<20} "
                 f"{entry.title:<15} {entry.description:<30} {entry.mime_type:<15}"
                 for entry in entries
             )
 
-        if len(lines) <= _HEADER_LINE_COUNT:
+        if not rows:
             return "No resource templates available."
+
+        total = len(rows)
+        paginated = rows[offset : offset + limit]
+
+        header = (
+            f"{'Source':<25} {'URI Template':<40} {'Name':<20} "
+            f"{'Title':<15} {'Description':<30} {'MIME Type':<15}"
+        )
+        lines = [header, "-" * len(header)]
+        lines.extend(paginated)
+
+        remaining = total - offset - len(paginated)
+        if remaining > 0:
+            lines.append(
+                f"\n... {remaining} more templates. "
+                f"Call list_resource_templates with offset={offset + len(paginated)} to see more."
+            )
+
         return "\n".join(lines)
 
     @logfire.instrument("capability.resource_capability.complete_resource_template")
@@ -441,6 +497,29 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         return f"Completion not supported for template: {uri_template}"
 
     @staticmethod
+    def _truncate_text(
+        text: str,
+        limit: int = _DEFAULT_READ_TEXT_LIMIT,
+    ) -> str:
+        """Truncate text content if it exceeds the limit.
+
+        Args:
+            text: The text to potentially truncate.
+            limit: Maximum number of characters to keep.
+
+        Returns:
+            The original text if within limit, or a truncated version
+            with a suffix indicating the total length.
+        """
+        if len(text) <= limit:
+            return text
+        return (
+            text[:limit]
+            + f"\n\n... [truncated: {len(text)} chars total, "
+            f"showing first {limit}]"
+        )
+
+    @staticmethod
     def _format_completion_result(result: CompletionResult) -> str:
         """Format a ``CompletionResult`` into a human-readable string.
 
@@ -451,8 +530,14 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             A formatted string with completion suggestions.
         """
         lines: list[str] = ["Completion suggestions:"]
-        lines.extend(f"  - {value}" for value in result.values)
-        if result.has_more:
+        values = result.values[:_MAX_COMPLETION_SUGGESTIONS]
+        lines.extend(f"  - {value}" for value in values)
+        if len(result.values) > _MAX_COMPLETION_SUGGESTIONS:
+            lines.append(
+                f"  ... ({len(result.values)} total, "
+                f"showing first {_MAX_COMPLETION_SUGGESTIONS})"
+            )
+        elif result.has_more:
             lines.append(f"  ... ({result.total} total, more available)")
         elif result.total is not None and result.total > len(result.values):
             lines.append(f"  ... ({result.total} total)")
