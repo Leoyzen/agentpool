@@ -95,7 +95,7 @@ async def test_protocol_source_does_not_yield_part_updated_events() -> None:
             content="hello world",
             timestamp=1000.0,
             meta=meta,
-            source="internal",
+            source="protocol",
         ):
             events.append(e)  # noqa: PERF401
 
@@ -107,7 +107,7 @@ async def test_protocol_source_does_not_yield_part_updated_events() -> None:
 
 @pytest.mark.unit
 async def test_internal_source_yields_part_updated_events() -> None:
-    """source="internal" SHOULD yield PartUpdatedEvent.
+    """source="background_task" SHOULD yield PartUpdatedEvent.
 
     Internal messages have no sync() to load parts from DB, so parts
     must come via SSE.
@@ -139,7 +139,7 @@ async def test_internal_source_yields_part_updated_events() -> None:
             content="background task result",
             timestamp=1000.0,
             meta=meta,
-            source="internal",
+            source="background_task",
         ):
             events.append(e)  # noqa: PERF401
 
@@ -207,7 +207,7 @@ async def test_protocol_source_no_part_updated_with_text_content() -> None:
             content="plain text message",
             timestamp=1000.0,
             meta=None,
-            source="internal",
+            source="protocol",
         ):
             events.append(e)  # noqa: PERF401
 

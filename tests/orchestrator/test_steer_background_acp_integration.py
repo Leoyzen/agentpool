@@ -87,18 +87,14 @@ async def test_steer_from_background_task_acp_converter(
     # Release the blocking turn
     release.set()
 
-    # Find UserMessageInsertedEvent with source="internal" and delivery="steer"
-    # (filter by delivery to exclude the initial prompt event which also has
-    # source="internal").
+    # Find UserMessageInsertedEvent with source="background_task"
     bg_events = [
         e
         for e in all_events
-        if isinstance(e, UserMessageInsertedEvent)
-        and e.source == "internal"
-        and e.delivery == "steer"
+        if isinstance(e, UserMessageInsertedEvent) and e.source == "background_task"
     ]
     assert len(bg_events) >= 1, (
-        f"Expected UserMessageInsertedEvent(source='internal', delivery='steer'); "
+        f"Expected UserMessageInsertedEvent(source='background_task'); "
         f"got {len(bg_events)} from {len(all_events)} total events. "
         f"Event types: {[type(e).__name__ for e in all_events]}"
     )
@@ -117,4 +113,5 @@ async def test_steer_from_background_task_acp_converter(
 
     chunk = chunks[0]
     assert chunk.content is not None
+    assert hasattr(chunk.content, "text")
     assert steer_text in chunk.content.text  # type: ignore[union-attr]

@@ -416,7 +416,7 @@ class SessionPoolMessagingMixin:
 
         This is the preferred entry point for background task capabilities
         (e.g. ``SubagentCapability``, ``BackgroundTaskCapability``) because:
-        - It emits ``UserMessageInsertedEvent(source="internal")``
+        - It emits ``UserMessageInsertedEvent(source="background_task")``
           for TUI display
         - It injects into the active RunHandle when one exists
         - It falls back to ``feedback_queue`` when no run is active
@@ -447,7 +447,7 @@ class SessionPoolMessagingMixin:
                 "event.user_message_inserted.emit",
                 session_id=session_id,
                 delivery="steer",
-                source="internal",
+                source="background_task",
             ):
                 try:
                     event: UserMessageInsertedEvent[Any] = UserMessageInsertedEvent(
@@ -455,7 +455,7 @@ class SessionPoolMessagingMixin:
                         message_id=ascending("message"),
                         content=message,
                         delivery="steer",
-                        source="internal",
+                        source="background_task",
                     )
                     await event_bus.publish(session_id, event)
                 except Exception:

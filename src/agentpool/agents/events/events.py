@@ -115,27 +115,6 @@ class RunStartedEvent:
     """Event type identifier."""
 
 
-@dataclass(frozen=True, kw_only=True)
-class StepErrorMetadata:
-    """Diagnostic metadata for step-level errors.
-
-    Captures the pydantic-ai node context and exception details when
-    a step fails during ``NativeTurn.execute()``. Populated only at the
-    generic exception handler inside the while loop; the outer catch in
-    ``_execute_turn()`` leaves ``step_error`` as ``None`` because no
-    node context is available.
-    """
-
-    node_type: str
-    """Type name of the pydantic-ai node that was executing (e.g. ``ModelRequestNode``)."""
-
-    exception_type: str
-    """Type name of the exception that caused the error."""
-
-    exception_message: str
-    """Message from the exception that caused the error."""
-
-
 @dataclass(kw_only=True)
 class RunErrorEvent:
     """Signals an error during an agent run."""
@@ -148,8 +127,6 @@ class RunErrorEvent:
     """ID of the agent run that failed."""
     agent_name: str | None = None
     """Name of the agent that errored."""
-    step_error: StepErrorMetadata | None = None
-    """Diagnostic metadata from the step that failed, if available."""
     event_kind: Literal["run_error"] = "run_error"
     """Event type identifier."""
 
@@ -958,18 +935,14 @@ class UserMessageInsertedEvent[T]:
     delivery: Literal["initial", "steer", "followup"] = "initial"
     """How the message was delivered to the run."""
 
-    source: Literal["enqueued", "internal"] = "internal"
+    source: Literal["protocol", "background_task", "internal", "team"] = "protocol"
     """Originator of the inserted message.
 
-    ``"enqueued"`` indicates the event was produced from
-    ``EnqueuedMessagesEvent`` mapping at model processing time — this is
-    the precise moment the steer message enters run history and the model
-    is about to process it, making it the split trigger for protocol
-    frontends.
-
-    ``"internal"`` indicates a fire-and-forget emission from
-    ``_schedule_user_message_emission()`` at send time — this is a
-    fallback display event that does NOT trigger a turn split.
+    ``"team"`` indicates a team-mode coordination message (e.g.
+    ``send_message`` between team members).  Protocol frontends should
+    render these with a distinct visual style (e.g. team badge) and the
+    ``meta`` field carries team-specific metadata such as ``from_member``,
+    ``to_member``, ``team_name``, and ``message_type``.
     """
 
     timestamp: float = field(default_factory=time.time)

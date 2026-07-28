@@ -20,7 +20,7 @@ def test_construction_with_all_fields() -> None:
         message_id="msg-1",
         content="hello world",
         delivery="steer",
-        source="enqueued",
+        source="background_task",
         timestamp=1234567890.0,
     )
 
@@ -28,7 +28,7 @@ def test_construction_with_all_fields() -> None:
     assert event.message_id == "msg-1"
     assert event.content == "hello world"
     assert event.delivery == "steer"
-    assert event.source == "enqueued"
+    assert event.source == "background_task"
     assert event.timestamp == 1234567890.0
 
 
@@ -36,7 +36,7 @@ def test_defaults_are_empty_and_initial() -> None:
     """Default values match the spec.
 
     - session_id='', message_id='', content=''
-    - delivery='initial', source='internal'
+    - delivery='initial', source='protocol'
     - timestamp auto-generated via time.time
     """
     event = UserMessageInsertedEvent()
@@ -45,7 +45,7 @@ def test_defaults_are_empty_and_initial() -> None:
     assert event.message_id == ""
     assert event.content == ""
     assert event.delivery == "initial"
-    assert event.source == "internal"
+    assert event.source == "protocol"
     assert isinstance(event.timestamp, float)
 
 
@@ -74,9 +74,9 @@ def test_all_delivery_values(delivery: str) -> None:
     assert event.delivery == delivery
 
 
-@pytest.mark.parametrize("source", ["enqueued", "internal"])
+@pytest.mark.parametrize("source", ["protocol", "background_task", "internal"])
 def test_all_source_values(source: str) -> None:
-    """UserMessageInsertedEvent accepts both source literals."""
+    """UserMessageInsertedEvent accepts all three source literals."""
     event = UserMessageInsertedEvent(source=source)  # type: ignore[arg-type]
     assert event.source == source
 

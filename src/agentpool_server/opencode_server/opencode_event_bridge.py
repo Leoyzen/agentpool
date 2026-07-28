@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from agentpool.agents.events.events import (
     CustomEvent,
+    PartStartEvent,
     RunErrorEvent,
     RunFailedEvent,
     RunStartedEvent,
@@ -625,52 +626,6 @@ class OpenCodeEventBridgeMixin:
                     # P3: Serialize context for resume, same as
                     # StreamCompleteEvent path.
                     await self._persist_context_for_resume(session_id)
-                case RunErrorEvent(message=error_msg):
-                    # RunErrorEvent is a terminal event (no trailing
-                    # StreamCompleteEvent). Without this case, the session
-                    # status stays "busy" forever because the match block
-                    # never sets it to "idle".
-                    #
-                    # The EventProcessor.process() already yields
-                    # SessionErrorEvent for RunErrorEvent, so we do NOT
-                    # broadcast it here — only the session status and
-                    # assistant message cleanup are our responsibility.
-                    await set_session_status(
-                        self.server_state, session_id, SessionStatus(type="idle")
-                    )
-                    # C3 fallback: same as RunFailedEvent — if no event
-                    # triggered C3 registration, register now so
-                    # _finalize_assistant_time can finalize and broadcast.
-                    if not self._message_registered.get(session_id, False):
-                        ctx = self._contexts.get(session_id)
-                        if ctx is not None:
-                            await append_message_to_session(
-                                self.server_state, session_id, ctx.assistant_msg
-                            )
-                            await self.server_state.broadcast_event(
-                                MessageUpdatedEvent.create(ctx.assistant_msg.info)
-                            )
-                            self._message_registered[session_id] = True
-                    # D3: Finalize time.completed for errored runs too.
-                    await self._finalize_assistant_time(session_id)
-                    # Set aborted error on the assistant message, using
-                    # the RunErrorEvent's message as the error reason.
-                    ctx = self._contexts.get(session_id)
-                    if ctx is not None and isinstance(ctx.assistant_msg.info, AssistantMessage):
-                        info = ctx.assistant_msg.info
-                        if info.error is None:
-                            info.error = MessageAbortedError(
-                                data=MessageAbortedErrorData(message=error_msg)
-                            )
-                            await self.server_state.broadcast_event(
-                                MessageUpdatedEvent.create(info)
-                            )
-                    # Persist the aborted assistant message to storage.
-                    await self._persist_assistant_message(session_id)
-                    # NOTE: Do NOT reset _message_registered here (same
-                    # reasoning as StreamCompleteEvent/RunFailedEvent).
-                    # P3: Serialize context for resume.
-                    await self._persist_context_for_resume(session_id)
                 case _:
                     pass
 
@@ -749,23 +704,18 @@ class OpenCodeEventBridgeMixin:
             # handler's ID, so the UI cannot associate parts with the message.
             # The canonical assistant_msg_id from the REST handler is correct.
 
-            # Steer split: When EnqueuedMessagesEvent fires (mapped to
-            # UserMessageInsertedEvent with source="enqueued"), the steer
-            # message has entered run history and the model is about to process
-            # it. This is the precise moment to split the logical turn:
-            # finalize the current assistant message (A1) and create a new one
-            # (A2) with a fresh message ID, so the steer user message sorts
-            # between A1 and A2 in the TUI's lexicographic message ID ordering.
-            #
-            # source="enqueued" means the event came from
-            # handle_enqueued_messages() → EnqueuedMessagesEvent → actual drain
-            # time. source="internal" means it came from fire-and-forget
-            # _schedule_user_message_emission() → send time (not a split
-            # trigger).
+            # Steer split: When a steer UserMessageInsertedEvent was received
+            # during an active turn, the next PartStartEvent (from the new
+            # ModelRequestNode after steer drain) triggers a logical turn split.
+            # This finalizes the current assistant message (A1) and creates a
+            # new one (A2) with a fresh message ID, so the steer user message
+            # sorts between A1 and A2 in the TUI's lexicographic message ID
+            # ordering. Without this split, the steer user message would sort
+            # after the entire assistant message (which reuses one ID for both
+            # pre-steer and post-steer content).
             if (
-                isinstance(event, UserMessageInsertedEvent)
-                and event.delivery == "steer"
-                and event.source == "enqueued"
+                isinstance(event, PartStartEvent)
+                and ctx._steer_received
                 and self._message_registered.get(session_id, False)
             ):
                 await self._finalize_assistant_time(session_id)
@@ -788,6 +738,12 @@ class OpenCodeEventBridgeMixin:
                 ctx.stream_start_ms = now_ms()
 
                 self._message_registered[session_id] = False
+                ctx._steer_received = False
+
+            # Set _steer_received flag when a steer user message arrives during
+            # an active turn. The next PartStartEvent will trigger the split.
+            if isinstance(event, UserMessageInsertedEvent) and event.delivery == "steer":
+                ctx._steer_received = True
 
             # Register assistant message on first non-spawn, non-custom,
             # non-user-message-inserted event.

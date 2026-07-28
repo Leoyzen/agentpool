@@ -23,7 +23,6 @@ from pydantic_graph import End
 
 from agentpool.agents.events.events import (
     RunErrorEvent,
-    StepErrorMetadata,
     StepUsageEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
@@ -180,7 +179,6 @@ class NativeTurn(HookAwareTurn, Turn):
                 mapper = EventMapper(
                     agent_name=self._agent.name,
                     message_id=self._message_id,
-                    _enqueue_message_ids=self._run_ctx._pending_enqueue_message_ids,
                 )
 
                 terminal_tool_names: set[str] = set()
@@ -234,7 +232,6 @@ class NativeTurn(HookAwareTurn, Turn):
                     effective_prompts = flattened
 
                 agent_run: Any = None
-                current_node: Any = None
                 try:
                     iter_kwargs: dict[str, Any] = dict(
                         deps=agent_deps,
@@ -254,7 +251,6 @@ class NativeTurn(HookAwareTurn, Turn):
                             self._run_ctx._run_handle.drain_queued_steer_messages()
 
                         node = agent_run.next_node
-                        current_node = node
 
                         # Track per-step token usage.  ``agent_run.usage``
                         # is a live mutable ``RunUsage`` — snapshot with
@@ -277,10 +273,7 @@ class NativeTurn(HookAwareTurn, Turn):
                                             if self._run_ctx.cancelled:
                                                 break
 
-                                            mapped = mapper.map_event(
-                                                event,
-                                                current_node_type=type(node).__name__,
-                                            )
+                                            mapped = mapper.map_event(event)
                                             if mapped is not None:
                                                 yield mapped
 
@@ -314,7 +307,6 @@ class NativeTurn(HookAwareTurn, Turn):
                                 iteration_task = asyncio.create_task(agent_run.next(node))
                                 self._agent._iteration_task = iteration_task
                                 node = await iteration_task
-                                current_node = node
                                 logger.info(
                                     "agent_run.next() completed",
                                     next_node_type=type(node).__name__,
@@ -410,11 +402,10 @@ class NativeTurn(HookAwareTurn, Turn):
                 except asyncio.CancelledError:
                     if self._run_ctx.cancelled:
                         # Cancellation came from cancel() — exit gracefully
-                        # with a StreamCompleteEvent(cancelled=True). Set
-                        # _final_message so turn.final_message is accessible
-                        # to callers. Capture _message_history from agent_run
-                        # so the cancelled turn's partial messages are
-                        # preserved for the next turn.
+                        # without yielding StreamCompleteEvent. Set _final_message
+                        # so turn.final_message doesn't raise for callers.
+                        # Capture _message_history from agent_run so the cancelled
+                        # turn's partial messages are preserved for the next turn.
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
                                 self._set_message_history(agent_run.all_messages())
@@ -433,10 +424,6 @@ class NativeTurn(HookAwareTurn, Turn):
                             session_id=self._run_ctx.session_id,
                             parent_id=self._parent_id,
                         )
-                        yield StreamCompleteEvent(
-                            message=self._final_message,
-                            cancelled=True,
-                        )
                         return
                     raise
 
@@ -453,18 +440,6 @@ class NativeTurn(HookAwareTurn, Turn):
                         if agent_run is not None:
                             with contextlib.suppress(Exception):
                                 self._set_message_history(agent_run.all_messages())
-                        self._final_message = ChatMessage(
-                            content="",
-                            role="assistant",
-                            name=self._agent.name,
-                            message_id=self._message_id,
-                            session_id=self._run_ctx.session_id,
-                            parent_id=self._parent_id,
-                        )
-                        yield StreamCompleteEvent(
-                            message=self._final_message,
-                            cancelled=True,
-                        )
                         return
                     raise
 
@@ -495,19 +470,10 @@ class NativeTurn(HookAwareTurn, Turn):
                         yield StreamCompleteEvent(message=self._final_message)
                         return
                     logger.exception("NativeTurn execution failed")
-                    node_type_str = (
-                        type(current_node).__name__ if current_node is not None else "unknown"
-                    )
-                    step_error = StepErrorMetadata(
-                        node_type=node_type_str,
-                        exception_type=type(exc).__name__,
-                        exception_message=str(exc),
-                    )
                     yield RunErrorEvent(
                         message=str(exc),
                         agent_name=self._agent.name,
                         run_id=self._run_ctx.run_id,
-                        step_error=step_error,
                     )
                     return
 
@@ -517,9 +483,9 @@ class NativeTurn(HookAwareTurn, Turn):
 
                 # Build final message always (even when cancelled) so that
                 # turn.final_message is accessible to callers after execute()
-                # returns. When cancelled via cancel(), the cancelled paths
-                # above already yielded StreamCompleteEvent(cancelled=True)
-                # and returned, so this code only runs on the success path.
+                # returns. When cancelled via cancel(), we skip yielding
+                # StreamCompleteEvent to avoid double turn_complete (end_turn
+                # + cancelled).
                 if self._message_history is not None:
                     # Only extract text from messages generated in THIS turn,
                     # not from the input history (which may contain previous
@@ -593,8 +559,7 @@ class NativeTurn(HookAwareTurn, Turn):
 
                 # Belt-and-suspenders: if cancelled during execution (e.g.
                 # CancelledError swallowed by pydantic-ai inside agent_run.next()),
-                # yield StreamCompleteEvent(cancelled=True) to ensure consumers
-                # receive a terminal event.
+                # exit without yielding StreamCompleteEvent.
                 if self._run_ctx.cancelled:
                     logger.info("Skipping StreamCompleteEvent — run_ctx.cancelled is True")
                     # Flush pending tool calls so downstream consumers receive
@@ -604,18 +569,6 @@ class NativeTurn(HookAwareTurn, Turn):
                     self._log_cancelled_tool_executions(cancelled_events)
                     for tool_event in cancelled_events:
                         yield tool_event
-                    self._final_message = ChatMessage(
-                        content="",
-                        role="assistant",
-                        name=self._agent.name,
-                        message_id=self._message_id,
-                        session_id=self._run_ctx.session_id,
-                        parent_id=self._parent_id,
-                    )
-                    yield StreamCompleteEvent(
-                        message=self._final_message,
-                        cancelled=True,
-                    )
                     return
 
                 logger.info("Yielding StreamCompleteEvent")

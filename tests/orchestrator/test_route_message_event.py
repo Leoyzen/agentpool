@@ -102,7 +102,7 @@ async def test_route_message_initial_delivery_publishes_event(
     assert sid == "sess-1"
     assert isinstance(event, UserMessageInsertedEvent)
     assert event.delivery == "initial"
-    assert event.source == "internal"
+    assert event.source == "protocol"
     assert event.content == "hello world"
     assert result is not None
 
@@ -138,7 +138,7 @@ async def test_route_message_steer_delivery_publishes_event(
     _, event = recorder.published[0]
     assert isinstance(event, UserMessageInsertedEvent)
     assert event.delivery == "steer"
-    assert event.source == "internal"
+    assert event.source == "protocol"
     assert event.content == "steer me"
     assert result == "steer-mid-123"
     mock_run.steer.assert_called_once()
@@ -174,7 +174,7 @@ async def test_route_message_followup_delivery_publishes_event(
     _, event = recorder.published[0]
     assert isinstance(event, UserMessageInsertedEvent)
     assert event.delivery == "followup"
-    assert event.source == "internal"
+    assert event.source == "protocol"
     assert event.content == "followup text"
     assert result is None  # Queued — _wait_and_finalize will early-return
     # Prompt should be enqueued.

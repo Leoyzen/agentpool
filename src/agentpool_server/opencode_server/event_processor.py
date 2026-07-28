@@ -1075,11 +1075,6 @@ class EventProcessor:
         both ``MessageUpdatedEvent`` and ``PartUpdatedEvent`` are yielded
         because there is no ``sync()`` to load parts from DB.
 
-        Dedup: If ``message_id`` is already in ``ctx.displayed_message_ids``,
-        the event is skipped. This prevents duplicate user message display
-        when both the fire-and-forget emission from ``steer()``/``followup()``
-        and the ``EnqueuedMessagesEvent`` produce events with the same ID.
-
         Args:
             ctx: The event processor context.
             message_id: Unique ID for the inserted user message.
@@ -1094,10 +1089,6 @@ class EventProcessor:
             ``MessageUpdatedEvent`` for the user message, followed by
             ``PartUpdatedEvent`` for each part (internal sources only).
         """
-        # Dedup: skip if this message_id was already displayed.
-        if message_id and message_id in ctx.displayed_message_ids:
-            return
-
         # Convert epoch seconds to milliseconds for OpenCode's TimeCreated
         created_ms = int(timestamp * 1000)
 
@@ -1155,10 +1146,6 @@ class EventProcessor:
         # duplicate risk for new messages.
         for part in user_msg_with_parts.parts:
             yield PartUpdatedEvent.create(part)
-
-        # Mark this message_id as displayed for dedup.
-        if message_id:
-            ctx.displayed_message_ids.add(message_id)
 
 
 def _deserialize_part(
