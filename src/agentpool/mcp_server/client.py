@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from mcp.shared.context import RequestContext
     from mcp.types import (
         BlobResourceContents,
+        Completion,
         ElicitRequestParams,
         GetPromptResult,
         Icon,
@@ -396,12 +397,6 @@ class MCPClient:
         Example template: "file:///{path}" -> expand with path="config.json"
         -> "file:///config.json" which can then be read.
 
-        TODO: Integrate resource templates into the ResourceInfo system.
-        Currently templates are separate from resources - we need to decide:
-        - Should templates appear in list_resources() with a flag?
-        - Should ResourceInfo.read() accept kwargs for template expansion?
-        - Should templates have their own ResourceTemplateInfo class?
-
         Returns:
             List of resource templates from the server
         """
@@ -428,6 +423,63 @@ class MCPClient:
             return await self._client.read_resource(uri)
         except Exception as e:
             raise RuntimeError(f"Failed to read resource {uri!r}: {e}") from e
+
+    async def complete(
+        self,
+        ref_type: str,
+        ref_uri: str,
+        argument_name: str,
+        argument_value: str,
+        context: dict[str, str] | None = None,
+    ) -> Completion:
+        """Send a completion request to the MCP server.
+
+        Wraps FastMCP's ``Client.complete()`` to provide a simpler interface
+        for resource template parameter completion.
+
+        Args:
+            ref_type: The reference type — ``"ref/resource"`` for resource
+                templates or ``"ref/prompt"`` for prompt arguments.
+            ref_uri: The URI (for resource templates) or name (for prompts)
+                of the reference to complete.
+            argument_name: The name of the argument being completed.
+            argument_value: The current value of the argument.
+            context: Optional context arguments for the completion request.
+
+        Returns:
+            ``mcp.types.Completion`` with completion values.
+
+        Raises:
+            RuntimeError: If not connected or the completion request fails.
+            ValueError: If ``ref_type`` is not ``"ref/resource"`` or
+                ``"ref/prompt"``.
+        """
+        import mcp.types
+
+        self._ensure_connected()
+
+        match ref_type:
+            case "ref/resource":
+                ref: mcp.types.ResourceTemplateReference | mcp.types.PromptReference = (
+                    mcp.types.ResourceTemplateReference(type="ref/resource", uri=ref_uri)
+                )
+            case "ref/prompt":
+                ref = mcp.types.PromptReference(type="ref/prompt", name=ref_uri)
+            case _:
+                raise ValueError(
+                    f"Invalid ref_type {ref_type!r}: expected 'ref/resource' or 'ref/prompt'"
+                )
+
+        argument = mcp.types.CompletionArgument(name=argument_name, value=argument_value)
+
+        try:
+            return await self._client.complete(
+                ref=ref,
+                argument=argument.model_dump(),
+                context_arguments=context,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to complete {ref_type} {ref_uri!r}: {e}") from e
 
     async def get_prompt(
         self, name: str, arguments: dict[str, str] | None = None

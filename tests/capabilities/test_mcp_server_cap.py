@@ -2,6 +2,8 @@
 
 Tests cover:
 - Delegation: list_tools, call_tool, list_resources, read_resource, resource_exists
+- Resource templates: list_resource_templates, complete_resource_template
+- Multimodal read_resource (text + blob)
 - Lazy init: no connection at construct, connection on first list_tools
 - Change notification mapping: tools/list_changed → ChangeEvent
 """
@@ -18,8 +20,16 @@ import pytest
 from agentpool.capabilities.change_event import ChangeEvent
 from agentpool.capabilities.mcp_server_cap import McpServerCap
 from agentpool.capabilities.resource_protocols import (
+    BlobResourceContent,
     ChangeObservable,
+    CompletionArgument,
+    CompletionResult,
     McpResource,
+    ResourceAccess,
+    ResourceTemplateAccess,
+    ResourceTemplateEntry,
+    TextResourceContent,
+    ToolAccess,
     ToolEntry,
 )
 
@@ -43,6 +53,8 @@ class FakeMCPClient:
     _tools: list[Any] = field(default_factory=list)
     _resources: list[Any] = field(default_factory=list)
     _read_results: dict[str, list[Any]] = field(default_factory=dict)
+    _resource_templates: list[Any] = field(default_factory=list)
+    _completion_result: Any = None
     _connected: bool = False
     _tool_change_callback: Any = None
     config: Any = None
@@ -64,12 +76,29 @@ class FakeMCPClient:
             raise RuntimeError("Not connected")
         return list(self._resources)
 
+    async def list_resource_templates(self) -> list[Any]:
+        if not self._connected:
+            raise RuntimeError("Not connected")
+        return list(self._resource_templates)
+
     async def read_resource(self, uri: str) -> list[Any]:
         if not self._connected:
             raise RuntimeError("Not connected")
         if uri not in self._read_results:
             raise RuntimeError(f"Resource not found: {uri}")
         return self._read_results[uri]
+
+    async def complete(
+        self,
+        ref_type: str,
+        ref_uri: str,
+        argument_name: str,
+        argument_value: str,
+        context: dict[str, str] | None = None,
+    ) -> Any:
+        if not self._connected:
+            raise RuntimeError("Not connected")
+        return self._completion_result
 
     async def call_tool(self, name: str, *args: Any, **kwargs: Any) -> str:
         return f"called:{name}"
@@ -121,7 +150,51 @@ def _make_text_content(text: str) -> MagicMock:
     """Create a fake TextResourceContents."""
     content = MagicMock()
     content.text = text
+    content.blob = None
+    content.mimeType = None
+    content.meta = None
     return content
+
+
+def _make_blob_content(blob: str, mime_type: str = "application/octet-stream") -> MagicMock:
+    """Create a fake BlobResourceContents."""
+    content = MagicMock()
+    content.blob = blob
+    content.text = None
+    content.mimeType = mime_type
+    content.meta = None
+    return content
+
+
+def _make_resource_template(
+    uri_template: str,
+    name: str = "",
+    title: str = "",
+    description: str = "",
+    mime_type: str = "",
+) -> MagicMock:
+    """Create a fake MCP ResourceTemplate."""
+    tmpl = MagicMock()
+    tmpl.uriTemplate = uri_template
+    tmpl.name = name
+    tmpl.title = title
+    tmpl.description = description
+    tmpl.mimeType = mime_type
+    tmpl.annotations = None
+    return tmpl
+
+
+def _make_completion(
+    values: list[str],
+    total: int | None = None,
+    has_more: bool | None = None,
+) -> MagicMock:
+    """Create a fake mcp.types.Completion."""
+    completion = MagicMock()
+    completion.values = values
+    completion.total = total
+    completion.hasMore = has_more
+    return completion
 
 
 def _make_config(client_id: str = "test_server") -> MagicMock:
@@ -143,6 +216,33 @@ def test_mcp_server_cap_is_mcp_resource() -> None:
         session_pool=FakeSessionPool(FakeMCPClient()),
     )
     assert isinstance(cap, McpResource)
+
+
+def test_mcp_server_cap_is_tool_access() -> None:
+    """McpServerCap is an instance of ToolAccess protocol."""
+    cap = McpServerCap(
+        config=_make_config(),
+        session_pool=FakeSessionPool(FakeMCPClient()),
+    )
+    assert isinstance(cap, ToolAccess)
+
+
+def test_mcp_server_cap_is_resource_access() -> None:
+    """McpServerCap is an instance of ResourceAccess protocol."""
+    cap = McpServerCap(
+        config=_make_config(),
+        session_pool=FakeSessionPool(FakeMCPClient()),
+    )
+    assert isinstance(cap, ResourceAccess)
+
+
+def test_mcp_server_cap_is_resource_template_access() -> None:
+    """McpServerCap is an instance of ResourceTemplateAccess protocol."""
+    cap = McpServerCap(
+        config=_make_config(),
+        session_pool=FakeSessionPool(FakeMCPClient()),
+    )
+    assert isinstance(cap, ResourceTemplateAccess)
 
 
 def test_mcp_server_cap_is_change_observable() -> None:
@@ -228,7 +328,7 @@ async def test_list_resources_delegation() -> None:
 
 @pytest.mark.anyio
 async def test_read_resource_existing() -> None:
-    """read_resource() returns content for existing resource."""
+    """read_resource() returns TextResourceContent list for existing resource."""
     text_content = _make_text_content("hello world")
     client = FakeMCPClient(
         _resources=[_make_resource("file:///path1")],
@@ -236,8 +336,12 @@ async def test_read_resource_existing() -> None:
     )
     cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
 
-    content = await cap.read_resource("file:///path1")
-    assert content == "hello world"
+    result = await cap.read_resource("file:///path1")
+    assert result is not None
+    assert len(result) == 1
+    assert isinstance(result[0], TextResourceContent)
+    assert result[0].text == "hello world"
+    assert result[0].uri == "file:///path1"
 
 
 @pytest.mark.anyio
@@ -266,6 +370,151 @@ async def test_resource_exists_false() -> None:
     cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
 
     assert await cap.resource_exists("file:///nonexistent") is False
+
+
+# ---------------------------------------------------------------------------
+# Resource template tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_list_resource_templates() -> None:
+    """list_resource_templates() delegates to MCPClient and maps to ResourceTemplateEntry."""
+    templates = [
+        _make_resource_template(
+            "file:///{path}",
+            name="file_template",
+            title="File Template",
+            description="Template for file paths",
+            mime_type="text/plain",
+        ),
+        _make_resource_template(
+            "db://{table}/{row}",
+            name="db_template",
+            description="Database row template",
+        ),
+    ]
+    client = FakeMCPClient(_resource_templates=templates)
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.list_resource_templates()
+    assert len(result) == 2
+    assert isinstance(result[0], ResourceTemplateEntry)
+    assert result[0].uri_template == "file:///{path}"
+    assert result[0].name == "file_template"
+    assert result[0].title == "File Template"
+    assert result[0].description == "Template for file paths"
+    assert result[0].mime_type == "text/plain"
+    assert result[1].uri_template == "db://{table}/{row}"
+    assert result[1].name == "db_template"
+
+
+@pytest.mark.anyio
+async def test_list_resource_templates_empty() -> None:
+    """list_resource_templates() returns empty sequence when no templates."""
+    client = FakeMCPClient(_resource_templates=[])
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.list_resource_templates()
+    assert len(result) == 0
+
+
+@pytest.mark.anyio
+async def test_complete_resource_template() -> None:
+    """complete_resource_template() delegates to MCPClient and maps to CompletionResult."""
+    completion = _make_completion(
+        values=["config.json", "config.yaml", "config.toml"],
+        total=3,
+        has_more=False,
+    )
+    client = FakeMCPClient(_completion_result=completion)
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.complete_resource_template(
+        uri_template="file:///{path}",
+        argument=CompletionArgument(name="path", value="config"),
+    )
+    assert isinstance(result, CompletionResult)
+    assert result.values == ["config.json", "config.yaml", "config.toml"]
+    assert result.total == 3
+    assert result.has_more is False
+
+
+@pytest.mark.anyio
+async def test_complete_resource_template_with_context() -> None:
+    """complete_resource_template() passes context arguments through."""
+    completion = _make_completion(values=["option1"], total=1, has_more=None)
+    client = FakeMCPClient(_completion_result=completion)
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.complete_resource_template(
+        uri_template="db://{table}/{row}",
+        argument=CompletionArgument(name="table", value="us"),
+        context={"row": "123"},
+    )
+    assert isinstance(result, CompletionResult)
+    assert result.values == ["option1"]
+    assert result.total == 1
+    assert result.has_more is None
+
+
+# ---------------------------------------------------------------------------
+# Multimodal read_resource tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_read_resource_multimodal_text_and_blob() -> None:
+    """read_resource() returns both TextResourceContent and BlobResourceContent."""
+    text_content = _make_text_content("hello")
+    blob_content = _make_blob_content("SGVsbG8=", "application/octet-stream")
+    client = FakeMCPClient(
+        _resources=[_make_resource("file:///mixed")],
+        _read_results={"file:///mixed": [text_content, blob_content]},
+    )
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.read_resource("file:///mixed")
+    assert result is not None
+    assert len(result) == 2
+    assert isinstance(result[0], TextResourceContent)
+    assert result[0].text == "hello"
+    assert result[0].uri == "file:///mixed"
+    assert isinstance(result[1], BlobResourceContent)
+    assert result[1].blob == "SGVsbG8="
+    assert result[1].mime_type == "application/octet-stream"
+    assert result[1].uri == "file:///mixed"
+
+
+@pytest.mark.anyio
+async def test_read_resource_blob_only() -> None:
+    """read_resource() returns BlobResourceContent for binary resources."""
+    blob_content = _make_blob_content("iVBORw0KGgo=", "image/png")
+    client = FakeMCPClient(
+        _resources=[_make_resource("file:///image.png")],
+        _read_results={"file:///image.png": [blob_content]},
+    )
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.read_resource("file:///image.png")
+    assert result is not None
+    assert len(result) == 1
+    assert isinstance(result[0], BlobResourceContent)
+    assert result[0].blob == "iVBORw0KGgo="
+    assert result[0].mime_type == "image/png"
+
+
+@pytest.mark.anyio
+async def test_read_resource_empty_contents() -> None:
+    """read_resource() returns None when contents list is empty."""
+    client = FakeMCPClient(
+        _resources=[_make_resource("file:///empty")],
+        _read_results={"file:///empty": []},
+    )
+    cap = McpServerCap(config=_make_config(), session_pool=FakeSessionPool(client))
+
+    result = await cap.read_resource("file:///empty")
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

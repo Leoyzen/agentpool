@@ -23,13 +23,20 @@ from pydantic_ai.tools import AgentDepsT, RunContext
 
 from agentpool.capabilities.change_event import ChangeEvent
 from agentpool.capabilities.resource_protocols import (
+    BlobResourceContent,
     ChangeObservable,
     CommandEntry,
     CommandResource,
-    McpResource,
+    CompletionArgument,
+    CompletionResult,
+    ResourceAccess,
     ResourceEntry,
+    ResourceTemplateAccess,
+    ResourceTemplateEntry,
     SkillEntry,
     SkillResource,
+    TextResourceContent,
+    ToolAccess,
     ToolEntry,
     ToolResult,
 )
@@ -55,7 +62,9 @@ _RETRY_BASE_DELAY = 1  # seconds
 
 class McpServerCap(
     AbstractCapability[AgentDepsT],
-    McpResource,
+    ToolAccess,
+    ResourceAccess,
+    ResourceTemplateAccess,
     SkillResource,
     CommandResource,
     ChangeObservable,
@@ -66,8 +75,10 @@ class McpServerCap(
     on first access via ``_ensure_client()``. The pool retains ownership of
     the transport lifecycle.
 
-    Implements four Resource Protocols:
-        - ``McpResource``: MCP tools and resources
+    Implements six Resource Protocols:
+        - ``ToolAccess``: MCP tool listing and invocation
+        - ``ResourceAccess``: MCP resource listing, reading, existence checking
+        - ``ResourceTemplateAccess``: MCP resource template listing and completion
         - ``SkillResource``: MCP resources mapped as skills
         - ``CommandResource``: MCP prompts mapped as commands
         - ``ChangeObservable``: Change events for tool/resource list changes
@@ -271,7 +282,7 @@ class McpServerCap(
 
         return _generator()
 
-    # ---- McpResource ----
+    # ---- ToolAccess ----
 
     async def list_tools(self) -> Sequence[ToolEntry]:
         """List available MCP tools.
@@ -312,6 +323,8 @@ class McpServerCap(
             content = str(result)
         return ToolResult(content=str(content))
 
+    # ---- ResourceAccess ----
+
     async def list_resources(self) -> Sequence[ResourceEntry]:
         """List available MCP resources.
 
@@ -330,27 +343,51 @@ class McpServerCap(
             for r in resources
         ]
 
-    async def read_resource(self, uri: str) -> str | None:
+    async def read_resource(
+        self, uri: str
+    ) -> list[TextResourceContent | BlobResourceContent] | None:
         """Read an MCP resource by URI.
 
         Args:
             uri: Resource URI to read.
 
         Returns:
-            Resource content as string, or ``None`` if not found.
+            List of ``TextResourceContent`` and/or ``BlobResourceContent``
+            instances, or ``None`` if not found.
         """
-        if not await self.resource_exists(uri):
-            return None
         client = await self._ensure_client()
-        contents = await client.read_resource(uri)
+        try:
+            contents = await client.read_resource(uri)
+        except Exception:
+            logger.warning("Failed to read resource %r", uri, exc_info=True)
+            return None
         if not contents:
             return None
-        first = contents[0]
-        # TextResourceContents has .text, BlobResourceContents has .blob
-        text: str | None = getattr(first, "text", None)
-        if text is not None:
-            return text
-        return str(first)
+        result: list[TextResourceContent | BlobResourceContent] = []
+        for c in contents:
+            # MCP TextResourceContents has .text, BlobResourceContents has .blob
+            text_val: str | None = getattr(c, "text", None)
+            if text_val is not None:
+                result.append(
+                    TextResourceContent(
+                        uri=uri,
+                        mime_type=getattr(c, "mimeType", None),
+                        meta=getattr(c, "meta", None),
+                        text=text_val,
+                    )
+                )
+            else:
+                blob_val: str | None = getattr(c, "blob", None)
+                if blob_val is not None:
+                    result.append(
+                        BlobResourceContent(
+                            uri=uri,
+                            mime_type=getattr(c, "mimeType", None),
+                            meta=getattr(c, "meta", None),
+                            blob=blob_val,
+                        )
+                    )
+        return result if result else None
 
     async def resource_exists(self, uri: str) -> bool:
         """Check if an MCP resource exists.
@@ -367,6 +404,61 @@ class McpServerCap(
         except Exception:  # noqa: BLE001
             return False
         return any(str(r.uri) == uri for r in resources)
+
+    # ---- ResourceTemplateAccess ----
+
+    async def list_resource_templates(self) -> Sequence[ResourceTemplateEntry]:
+        """List available MCP resource templates.
+
+        Returns:
+            Sequence of ``ResourceTemplateEntry`` descriptors.
+        """
+        client = await self._ensure_client()
+        templates = await client.list_resource_templates()
+        return [
+            ResourceTemplateEntry(
+                uri_template=str(t.uriTemplate),
+                name=t.name or "",
+                title=getattr(t, "title", "") or "",
+                description=t.description or "",
+                mime_type=t.mimeType if t.mimeType else "",
+                annotations=getattr(t, "annotations", None),
+            )
+            for t in templates
+        ]
+
+    async def complete_resource_template(
+        self,
+        uri_template: str,
+        argument: CompletionArgument,
+        context: dict[str, str] | None = None,
+    ) -> CompletionResult:
+        """Complete a resource template parameter via MCP completion.
+
+        Args:
+            uri_template: The URI template to complete.
+            argument: The argument being completed.
+            context: Optional context arguments.
+
+        Returns:
+            ``CompletionResult`` with suggestion values.
+
+        Raises:
+            NotImplementedError: If the MCP server does not support completion.
+        """
+        client = await self._ensure_client()
+        completion = await client.complete(
+            ref_type="ref/resource",
+            ref_uri=uri_template,
+            argument_name=argument.name,
+            argument_value=argument.value,
+            context=context,
+        )
+        return CompletionResult(
+            values=list(completion.values),
+            total=getattr(completion, "total", None),
+            has_more=getattr(completion, "hasMore", None),
+        )
 
     # ---- SkillResource ----
 

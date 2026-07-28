@@ -4,6 +4,11 @@ Defines Protocol interfaces for skill, MCP, and command resource access.
 Each protocol is ``@runtime_checkable`` so capabilities can be queried via
 ``isinstance(cap, SkillResource)`` etc.
 
+The deprecated ``McpResource`` Protocol has been split into three focused
+protocols: ``ToolAccess``, ``ResourceAccess``, and ``ResourceTemplateAccess``.
+``McpResource`` remains as a ``DeprecatedAlias`` that emits ``DeprecationWarning``
+on ``isinstance()`` checks.
+
 ChangeEvent is imported from ``agentpool.capabilities.change_event`` —
 this module does NOT define a duplicate.
 """
@@ -12,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+import warnings
 
 
 if TYPE_CHECKING:
@@ -108,6 +114,111 @@ class CommandEntry:
     source: str = "local"
 
 
+# ---- Resource Content Types (MCP-aligned) ----
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceContent:
+    """Base type for resource content returned by ``read_resource()``.
+
+    Mirrors MCP's ``ResourceContents`` structure.
+
+    Attributes:
+        uri: The URI of the resource that was read.
+        mime_type: MIME type of the resource content, or ``None``.
+        meta: Optional metadata dict from the MCP server.
+    """
+
+    uri: str
+    mime_type: str | None = None
+    meta: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TextResourceContent(ResourceContent):
+    """Text resource content returned by ``read_resource()``.
+
+    Mirrors MCP's ``TextResourceContents``.
+
+    Attributes:
+        text: The text content of the resource.
+    """
+
+    text: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class BlobResourceContent(ResourceContent):
+    """Binary resource content returned by ``read_resource()``.
+
+    Mirrors MCP's ``BlobResourceContents``. The ``blob`` field contains
+    base64-encoded bytes — decoding happens at the agent tool layer.
+
+    Attributes:
+        blob: Base64-encoded string of the binary content.
+    """
+
+    blob: str = ""
+
+
+# ---- Resource Template & Completion Types ----
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceTemplateEntry:
+    """A resource template descriptor returned by ``list_resource_templates()``.
+
+    Mirrors MCP's ``ResourceTemplate`` structure.
+
+    Attributes:
+        uri_template: URI template pattern (e.g., ``"file:///{path}"``).
+        name: Human-readable template name.
+        title: Display title (may be empty).
+        description: Optional description.
+        mime_type: MIME type of expanded resources.
+        annotations: Optional MCP annotations dict.
+    """
+
+    uri_template: str
+    name: str = ""
+    title: str = ""
+    description: str = ""
+    mime_type: str = ""
+    annotations: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionArgument:
+    """Argument for a resource template completion request.
+
+    Mirrors MCP's ``CompletionArgument``.
+
+    Attributes:
+        name: The parameter name being completed.
+        value: The current value of the parameter.
+    """
+
+    name: str
+    value: str
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionResult:
+    """Result of a resource template completion request.
+
+    Mirrors MCP's ``Completion`` type.
+
+    Attributes:
+        values: List of completion suggestions.
+        total: Total number of completions available (may exceed ``len(values)``).
+        has_more: Whether more completions exist beyond those returned.
+    """
+
+    values: list[str]
+    total: int | None = None
+    has_more: bool | None = None
+
+
 # ---- Protocols ----
 
 
@@ -147,8 +258,12 @@ class SkillResource(Protocol):
 
 
 @runtime_checkable
-class McpResource(Protocol):
-    """Protocol for accessing MCP tools and resources."""
+class ToolAccess(Protocol):
+    """Protocol for accessing MCP tools.
+
+    This is the tool-access portion of the deprecated ``McpResource``.
+    Capabilities implementing this protocol provide tool listing and invocation.
+    """
 
     async def list_tools(self) -> Sequence[ToolEntry]:
         """List available MCP tools.
@@ -170,6 +285,16 @@ class McpResource(Protocol):
         """
         ...
 
+
+@runtime_checkable
+class ResourceAccess(Protocol):
+    """Protocol for accessing MCP resources.
+
+    This is the resource-access portion of the deprecated ``McpResource``.
+    Capabilities implementing this protocol provide resource listing, reading,
+    and existence checking.
+    """
+
     async def list_resources(self) -> Sequence[ResourceEntry]:
         """List available MCP resources.
 
@@ -178,14 +303,17 @@ class McpResource(Protocol):
         """
         ...
 
-    async def read_resource(self, uri: str) -> str | None:
+    async def read_resource(
+        self, uri: str
+    ) -> list[TextResourceContent | BlobResourceContent] | None:
         """Read an MCP resource by URI.
 
         Args:
             uri: Resource URI to read.
 
         Returns:
-            Resource content as string, or ``None`` if not found.
+            List of ``TextResourceContent`` and/or ``BlobResourceContent``
+            instances, or ``None`` if the resource is not found.
         """
         ...
 
@@ -199,6 +327,91 @@ class McpResource(Protocol):
             ``True`` if the resource exists, ``False`` otherwise.
         """
         ...
+
+
+@runtime_checkable
+class ResourceTemplateAccess(Protocol):
+    """Protocol for accessing MCP resource templates.
+
+    Capabilities implementing this protocol provide resource template listing
+    and parameter completion. Capabilities that do not support completion
+    SHALL raise ``NotImplementedError`` from ``complete_resource_template()``.
+    """
+
+    async def list_resource_templates(self) -> Sequence[ResourceTemplateEntry]:
+        """List available resource templates.
+
+        Returns:
+            Sequence of ``ResourceTemplateEntry`` descriptors.
+        """
+        ...
+
+    async def complete_resource_template(
+        self,
+        uri_template: str,
+        argument: CompletionArgument,
+        context: dict[str, str] | None = None,
+    ) -> CompletionResult:
+        """Complete a resource template parameter.
+
+        Args:
+            uri_template: The URI template to complete.
+            argument: The argument being completed.
+            context: Optional context arguments.
+
+        Returns:
+            ``CompletionResult`` with suggestion values.
+
+        Raises:
+            NotImplementedError: If completion is not supported.
+        """
+        ...
+
+
+# ---- Deprecated McpResource alias ----
+
+
+class _McpResourceMeta(type):
+    """Metaclass for the deprecated ``McpResource`` alias.
+
+    Implements ``__instancecheck__`` to check against both ``ToolAccess``
+    and ``ResourceAccess`` protocols, emitting a ``DeprecationWarning`` on
+    each check. This is necessary because Python's ``@runtime_checkable``
+    Protocol does not support custom ``__instancecheck__`` — a plain
+    ``Union[ToolAccess, ResourceAccess]`` type alias cannot emit warnings
+    or be used with ``isinstance()``.
+    """
+
+    def __instancecheck__(cls, obj: object) -> bool:
+        """Check if obj implements both ToolAccess and ResourceAccess.
+
+        Emits ``DeprecationWarning`` on each call.
+        """
+        warnings.warn(
+            "McpResource is deprecated. Use ToolAccess and ResourceAccess "
+            "instead for isinstance() checks.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return isinstance(obj, (ToolAccess, ResourceAccess))
+
+
+class McpResource(metaclass=_McpResourceMeta):
+    """Deprecated alias for ``ToolAccess`` + ``ResourceAccess``.
+
+    This class has been replaced by three focused protocols:
+        - ``ToolAccess``: tool listing and invocation
+        - ``ResourceAccess``: resource listing, reading, existence checking
+        - ``ResourceTemplateAccess``: resource template listing and completion
+
+    ``isinstance(obj, McpResource)`` still works but emits a
+    ``DeprecationWarning``. Migrate to explicit ``ToolAccess`` /
+    ``ResourceAccess`` checks.
+
+    Note:
+        ``agentpool_server.opencode_server.models.mcp.McpResource`` (Pydantic
+        model) is unrelated to this deprecated Protocol and is NOT affected.
+    """
 
 
 @runtime_checkable

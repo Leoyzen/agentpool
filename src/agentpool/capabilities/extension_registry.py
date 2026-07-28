@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
+import warnings
 
 from agentpool.log import get_logger
 
@@ -34,8 +35,10 @@ if TYPE_CHECKING:
     from agentpool.capabilities.resource_protocols import (
         ChangeObservable,
         CommandResource,
-        McpResource,
+        ResourceAccess,
+        ResourceTemplateAccess,
         SkillResource,
+        ToolAccess,
     )
     from agentpool.skills.skill import Skill
 
@@ -343,21 +346,84 @@ class ExtensionRegistry:
             cap for cap in self.get_visible_capabilities(scope) if isinstance(cap, SkillResource)
         ]
 
-    def get_mcp_resources(
+    def get_resource_access(
         self,
         scope: Scope,
-    ) -> list[McpResource]:
-        """Get visible capabilities implementing ``McpResource``.
+    ) -> list[ResourceAccess]:
+        """Get visible capabilities implementing ``ResourceAccess``.
 
         Args:
             scope: The scope to query.
 
         Returns:
-            List of capabilities implementing ``McpResource``.
+            List of capabilities implementing ``ResourceAccess``.
         """
-        from agentpool.capabilities.resource_protocols import McpResource
+        from agentpool.capabilities.resource_protocols import ResourceAccess
 
-        return [cap for cap in self.get_visible_capabilities(scope) if isinstance(cap, McpResource)]
+        return [
+            cap for cap in self.get_visible_capabilities(scope) if isinstance(cap, ResourceAccess)
+        ]
+
+    def get_tool_access(
+        self,
+        scope: Scope,
+    ) -> list[ToolAccess]:
+        """Get visible capabilities implementing ``ToolAccess``.
+
+        Args:
+            scope: The scope to query.
+
+        Returns:
+            List of capabilities implementing ``ToolAccess``.
+        """
+        from agentpool.capabilities.resource_protocols import ToolAccess
+
+        return [cap for cap in self.get_visible_capabilities(scope) if isinstance(cap, ToolAccess)]
+
+    def get_resource_template_access(
+        self,
+        scope: Scope,
+    ) -> list[ResourceTemplateAccess]:
+        """Get visible capabilities implementing ``ResourceTemplateAccess``.
+
+        Args:
+            scope: The scope to query.
+
+        Returns:
+            List of capabilities implementing ``ResourceTemplateAccess``.
+        """
+        from agentpool.capabilities.resource_protocols import ResourceTemplateAccess
+
+        return [
+            cap
+            for cap in self.get_visible_capabilities(scope)
+            if isinstance(cap, ResourceTemplateAccess)
+        ]
+
+    def get_mcp_resources(
+        self,
+        scope: Scope,
+    ) -> list[ResourceAccess]:
+        """Get visible capabilities implementing ``McpResource``.
+
+        .. deprecated::
+            Use ``get_resource_access()`` and/or ``get_tool_access()`` instead.
+            This method emits a ``DeprecationWarning`` and delegates to
+            ``get_resource_access()``.
+
+        Args:
+            scope: The scope to query.
+
+        Returns:
+            List of capabilities implementing ``ResourceAccess``.
+        """
+        warnings.warn(
+            "get_mcp_resources() is deprecated. Use get_resource_access() "
+            "and/or get_tool_access() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.get_resource_access(scope)
 
     def get_command_resources(
         self,
@@ -460,17 +526,22 @@ class ExtensionRegistry:
             return None
 
         if uri.startswith("mcp://"):
-            for mcp_cap in self.get_mcp_resources(scope):
+            from agentpool.capabilities.resource_protocols import TextResourceContent
+
+            for cap in self.get_resource_access(scope):
                 try:
-                    if await mcp_cap.resource_exists(uri):
-                        mcp_content: str | bytes | None = await mcp_cap.read_resource(uri)
-                        if mcp_content is not None:
-                            return mcp_content
+                    contents = await cap.read_resource(uri)
+                    if contents is None:
+                        continue
+                    for c in contents:
+                        if isinstance(c, TextResourceContent):
+                            return c.text
+                    # Only BlobResourceContent found — cannot return as string
                 except Exception:
                     logger.warning(
                         "Failed to resolve MCP URI %r via %s",
                         uri,
-                        type(mcp_cap).__name__,
+                        type(cap).__name__,
                         exc_info=True,
                     )
             return None
