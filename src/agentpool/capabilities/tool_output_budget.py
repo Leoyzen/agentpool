@@ -38,6 +38,7 @@ capability injection order in ``get_agentlet()``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.capabilities import AbstractCapability
@@ -50,28 +51,30 @@ if TYPE_CHECKING:
     from pydantic_ai.tools import ToolDefinition
 
 
-_TRUNCATION_NOTICE = "\n[Tool output truncated by ToolOutputBudgetCapability]"
-
-
 @dataclass
 class ToolOutputBudgetCapability(AbstractCapability[Any]):
     """Limit tool output size per tool call.
 
     Wraps ``tool_execute`` and truncates string results that exceed
-    ``max_output_chars``. A truncation notice is appended so the model
+    ``max_output_chars``. A truncation suffix is appended so the model
     knows the output was cut.
+
+    Set ``max_output_chars`` to 0 or a negative value to disable
+    truncation entirely.
+
+    Non-string results (dicts, numbers, etc.) are serialized via
+    ``json.dumps`` before the length check, ensuring structured tool
+    outputs are also budget-controlled.
     """
 
     max_output_chars: int = 10_000
-
-    _MIN_OUTPUT_CHARS = 100
+    truncation_suffix: str = "\n[Tool output truncated by ToolOutputBudgetCapability]"
+    """Suffix appended to truncated output to indicate truncation."""
 
     def __post_init__(self) -> None:
-        if self.max_output_chars < self._MIN_OUTPUT_CHARS:
-            msg = (
-                f"max_output_chars must be >= {self._MIN_OUTPUT_CHARS}, got {self.max_output_chars}"
-            )
-            raise ValueError(msg)
+        # max_output_chars <= 0 disables the capability entirely.
+        # No minimum enforcement needed when disabled.
+        pass
 
     @property
     def has_wrap_node_run(self) -> bool:
@@ -93,13 +96,36 @@ class ToolOutputBudgetCapability(AbstractCapability[Any]):
             case list():
                 return [self._truncate(item) if isinstance(item, str) else item for item in result]
             case _:
-                pass
+                # Non-string, non-list results: serialize to JSON for length check.
+                return self._truncate_non_string(result)
         return result
 
     def _truncate(self, text: str) -> str:
+        if self.max_output_chars <= 0:
+            return text
         if len(text) > self.max_output_chars:
-            return text[: self.max_output_chars] + _TRUNCATION_NOTICE
+            return text[: self.max_output_chars] + self.truncation_suffix
         return text
 
+    def _truncate_non_string(self, result: Any) -> Any:
+        """Serialize a non-string result to JSON and truncate if over budget.
+
+        If the serialized form exceeds ``max_output_chars``, the truncated
+        JSON string (with suffix) is returned in place of the original
+        object. Otherwise the original object is returned unchanged.
+        """
+        if self.max_output_chars <= 0:
+            return result
+        try:
+            serialized = json.dumps(result, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            return result
+        if len(serialized) > self.max_output_chars:
+            return serialized[: self.max_output_chars] + self.truncation_suffix
+        return result
+
     async def for_run(self, ctx: RunContext[Any]) -> ToolOutputBudgetCapability:
-        return ToolOutputBudgetCapability(max_output_chars=self.max_output_chars)
+        return ToolOutputBudgetCapability(
+            max_output_chars=self.max_output_chars,
+            truncation_suffix=self.truncation_suffix,
+        )

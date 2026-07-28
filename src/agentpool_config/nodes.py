@@ -251,7 +251,7 @@ class BaseAgentConfig(NodeConfig):
 
     Each entry is a capability config (built-in or generic import path).
     Built-in types: ``loop_detection``, ``token_budget``,
-    ``tool_output_budget``, ``dynamic_context``, ``skill_activation``,
+    ``tool_output_budget``, ``dcp``, ``skill_activation``,
     ``memory``.
 
     Example:
