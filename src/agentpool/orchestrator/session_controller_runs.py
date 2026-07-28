@@ -525,6 +525,12 @@ class SessionControllerRunsMixin:
             The ``message_id`` string on success, ``None`` for rejection.
         """
         resolved = {"steer": "asap", "followup": "when_idle"}.get(priority, priority)
+        # Generate message_id once so both _emit_user_message_inserted() and
+        # steer()/followup() share the same ID for dedup.
+        if message_id is None:
+            from agentpool.utils.identifiers import ascending
+
+            message_id = ascending("message")
         async with session._request_lock:
             if session.closing or session.is_closing:
                 return None

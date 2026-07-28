@@ -183,7 +183,7 @@ class SessionPoolMessagingMixin:
         deps: Any = None,
         input_provider: Any = None,
         meta: Any = None,
-        source: str = "protocol",
+        source: str = "internal",
     ) -> str | None:
         """Send a message to a session using the typed ``DeliveryMode`` enum.
 

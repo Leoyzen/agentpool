@@ -84,7 +84,7 @@ class EventMapper:
         self._pending_tool_calls: dict[str, str] = {}
         self._pending_tool_inputs: dict[str, dict[str, Any]] = {}
         self.tool_kind_map: dict[str, str] = {}
-        self._enqueue_message_ids = _enqueue_message_ids or []
+        self._enqueue_message_ids = _enqueue_message_ids if _enqueue_message_ids is not None else []
 
     def map_event(  # noqa: PLR0911
         self,
