@@ -634,7 +634,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
 
         # Handle model configuration - resolve model_variants reference if needed
-        from agentpool.models.model_configs import StringModelConfig
+        from agentpool.models.model_configs import BaseModelConfig, StringModelConfig
 
         model_config = config.model
         if (
@@ -673,7 +673,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers=config.model_providers,
             metadata=getattr(config, "metadata", None),
             capabilities=None,  # Built lazily in get_agentlet() from self.config.capabilities
-            resolved_model_config=model_config,
+            resolved_model_config=model_config
+            if isinstance(model_config, BaseModelConfig)
+            else None,
         )
 
     async def __aenter__(self) -> Self:
@@ -872,7 +874,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         if self.config is None and self._resolved_model_config is None:
             return []
-        model_cfg = self._resolved_model_config
+        model_cfg: BaseModelConfig | str | None = self._resolved_model_config
         if model_cfg is None and self.config is not None:
             model_cfg = self.config.model
         if not isinstance(model_cfg, BaseModelConfig):
@@ -903,7 +905,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         """
         from agentpool.models.model_configs import BaseModelConfig
 
-        model_cfg = self._resolved_model_config
+        model_cfg: BaseModelConfig | str | None = self._resolved_model_config
         if model_cfg is None and self.config is not None:
             model_cfg = self.config.model
         if not isinstance(model_cfg, BaseModelConfig):
@@ -948,7 +950,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             from agentpool.host.stubs import resolve_capabilities
 
             return await resolve_capabilities(
-                model_names[0], declared, cache_only=True,
+                model_names[0],
+                declared,
+                cache_only=True,
             )
 
         # Intentional simplification: fallback models use declared/text-only
@@ -1532,7 +1536,8 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         delta = timedelta(days=200)
         models = await get_all_models(
-            providers=self._providers or ["models.dev"], max_age=delta,
+            providers=self._providers or ["models.dev"],
+            max_age=delta,
         )
         # Passively populate CapabilityCache from the fetched models.
         # Zero additional network requests — data is already available.

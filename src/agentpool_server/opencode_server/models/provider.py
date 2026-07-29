@@ -191,7 +191,7 @@ class Model(OpenCodeBaseModel):
 
             _get_default_cache().populate_cache_from_model_info(model)
         except Exception:  # noqa: BLE001
-            logger.debug("populate_cache_failed", model=model.id)
+            logger.debug("populate_cache_failed: %s", model.id)
 
         return instance
 

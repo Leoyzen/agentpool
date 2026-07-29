@@ -166,11 +166,9 @@ async def test_fallback_model_intersection_injects_filter() -> None:
     """FallbackModelConfig with mixed vision capabilities populates user-configured filter.
 
     The user must explicitly configure a ModalityFilterCapability. The factory
-    populates it with the pessimistic intersection of all sub-models'
-    resolved capabilities.
+    populates it with the declared capabilities directly (no per-model
+    intersection or network lookups for fallback models).
     """
-    from unittest.mock import patch
-
     user_filter = ModalityFilterCapability(
         capabilities=None,
         image_strategy="describe",
@@ -188,28 +186,7 @@ async def test_fallback_model_intersection_injects_filter() -> None:
         capabilities=[user_filter],
     )
 
-    async def mock_resolve(name: str, declared: Any) -> ModelCapabilities:
-        if "gpt-4o" in name:
-            return ModelCapabilities(
-                image_input=True,
-                audio_input=True,
-                video_input=False,
-                document_input=False,
-                image_output=False,
-            )
-        return ModelCapabilities(
-            image_input=False,
-            audio_input=True,
-            video_input=False,
-            document_input=False,
-            image_output=False,
-        )
-
-    with patch(
-        "agentpool.host.stubs.resolve_capabilities",
-        side_effect=mock_resolve,
-    ):
-        pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
+    pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
 
     filter_caps = [
         cap
@@ -217,11 +194,12 @@ async def test_fallback_model_intersection_injects_filter() -> None:
         if isinstance(cap, ModalityFilterCapability)
     ]
     assert len(filter_caps) == 1
-    # Intersection: gpt-4o=True, gpt-3.5=False -> False (pessimistic).
+    # Fallback models return declared caps directly (all None for ModelCapabilities()).
     assert filter_caps[0].capabilities is not None
-    assert filter_caps[0].capabilities.image_input is False
+    assert filter_caps[0].capabilities.image_input is None
 
     # Verify image content is degraded by this capability.
+    # None is treated as unsupported via ``is True`` check → text-only behavior.
     img = _binary_image()
     degraded = filter_caps[0]._filter_tool_result(img)
     assert degraded == "[image/png]"
