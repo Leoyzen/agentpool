@@ -202,7 +202,7 @@ async def test_background_task_steer_full_chain(minimal_pool: AgentPool) -> None
     Given: A session with an active blocking turn and an EventBus subscriber.
     When: ``steer_from_background_task()`` is called mid-turn.
     Then: ``UserMessageInsertedEvent`` appears on the subscriber queue with
-        ``source="internal"``, ``delivery="steer"``, and a valid
+        ``source="accepted"``, ``delivery="steer"``, and a valid
         ``message_id``.
     """
     session_pool = minimal_pool.session_pool
@@ -219,9 +219,9 @@ async def test_background_task_steer_full_chain(minimal_pool: AgentPool) -> None
     # Inject steer from background task.
     result = await session_pool.steer_from_background_task(session_id, "bg task result")
     assert result is not None
-    # Collect events — filter for the internal steer event specifically.
+    # Collect events — filter for the accepted steer event specifically.
     # The initial prompt also publishes a UserMessageInsertedEvent with
-    # source="internal", so we must filter by delivery="steer".
+    # source="accepted", so we must filter by delivery="steer".
     user_msg_events: list[UserMessageInsertedEvent] = []
     all_events: list[Any] = []
     try:
@@ -235,7 +235,7 @@ async def test_background_task_steer_full_chain(minimal_pool: AgentPool) -> None
                 all_events.append(unwrapped)
                 if (
                     isinstance(unwrapped, UserMessageInsertedEvent)
-                    and unwrapped.source == "internal"
+                    and unwrapped.source == "accepted"
                     and unwrapped.delivery == "steer"
                 ):
                     user_msg_events.append(unwrapped)
@@ -254,18 +254,18 @@ async def test_background_task_steer_full_chain(minimal_pool: AgentPool) -> None
                     unwrapped = _unwrap(raw)
                     if (
                         isinstance(unwrapped, UserMessageInsertedEvent)
-                        and unwrapped.source == "internal"
+                        and unwrapped.source == "accepted"
                         and unwrapped.delivery == "steer"
                     ):
                         user_msg_events.append(unwrapped)
         except TimeoutError:
             pass
     assert len(user_msg_events) >= 1, (
-        f"Expected at least 1 UserMessageInsertedEvent with source=internal, "
+        f"Expected at least 1 UserMessageInsertedEvent with source=accepted, "
         f"got {user_msg_events}. All events: {all_events}"
     )
     evt = user_msg_events[0]
-    assert evt.source == "internal"
+    assert evt.source == "accepted"
     assert evt.delivery == "steer"
     assert evt.content == "bg task result"
     assert evt.message_id, "message_id must be a non-empty string"
@@ -329,7 +329,7 @@ async def test_dedup_protocol_handler_same_message_id(
         message_id="msg_123",
         content="dedup test",
         delivery="steer",
-        source="internal",
+        source="accepted",
     )
     await session_pool.event_bus.publish(session_id, event)
     # The event should arrive on the subscriber queue.
@@ -351,28 +351,28 @@ async def test_dedup_protocol_handler_same_message_id(
 # ---------------------------------------------------------------------------
 
 
-async def test_dedup_internal_steer_not_deduped(minimal_pool: AgentPool) -> None:
-    """Internal steer paths publish UserMessageInsertedEvent to EventBus.
+async def test_dedup_accepted_steer_not_deduped(minimal_pool: AgentPool) -> None:
+    """Accepted steer paths publish UserMessageInsertedEvent to EventBus.
 
     Given: A session with an active turn.
-    When: ``steer_from_background_task()`` is called (internal path).
-    Then: The event appears on EventBus with ``source="internal"`` and
+    When: ``steer_from_background_task()`` is called (accepted path).
+    Then: The event appears on EventBus with ``source="accepted"`` and
         ``delivery="steer"``.
     """
     session_pool = minimal_pool.session_pool
     assert session_pool is not None
-    session_id = "test-internal-no-dedup"
+    session_id = "test-accepted-no-dedup"
     await session_pool.create_session(session_id, agent_name="test_agent")
     release = asyncio.Event()
     await _patch_agent_create_turn(session_pool, session_id, _make_blocking_create_turn(release))
     queue = await session_pool.event_bus.subscribe(session_id, scope="session")
     await session_pool.send_message(session_id, "initial")
     await asyncio.sleep(0.1)
-    result = await session_pool.steer_from_background_task(session_id, "internal steer")
+    result = await session_pool.steer_from_background_task(session_id, "accepted steer")
     assert result is not None
     # Collect the UserMessageInsertedEvent.
     events = await _collect_user_message_events(queue, timeout=2.0)
-    bg_events = [e for e in events if e.source == "internal" and e.delivery == "steer"]
+    bg_events = [e for e in events if e.source == "accepted" and e.delivery == "steer"]
     if not bg_events:
         # Try replay buffer.
         queue2 = await session_pool.event_bus.subscribe(session_id, scope="session")
@@ -386,7 +386,7 @@ async def test_dedup_internal_steer_not_deduped(minimal_pool: AgentPool) -> None
                     unwrapped = _unwrap(raw)
                     if (
                         isinstance(unwrapped, UserMessageInsertedEvent)
-                        and unwrapped.source == "internal"
+                        and unwrapped.source == "accepted"
                         and unwrapped.delivery == "steer"
                     ):
                         bg_events.append(unwrapped)
@@ -398,8 +398,8 @@ async def test_dedup_internal_steer_not_deduped(minimal_pool: AgentPool) -> None
         f"Expected UserMessageInsertedEvent from background_task, got {bg_events}"
     )
     evt = bg_events[0]
-    assert evt.source == "internal"
-    assert evt.content == "internal steer"
+    assert evt.source == "accepted"
+    assert evt.content == "accepted steer"
     release.set()
     await asyncio.sleep(0.2)
 
@@ -468,7 +468,7 @@ async def test_await_publish_does_not_block_steer_injection(
     assert result is not None
     # Verify the event was published.
     events = await _collect_user_message_events(queue, timeout=2.0)
-    bg_events = [e for e in events if e.source == "internal" and e.delivery == "steer"]
+    bg_events = [e for e in events if e.source == "accepted" and e.delivery == "steer"]
     if not bg_events:
         queue2 = await session_pool.event_bus.subscribe(session_id, scope="session")
         try:
@@ -481,7 +481,7 @@ async def test_await_publish_does_not_block_steer_injection(
                     unwrapped = _unwrap(raw)
                     if (
                         isinstance(unwrapped, UserMessageInsertedEvent)
-                        and unwrapped.source == "internal"
+                        and unwrapped.source == "accepted"
                     ):
                         bg_events.append(unwrapped)
                         break
@@ -528,7 +528,7 @@ async def test_rapid_steer_messages_ordering(minimal_pool: AgentPool) -> None:  
     assert r3 is not None
     # Collect all UserMessageInsertedEvent from the queue.
     # Filter by delivery="steer" to exclude the initial prompt event
-    # (which also has source="internal").
+    # (which also has source="accepted").
     all_events: list[UserMessageInsertedEvent] = []
     try:
         async with asyncio.timeout(3.0):
@@ -540,7 +540,7 @@ async def test_rapid_steer_messages_ordering(minimal_pool: AgentPool) -> None:  
                 unwrapped = _unwrap(raw)
                 if (
                     isinstance(unwrapped, UserMessageInsertedEvent)
-                    and unwrapped.source == "internal"
+                    and unwrapped.source == "accepted"
                     and unwrapped.delivery == "steer"
                 ):
                     all_events.append(unwrapped)
@@ -560,7 +560,7 @@ async def test_rapid_steer_messages_ordering(minimal_pool: AgentPool) -> None:  
                     unwrapped = _unwrap(raw)
                     if (
                         isinstance(unwrapped, UserMessageInsertedEvent)
-                        and unwrapped.source == "internal"
+                        and unwrapped.source == "accepted"
                         and unwrapped.delivery == "steer"
                     ):
                         all_events.append(unwrapped)
@@ -615,9 +615,9 @@ async def test_steer_during_tool_execution_event_before_processing(
     # Steer while tool is "executing".
     result = await session_pool.steer_from_background_task(session_id, "steer during tool")
     assert result is not None
-    # Collect events in order — filter for the internal steer event.
+    # Collect events in order — filter for the accepted steer event.
     # The initial prompt also publishes a UserMessageInsertedEvent with
-    # delivery="initial" source="internal", so we must filter by delivery="steer".
+    # delivery="initial" source="accepted", so we must filter by delivery="steer".
     received_order: list[Any] = []
     user_msg_events: list[UserMessageInsertedEvent] = []
     try:
@@ -631,7 +631,7 @@ async def test_steer_during_tool_execution_event_before_processing(
                 received_order.append(unwrapped)
                 if (
                     isinstance(unwrapped, UserMessageInsertedEvent)
-                    and unwrapped.source == "internal"
+                    and unwrapped.source == "accepted"
                     and unwrapped.delivery == "steer"
                 ):
                     user_msg_events.append(unwrapped)
@@ -642,7 +642,7 @@ async def test_steer_during_tool_execution_event_before_processing(
     )
     evt = user_msg_events[0]
     assert evt.delivery == "steer"
-    assert evt.source == "internal"
+    assert evt.source == "accepted"
     assert evt.content == "steer during tool"
     # No StreamCompleteEvent should have arrived before the UserMessageInsertedEvent
     # (the turn is still blocked).
@@ -710,7 +710,7 @@ async def test_followup_from_prompt_queue_event_published(
         for e in received
         if isinstance(e, UserMessageInsertedEvent)
         and e.delivery == "followup"
-        and e.source == "internal"
+        and e.source == "accepted"
     ]
     assert len(followup_events) == 0, (
         f"Expected NO UserMessageInsertedEvent from _consume_run (single-path), "

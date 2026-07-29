@@ -64,7 +64,12 @@ class FakeSkillResource(FakeCapability):
 
 
 class FakeMcpResource(FakeCapability):
-    """Fake capability implementing McpResource protocol."""
+    """Fake capability implementing McpResource protocol.
+
+    With the new ResourceAccess protocol, ``read_resource()`` returns
+    ``list[TextResourceContent | BlobResourceContent] | None`` instead
+    of ``str | None``.
+    """
 
     def __init__(self, name: str = "mcp_cap", resources: dict[str, str] | None = None) -> None:
         super().__init__(name)
@@ -83,8 +88,13 @@ class FakeMcpResource(FakeCapability):
 
         return [ResourceEntry(uri=u, name=n) for u, n in self._resources.items()]
 
-    async def read_resource(self, uri: str) -> str | None:
-        return self._resources.get(uri)
+    async def read_resource(self, uri: str) -> list[Any] | None:
+        from agentpool.capabilities.resource_protocols import TextResourceContent
+
+        content = self._resources.get(uri)
+        if content is None:
+            return None
+        return [TextResourceContent(uri=uri, text=content)]
 
     async def resource_exists(self, uri: str) -> bool:
         return uri in self._resources
@@ -126,6 +136,34 @@ class FakeCommandResource(FakeCapability):
         if name == "test-cmd":
             return CommandEntry(name=name, description="Test command")
         return None
+
+
+class FakeResourceTemplateAccess(FakeCapability):
+    """Fake capability implementing ResourceTemplateAccess protocol."""
+
+    def __init__(self, name: str = "template_cap") -> None:
+        super().__init__(name)
+
+    async def list_resource_templates(self) -> list[Any]:
+        from agentpool.capabilities.resource_protocols import ResourceTemplateEntry
+
+        return [
+            ResourceTemplateEntry(
+                uri_template="file:///{path}",
+                name="file-template",
+                description="File template",
+            )
+        ]
+
+    async def complete_resource_template(
+        self,
+        uri_template: str,
+        argument: Any,
+        context: dict[str, str] | None = None,
+    ) -> Any:
+        from agentpool.capabilities.resource_protocols import CompletionResult
+
+        return CompletionResult(values=["completion1", "completion2"])
 
 
 # ---- Scope Isolation Tests ----
@@ -265,9 +303,82 @@ class TestTypedQueries:
         reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
         reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
 
-        mcps = reg.get_mcp_resources(Scope(level=ScopeLevel.POOL))
+        with pytest.warns(DeprecationWarning, match="get_mcp_resources.*deprecated"):
+            mcps = reg.get_mcp_resources(Scope(level=ScopeLevel.POOL))
         assert mcp_cap in mcps
         assert skill_cap not in mcps
+
+    def test_get_mcp_resources_delegates_to_get_resource_access(self) -> None:
+        """get_mcp_resources() result equals get_resource_access() result."""
+        reg = ExtensionRegistry()
+        mcp_cap = FakeMcpResource()
+        reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
+
+        with pytest.warns(DeprecationWarning, match="get_mcp_resources.*deprecated"):
+            deprecated_result = reg.get_mcp_resources(Scope(level=ScopeLevel.POOL))
+        new_result = reg.get_resource_access(Scope(level=ScopeLevel.POOL))
+
+        assert deprecated_result == new_result
+
+    def test_get_resource_access(self) -> None:
+        reg = ExtensionRegistry()
+        skill_cap = FakeSkillResource()
+        mcp_cap = FakeMcpResource()
+        reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
+        reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
+
+        resources = reg.get_resource_access(Scope(level=ScopeLevel.POOL))
+        assert mcp_cap in resources
+        assert skill_cap not in resources
+
+    def test_get_tool_access(self) -> None:
+        reg = ExtensionRegistry()
+        skill_cap = FakeSkillResource()
+        mcp_cap = FakeMcpResource()
+        reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
+        reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
+
+        tools = reg.get_tool_access(Scope(level=ScopeLevel.POOL))
+        assert mcp_cap in tools
+        assert skill_cap not in tools
+
+    def test_get_resource_template_access(self) -> None:
+        reg = ExtensionRegistry()
+        mcp_cap = FakeMcpResource()
+        template_cap = FakeResourceTemplateAccess()
+        reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
+        reg.register(template_cap, Scope(level=ScopeLevel.POOL))
+
+        templates = reg.get_resource_template_access(Scope(level=ScopeLevel.POOL))
+        assert template_cap in templates
+        assert mcp_cap not in templates
+
+    def test_get_resource_access_empty(self) -> None:
+        """get_resource_access() returns empty list when no ResourceAccess caps."""
+        reg = ExtensionRegistry()
+        skill_cap = FakeSkillResource()
+        reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
+
+        resources = reg.get_resource_access(Scope(level=ScopeLevel.POOL))
+        assert resources == []
+
+    def test_get_tool_access_empty(self) -> None:
+        """get_tool_access() returns empty list when no ToolAccess caps."""
+        reg = ExtensionRegistry()
+        skill_cap = FakeSkillResource()
+        reg.register(skill_cap, Scope(level=ScopeLevel.POOL))
+
+        tools = reg.get_tool_access(Scope(level=ScopeLevel.POOL))
+        assert tools == []
+
+    def test_get_resource_template_access_empty(self) -> None:
+        """get_resource_template_access() returns empty list when no ResourceTemplateAccess caps."""
+        reg = ExtensionRegistry()
+        mcp_cap = FakeMcpResource()
+        reg.register(mcp_cap, Scope(level=ScopeLevel.POOL))
+
+        templates = reg.get_resource_template_access(Scope(level=ScopeLevel.POOL))
+        assert templates == []
 
     def test_get_command_resources(self) -> None:
         reg = ExtensionRegistry()

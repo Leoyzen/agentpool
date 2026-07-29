@@ -16,7 +16,8 @@ from typing import Literal
 ChangeKind = Literal[
     "tools_changed",
     "prompts_changed",
-    "resources_changed",
+    "resource_list_changed",
+    "resource_updated",
     "skills_changed",
 ]
 """Discriminator for which resource type changed in a capability."""

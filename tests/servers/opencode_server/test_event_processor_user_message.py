@@ -84,7 +84,7 @@ async def test_user_message_inserted_creates_user_message(
         message_id="user-msg-1",
         content="Steer this conversation",
         delivery="steer",
-        source="internal",
+        source="accepted",
         timestamp=1700000000.0,
     )
     events = [e async for e in processor.process(event, ctx)]
@@ -139,7 +139,7 @@ async def test_user_message_inserted_with_meta_reconstructs_parts(
         message_id="user-msg-meta",
         content="Reconstructed from meta",
         delivery="initial",
-        source="internal",
+        source="accepted",
         timestamp=1700000000.0,
         meta=meta,
     )
@@ -174,7 +174,7 @@ async def test_user_message_inserted_multimodal_content(
         message_id="user-msg-multi",
         content=["First part", {"text": "Second part"}, "Third part"],
         delivery="followup",
-        source="internal",
+        source="accepted",
         timestamp=1700000001.0,
     )
     events = [e async for e in processor.process(event, ctx)]
@@ -213,3 +213,78 @@ async def test_user_message_inserted_empty_string_no_parts(
 
     assert len(events) == 1
     assert isinstance(events[0], MessageUpdatedEvent)
+
+
+# =============================================================================
+# Tests for source-based handling (5.15, 5.16)
+# =============================================================================
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_processor_skips_processed_source(
+    server_state: ServerState,
+) -> None:
+    """EventProcessor returns empty for source="processed" event.
+
+    source="processed" means the event is from the model drain time
+    (EnqueuedMessagesEvent). It should NOT create a UserMessage or
+    yield any SSE events — display was already handled by the
+    source="accepted" event at routing time.
+    """
+    processor = EventProcessor()
+    ctx = _make_ctx(server_state)
+
+    event = UserMessageInsertedEvent(
+        session_id="test-session",
+        message_id="user-msg-processed",
+        content="processed source text",
+        delivery="steer",
+        source="processed",
+        timestamp=1700000003.0,
+    )
+    events = [e async for e in processor.process(event, ctx)]
+
+    assert len(events) == 0, (
+        f"Expected 0 events for source='processed', got {len(events)}: {events}"
+    )
+
+    # No message should be appended to session state
+    messages = server_state.messages.get("test-session", [])
+    assert len(messages) == 0, f"Expected no messages in session state, got {len(messages)}"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_event_processor_processes_accepted_source(
+    server_state: ServerState,
+) -> None:
+    """EventProcessor creates UserMessage for source="accepted" event.
+
+    source="accepted" means the event is from the accept time (routing).
+    It SHOULD create a UserMessage and yield SSE events for display.
+    """
+    processor = EventProcessor()
+    ctx = _make_ctx(server_state)
+
+    event = UserMessageInsertedEvent(
+        session_id="test-session",
+        message_id="user-msg-accepted",
+        content="accepted source text",
+        delivery="steer",
+        source="accepted",
+        timestamp=1700000004.0,
+    )
+    events = [e async for e in processor.process(event, ctx)]
+
+    assert len(events) == 2
+    assert isinstance(events[0], MessageUpdatedEvent)
+    assert isinstance(events[1], PartUpdatedEvent)
+
+    msg_info = events[0].properties.info
+    assert msg_info.id == "user-msg-accepted"
+    assert msg_info.role == "user"
+
+    messages = server_state.messages.get("test-session", [])
+    assert len(messages) == 1
+    assert messages[0].info.id == "user-msg-accepted"

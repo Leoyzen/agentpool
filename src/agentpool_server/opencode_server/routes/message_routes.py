@@ -188,10 +188,14 @@ async def _maybe_generate_title(
     session_id: str,
     user_prompt: Sequence[UserContent | PathReference],
 ) -> None:
-    """Generate title for session if this is the first user message.
+    """Generate title for session if the title is still the default.
 
-    Checks if the session only has system/initialization messages (no user messages yet).
-    If so, triggers title generation via the storage manager.
+    Triggers title generation via the storage manager when the session
+    title has not been set yet (still ``"New Session"``). The
+    ``user_prompt`` is passed directly from the REST handler, so we do
+    not need to read ``state.messages`` — which may not yet contain the
+    user message because ``append_message_to_session`` runs asynchronously
+    via the EventProcessor on ``UserMessageInsertedEvent``.
 
     Args:
         state: Server state containing storage manager
@@ -201,24 +205,13 @@ async def _maybe_generate_title(
     if _session_disables_title_generation(state, session_id):
         return
 
-    # Check if this is the first user message by looking at existing messages
-    existing_messages = await get_messages_for_session(state, session_id)
-
-    # Count user messages (not assistant, not system)
-    user_message_count = sum(
-        1 for msg in existing_messages if hasattr(msg.info, "role") and msg.info.role == "user"
-    )
-
-    # Only generate title on first user message
-    if user_message_count != 1:
-        return
-
     # Check if storage manager has title generation configured
     storage = state.pool.storage if state.pool else None
     if storage is None:
         return
 
-    # Check if title is already set (not default)
+    # Only generate title when the session still has the default title.
+    # This guards against duplicate generation on subsequent messages.
     session = state.sessions.get(session_id)
     if session and session.title and session.title != "New Session":
         return
@@ -347,7 +340,13 @@ async def _process_message(
                     )
                 case _ as unreachable:
                     assert_never(unreachable)
-        await persist_message_to_storage(state, user_msg_with_parts, session_id)
+        # NOTE: persist_message_to_storage is NOT called here for the user
+        # message. The EventProcessor's append_message_to_session() handles
+        # both DB persistence and in-memory append when it receives the
+        # UserMessageInsertedEvent from _route_message(). Calling
+        # persist_message_to_storage here would write to storage twice,
+        # causing duplicate 0-parts user messages in the TUI.
+        # This matches the send_message_async pattern (see line ~1017).
 
         ctx = await _route_message_locked(
             session_id, request, state, user_msg_id, user_msg_with_parts

@@ -958,18 +958,19 @@ class UserMessageInsertedEvent[T]:
     delivery: Literal["initial", "steer", "followup"] = "initial"
     """How the message was delivered to the run."""
 
-    source: Literal["enqueued", "internal"] = "internal"
+    source: Literal["accepted", "processed"] = "accepted"
     """Originator of the inserted message.
 
-    ``"enqueued"`` indicates the event was produced from
-    ``EnqueuedMessagesEvent`` mapping at model processing time — this is
-    the precise moment the steer message enters run history and the model
-    is about to process it, making it the split trigger for protocol
-    frontends.
-
-    ``"internal"`` indicates a fire-and-forget emission from
-    ``_schedule_user_message_emission()`` at send time — this is a
+    ``"accepted"`` indicates the event was produced at message accept
+    time (routing) — when the message enters the session via
+    ``_route_message()``, ``send_message()``, or fire-and-forget
+    emission from ``_schedule_user_message_emission()``. This is a
     fallback display event that does NOT trigger a turn split.
+
+    ``"processed"`` indicates the event was produced at model
+    processing time — from ``EnqueuedMessagesEvent`` mapping when the
+    steer message enters run history and the model is about to process
+    it, making it the split trigger for protocol frontends.
     """
 
     timestamp: float = field(default_factory=time.time)

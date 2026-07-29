@@ -418,7 +418,7 @@ async def test_on_change_yields_events_from_single_child() -> None:
     """on_change() yields events from a single child with on_change()."""
     events = [
         ChangeEvent(capability_name="only_cap", kind="tools_changed"),
-        ChangeEvent(capability_name="only_cap", kind="resources_changed"),
+        ChangeEvent(capability_name="only_cap", kind="resource_list_changed"),
     ]
     cap = _FakeCap(name="only_cap", change_events=events)
     combined = CombinedToolsetCapability([cap])
@@ -430,7 +430,7 @@ async def test_on_change_yields_events_from_single_child() -> None:
 
     assert len(collected) == 2
     assert collected[0].kind == "tools_changed"
-    assert collected[1].kind == "resources_changed"
+    assert collected[1].kind == "resource_list_changed"
 
 
 @pytest.mark.asyncio
@@ -457,7 +457,7 @@ async def test_on_change_yields_in_order_from_single_child() -> None:
     events = [
         ChangeEvent(capability_name="cap", kind="tools_changed"),
         ChangeEvent(capability_name="cap", kind="prompts_changed"),
-        ChangeEvent(capability_name="cap", kind="resources_changed"),
+        ChangeEvent(capability_name="cap", kind="resource_list_changed"),
         ChangeEvent(capability_name="cap", kind="skills_changed"),
     ]
     cap = _FakeCap(name="cap", change_events=events)
@@ -471,7 +471,7 @@ async def test_on_change_yields_in_order_from_single_child() -> None:
     assert len(collected) == 4
     assert collected[0].kind == "tools_changed"
     assert collected[1].kind == "prompts_changed"
-    assert collected[2].kind == "resources_changed"
+    assert collected[2].kind == "resource_list_changed"
     assert collected[3].kind == "skills_changed"
 
 

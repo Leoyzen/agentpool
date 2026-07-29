@@ -104,7 +104,7 @@ async def test_steer_default_emits_user_message() -> None:
     assert event.session_id == "test-session"
     assert event.content == "steer content"
     assert event.delivery == "steer"
-    assert event.source == "internal"
+    assert event.source == "accepted"
 
 
 @pytest.mark.unit
@@ -198,7 +198,7 @@ async def test_followup_emit_true_emits_user_message() -> None:
     assert isinstance(event, UserMessageInsertedEvent)
     assert event.content == "followup content"
     assert event.delivery == "followup"
-    assert event.source == "internal"
+    assert event.source == "accepted"
 
 
 @pytest.mark.unit

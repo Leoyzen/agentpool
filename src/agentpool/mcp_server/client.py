@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from mcp.shared.context import RequestContext
     from mcp.types import (
         BlobResourceContents,
+        Completion,
         ElicitRequestParams,
         GetPromptResult,
         Icon,
@@ -76,7 +77,8 @@ class MCPClient:
         accessible_roots: list[str] | None = None,
         tool_change_callback: Callable[[], Awaitable[None]] | None = None,
         prompt_change_callback: Callable[[], Awaitable[None]] | None = None,
-        resource_change_callback: Callable[[], Awaitable[None]] | None = None,
+        resource_list_changed_callback: Callable[[], Awaitable[None]] | None = None,
+        resource_updated_callback: Callable[[str], Awaitable[None]] | None = None,
         client_name: str | None = None,
         client_title: str | None = None,
         client_website_url: str | None = None,
@@ -92,7 +94,8 @@ class MCPClient:
         self._accessible_roots = accessible_roots or []
         self._tool_change_callback = tool_change_callback
         self._prompt_change_callback = prompt_change_callback
-        self._resource_change_callback = resource_change_callback
+        self._resource_list_changed_callback = resource_list_changed_callback
+        self._resource_updated_callback = resource_updated_callback
         self._client_name = client_name
         self._client_title = client_title
         self._client_website_url = client_website_url
@@ -284,7 +287,8 @@ class MCPClient:
             self,
             self._tool_change_callback,
             self._prompt_change_callback,
-            self._resource_change_callback,
+            self._resource_list_changed_callback,
+            self._resource_updated_callback,
         )
 
         # Build client_info if client_name is provided
@@ -326,7 +330,8 @@ class MCPClient:
             self,
             self._tool_change_callback,
             self._prompt_change_callback,
-            self._resource_change_callback,
+            self._resource_list_changed_callback,
+            self._resource_updated_callback,
         )
 
         client_info: Implementation | None = None
@@ -396,12 +401,6 @@ class MCPClient:
         Example template: "file:///{path}" -> expand with path="config.json"
         -> "file:///config.json" which can then be read.
 
-        TODO: Integrate resource templates into the ResourceInfo system.
-        Currently templates are separate from resources - we need to decide:
-        - Should templates appear in list_resources() with a flag?
-        - Should ResourceInfo.read() accept kwargs for template expansion?
-        - Should templates have their own ResourceTemplateInfo class?
-
         Returns:
             List of resource templates from the server
         """
@@ -428,6 +427,92 @@ class MCPClient:
             return await self._client.read_resource(uri)
         except Exception as e:
             raise RuntimeError(f"Failed to read resource {uri!r}: {e}") from e
+
+    async def subscribe_resource(self, uri: str) -> None:
+        """Subscribe to updates for a specific resource.
+
+        Uses the low-level ``ClientSession.subscribe_resource()`` since
+        FastMCP's high-level ``Client`` does not wrap this method. After
+        subscribing, the server will send ``notifications/resources/updated``
+        when the resource content changes.
+
+        Args:
+            uri: The URI of the resource to subscribe to.
+        """
+        from pydantic import AnyUrl
+
+        self._ensure_connected()
+        session = self._client.session
+        await session.subscribe_resource(AnyUrl(uri))
+
+    async def unsubscribe_resource(self, uri: str) -> None:
+        """Unsubscribe from updates for a specific resource.
+
+        Args:
+            uri: The URI of the resource to unsubscribe from.
+        """
+        from pydantic import AnyUrl
+
+        self._ensure_connected()
+        session = self._client.session
+        await session.unsubscribe_resource(AnyUrl(uri))
+
+    async def complete(
+        self,
+        ref_type: str,
+        ref_uri: str,
+        argument_name: str,
+        argument_value: str,
+        context: dict[str, str] | None = None,
+    ) -> Completion:
+        """Send a completion request to the MCP server.
+
+        Wraps FastMCP's ``Client.complete()`` to provide a simpler interface
+        for resource template parameter completion.
+
+        Args:
+            ref_type: The reference type — ``"ref/resource"`` for resource
+                templates or ``"ref/prompt"`` for prompt arguments.
+            ref_uri: The URI (for resource templates) or name (for prompts)
+                of the reference to complete.
+            argument_name: The name of the argument being completed.
+            argument_value: The current value of the argument.
+            context: Optional context arguments for the completion request.
+
+        Returns:
+            ``mcp.types.Completion`` with completion values.
+
+        Raises:
+            RuntimeError: If not connected or the completion request fails.
+            ValueError: If ``ref_type`` is not ``"ref/resource"`` or
+                ``"ref/prompt"``.
+        """
+        import mcp.types
+
+        self._ensure_connected()
+
+        match ref_type:
+            case "ref/resource":
+                ref: mcp.types.ResourceTemplateReference | mcp.types.PromptReference = (
+                    mcp.types.ResourceTemplateReference(type="ref/resource", uri=ref_uri)
+                )
+            case "ref/prompt":
+                ref = mcp.types.PromptReference(type="ref/prompt", name=ref_uri)
+            case _:
+                raise ValueError(
+                    f"Invalid ref_type {ref_type!r}: expected 'ref/resource' or 'ref/prompt'"
+                )
+
+        argument = mcp.types.CompletionArgument(name=argument_name, value=argument_value)
+
+        try:
+            return await self._client.complete(
+                ref=ref,
+                argument=argument.model_dump(),
+                context_arguments=context,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to complete {ref_type} {ref_uri!r}: {e}") from e
 
     async def get_prompt(
         self, name: str, arguments: dict[str, str] | None = None

@@ -1084,6 +1084,12 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 tool_capabilities.extend(
                     cap for cap in pool_capabilities if isinstance(cap, SkillManagerCap)
                 )
+            # 6. ResourceCapability — unified resource access tools.
+            #    Per-agent opt-out via ``resources.enabled: false`` in YAML.
+            if self.config is not None and self.config.resources.enabled:
+                resource_cap = pool.resource_capability
+                if resource_cap is not None:
+                    tool_capabilities.append(resource_cap)
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []

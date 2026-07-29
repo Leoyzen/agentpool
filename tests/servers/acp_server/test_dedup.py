@@ -29,7 +29,7 @@ def _make_event(message_id: str, content: str = "hello") -> UserMessageInsertedE
         message_id=message_id,
         content=content,
         delivery="steer",
-        source="internal",
+        source="accepted",
         timestamp=time.time(),
     )
 
@@ -90,3 +90,29 @@ async def test_dedup_empty_message_id_not_tracked() -> None:
 
     assert len(updates1) == 1
     assert len(updates2) == 1
+
+
+@pytest.mark.unit
+async def test_acp_converter_skips_processed_source() -> None:
+    """ACPEventConverter returns empty for source="processed" event.
+
+    source="processed" means the event is from the model drain time
+    (EnqueuedMessagesEvent). The ACP converter should NOT produce a
+    UserMessageChunk for it — display was already handled by the
+    source="accepted" event at routing time.
+    """
+    converter = ACPEventConverter()
+    event = UserMessageInsertedEvent(
+        session_id="test-session",
+        message_id="msg-processed",
+        content="processed source text",
+        delivery="steer",
+        source="processed",
+        timestamp=time.time(),
+    )
+
+    updates = [u async for u in converter.convert(event)]
+
+    assert len(updates) == 0, (
+        f"Expected 0 updates for source='processed', got {len(updates)}: {updates}"
+    )

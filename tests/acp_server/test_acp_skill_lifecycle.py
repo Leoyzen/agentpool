@@ -259,7 +259,7 @@ async def test_watch_skill_changes_calls_register_on_skills_changed_event() -> N
 async def test_watch_skill_changes_ignores_non_skills_changed_events() -> None:
     """T8.2: _watch_skill_changes() ignores non-skills_changed events."""
     tools_event = ChangeEvent(capability_name="test-cap", kind="tools_changed")
-    resources_event = ChangeEvent(capability_name="test-cap", kind="resources_changed")
+    resources_event = ChangeEvent(capability_name="test-cap", kind="resource_list_changed")
     skills_event = ChangeEvent(capability_name="test-cap", kind="skills_changed")
     mock_stream = _async_iter([tools_event, resources_event, skills_event, None])
 
