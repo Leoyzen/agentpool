@@ -435,6 +435,7 @@ module = [
   "fastmcp.prompts.function_prompt",
   "fastmcp.tools.tool",
   "apprise",
+  "openviking_sdk",
 ]
 ignore_missing_imports = true
 

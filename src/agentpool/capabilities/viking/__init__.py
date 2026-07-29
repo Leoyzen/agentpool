@@ -230,7 +230,7 @@ class VikingCapability(AbstractCapability[Any]):
             for entry in entries:
                 name: str
                 if isinstance(entry, dict):
-                    name = entry.get("name", entry.get("uri", ""))
+                    name = str(entry.get("name") or entry.get("uri") or "")
                 else:
                     name = str(entry)
                 if name.endswith(".md"):
@@ -283,7 +283,7 @@ class VikingCapability(AbstractCapability[Any]):
             for entry in entries:
                 entry_name: str
                 if isinstance(entry, dict):
-                    entry_name = entry.get("name", entry.get("uri", ""))
+                    entry_name = str(entry.get("name") or entry.get("uri") or "")
                 else:
                     entry_name = str(entry)
                 if entry_name == target:
