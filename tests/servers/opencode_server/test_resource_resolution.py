@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -110,12 +109,8 @@ class FakeAgent:
 
 async def test_resolve_resource_text_content() -> None:
     """Text resource via ResourceAccess returns XML-wrapped text."""
-    cap = FakeResourceAccess(
-        read_result=[TextResourceContent(text="hello", uri="viking://doc.md")]
-    )
-    result = await resolve_resource_content(
-        "viking://doc.md", resource_caps=[cap], skill_caps=[]
-    )
+    cap = FakeResourceAccess(read_result=[TextResourceContent(text="hello", uri="viking://doc.md")])
+    result = await resolve_resource_content("viking://doc.md", resource_caps=[cap], skill_caps=[])
     assert result is not None
     assert result == ['<resource uri="viking://doc.md">\nhello\n</resource>']
 
@@ -125,14 +120,10 @@ async def test_resolve_resource_binary_content() -> None:
     blob_data = base64.b64encode(b"img").decode()
     cap = FakeResourceAccess(
         read_result=[
-            BlobResourceContent(
-                blob=blob_data, mime_type="image/png", uri="viking://img.png"
-            )
+            BlobResourceContent(blob=blob_data, mime_type="image/png", uri="viking://img.png")
         ]
     )
-    result = await resolve_resource_content(
-        "viking://img.png", resource_caps=[cap], skill_caps=[]
-    )
+    result = await resolve_resource_content("viking://img.png", resource_caps=[cap], skill_caps=[])
     assert result is not None
     assert len(result) == 3
     assert result[0] == '<resource uri="viking://img.png">\n'
@@ -145,27 +136,21 @@ async def test_resolve_resource_binary_content() -> None:
 async def test_resolve_resource_not_found() -> None:
     """No provider returns content → result is None."""
     cap = FakeResourceAccess(read_result=None)
-    result = await resolve_resource_content(
-        "viking://missing", resource_caps=[cap], skill_caps=[]
-    )
+    result = await resolve_resource_content("viking://missing", resource_caps=[cap], skill_caps=[])
     assert result is None
 
 
 async def test_resolve_resource_read_returns_empty() -> None:
     """``read_resource()`` returns empty list → returns None."""
     cap = FakeResourceAccess(read_result=[])
-    result = await resolve_resource_content(
-        "viking://empty", resource_caps=[cap], skill_caps=[]
-    )
+    result = await resolve_resource_content("viking://empty", resource_caps=[cap], skill_caps=[])
     assert result is None
 
 
 async def test_resolve_resource_read_raises_exception() -> None:
     """``read_resource()`` raises → logs, continues, returns None."""
     cap = FakeResourceAccess(raise_exc=RuntimeError("connection lost"))
-    result = await resolve_resource_content(
-        "viking://error", resource_caps=[cap], skill_caps=[]
-    )
+    result = await resolve_resource_content("viking://error", resource_caps=[cap], skill_caps=[])
     assert result is None
 
 
@@ -175,14 +160,10 @@ async def test_resolve_resource_mixed_text_and_binary() -> None:
     cap = FakeResourceAccess(
         read_result=[
             TextResourceContent(text="desc", uri="viking://mixed"),
-            BlobResourceContent(
-                blob=blob_data, mime_type="image/png", uri="viking://mixed"
-            ),
+            BlobResourceContent(blob=blob_data, mime_type="image/png", uri="viking://mixed"),
         ]
     )
-    result = await resolve_resource_content(
-        "viking://mixed", resource_caps=[cap], skill_caps=[]
-    )
+    result = await resolve_resource_content("viking://mixed", resource_caps=[cap], skill_caps=[])
     assert result is not None
     # Text item → single XML-wrapped string
     assert result[0] == '<resource uri="viking://mixed">\ndesc\n</resource>'
@@ -197,9 +178,7 @@ async def test_resolve_resource_mixed_text_and_binary() -> None:
 async def test_resolve_resource_multiple_providers() -> None:
     """First provider returns None, second returns content → returns content from second."""
     cap1 = FakeResourceAccess(read_result=None)
-    cap2 = FakeResourceAccess(
-        read_result=[TextResourceContent(text="found", uri="viking://doc")]
-    )
+    cap2 = FakeResourceAccess(read_result=[TextResourceContent(text="found", uri="viking://doc")])
     result = await resolve_resource_content(
         "viking://doc", resource_caps=[cap1, cap2], skill_caps=[]
     )
@@ -218,19 +197,13 @@ async def test_resolve_resource_skill_uri() -> None:
         skill_caps=[skill_cap],
     )
     assert result is not None
-    assert result == [
-        '<resource uri="skill://ponytail/SKILL.md">\ncontent\n</resource>'
-    ]
+    assert result == ['<resource uri="skill://ponytail/SKILL.md">\ncontent\n</resource>']
 
 
 async def test_resolve_resource_xml_wrapper_format() -> None:
     r"""Verify exact XML format for text: ``<resource uri="{uri}">\n{content}\n</resource>``."""
-    cap = FakeResourceAccess(
-        read_result=[TextResourceContent(text="hello", uri="viking://doc.md")]
-    )
-    result = await resolve_resource_content(
-        "viking://doc.md", resource_caps=[cap], skill_caps=[]
-    )
+    cap = FakeResourceAccess(read_result=[TextResourceContent(text="hello", uri="viking://doc.md")])
+    result = await resolve_resource_content("viking://doc.md", resource_caps=[cap], skill_caps=[])
     assert result is not None
     assert len(result) == 1
     expected = '<resource uri="viking://doc.md">\nhello\n</resource>'
@@ -240,9 +213,7 @@ async def test_resolve_resource_xml_wrapper_format() -> None:
 async def test_resolve_resource_text_truncation() -> None:
     """Text > max_text_chars → truncated with suffix."""
     long_text = "x" * 15_000
-    cap = FakeResourceAccess(
-        read_result=[TextResourceContent(text=long_text, uri="viking://big")]
-    )
+    cap = FakeResourceAccess(read_result=[TextResourceContent(text=long_text, uri="viking://big")])
     result = await resolve_resource_content(
         "viking://big", resource_caps=[cap], skill_caps=[], max_text_chars=10_000
     )
@@ -270,9 +241,7 @@ async def test_extract_user_prompt_with_resource_source() -> None:
     from agentpool_server.opencode_server.models.common import TextSpan
     from agentpool_server.opencode_server.models.parts import ResourceSource
 
-    cap = FakeResourceAccess(
-        read_result=[TextResourceContent(text="hello", uri="viking://doc.md")]
-    )
+    cap = FakeResourceAccess(read_result=[TextResourceContent(text="hello", uri="viking://doc.md")])
     agent = FakeAgent(capabilities=[cap])
 
     source = ResourceSource(
@@ -298,9 +267,7 @@ async def test_extract_user_prompt_with_binary_resource() -> None:
     blob_data = base64.b64encode(b"img").decode()
     cap = FakeResourceAccess(
         read_result=[
-            BlobResourceContent(
-                blob=blob_data, mime_type="image/png", uri="viking://img.png"
-            )
+            BlobResourceContent(blob=blob_data, mime_type="image/png", uri="viking://img.png")
         ]
     )
     agent = FakeAgent(capabilities=[cap])
@@ -365,9 +332,7 @@ async def test_extract_user_prompt_resource_returns_none() -> None:
     resource_part = FilePartInput(mime="text/plain", url="", source=source)
     text_part = TextPartInput(text="hello world")
 
-    result = await extract_user_prompt_from_parts(
-        [resource_part, text_part], agent=agent
-    )
+    result = await extract_user_prompt_from_parts([resource_part, text_part], agent=agent)
     result_list = list(result)
     # Only the text part should appear — resource resolution returned None
     assert len(result_list) == 1
