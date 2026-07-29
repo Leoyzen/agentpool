@@ -193,7 +193,7 @@ async def test_mode_tool_exposure_retrieve() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 7
+    assert len(tool_names) == 6  # 6 retrieve tools (recall gated by enable_memory)
 
 
 @pytest.mark.asyncio
@@ -209,7 +209,7 @@ async def test_mode_tool_exposure_write() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 6
+    assert len(tool_names) == 5  # 5 write tools (remember gated by enable_memory)
 
 
 @pytest.mark.asyncio
@@ -225,7 +225,7 @@ async def test_mode_tool_exposure_graph() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 2
+    assert len(tool_names) == 1  # 1 graph tool (link gated by enable_link)
 
 
 @pytest.mark.asyncio
@@ -241,7 +241,7 @@ async def test_mode_tool_exposure_all() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 15
+    assert len(tool_names) == 12  # 6+5+1 (link and memory gated by default flags)
 
 
 @pytest.mark.asyncio
@@ -265,7 +265,7 @@ async def test_mode_tool_exposure_with_config_fields() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 15
+    assert len(tool_names) == 12  # default flags: enable_link=False, enable_memory=False
 
 
 # ---------------------------------------------------------------------------

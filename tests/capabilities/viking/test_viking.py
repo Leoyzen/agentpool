@@ -1875,28 +1875,29 @@ class TestResourceAccessProtocol:
     async def test_list_resources_success(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
+        # First call: top-level ls returns files + one directory
+        # Second call: recursive ls of the directory returns more files
         mock_client.ls = AsyncMock(
-            return_value=[
-                {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
-                {"name": "doc2.txt", "uri": "viking://resources/doc2.txt", "isDir": False},
-                {"name": "subdir", "uri": "viking://resources/subdir", "isDir": True},
-                {
-                    "name": "doc3.md",
-                    "uri": "viking://resources/doc3.md",
-                    "isDir": False,
-                    "meta": {"abstract": "A test document"},
-                },
+            side_effect=[
+                [
+                    {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
+                    {"name": "doc2.txt", "uri": "viking://resources/doc2.txt", "isDir": False},
+                    {"name": "subdir", "uri": "viking://resources/subdir", "isDir": True},
+                ],
+                [
+                    {"name": "doc3.md", "uri": "viking://resources/subdir/doc3.md", "isDir": False},
+                ],
             ]
         )
         result = await viking_cap.list_resources()
-        assert len(result) == 4  # includes directories for @ mention browsing
+        assert len(result) == 3  # only text files, no directories
         assert result[0].name == "doc1.md"
         assert result[0].uri == "viking://resources/doc1.md"
         assert result[0].mime_type == "text/markdown"
         assert result[1].name == "doc2.txt"
-        assert result[1].mime_type == ""
-        assert result[2].name == "subdir"  # directory included
-        assert result[3].description == "A test document"
+        assert result[1].mime_type == "text/plain"
+        assert result[2].name == "doc3.md"
+        assert result[2].description == "subdir/doc3.md"
 
     async def test_list_resources_empty(
         self, viking_cap: VikingCapability, mock_client: AsyncMock

@@ -23,7 +23,7 @@ from agentpool.capabilities.viking.utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from agentpool.capabilities.viking import VikingCapability
 
@@ -314,7 +314,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_read error: {e}"
 
-        retrieve_tools = [
+        retrieve_tools: list[Callable[..., Awaitable[str]]] = [
             viking_search,
             viking_find,
             viking_grep,
@@ -513,7 +513,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_forget error: {e}"
 
-        write_tools = [
+        write_tools: list[Callable[..., Awaitable[str]]] = [
             viking_write,
             viking_edit,
             viking_mkdir,
@@ -578,7 +578,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_set_tags error: {e}"
 
-        graph_tools = [viking_set_tags]
+        graph_tools: list[Callable[..., Awaitable[str]]] = [viking_set_tags]
         if cap.enable_link:
             graph_tools.append(viking_link)
         tools.extend(graph_tools)
