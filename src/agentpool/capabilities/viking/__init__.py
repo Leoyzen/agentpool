@@ -562,8 +562,9 @@ class VikingCapability(AbstractCapability[Any]):
             uploads_uri = self.uploads_uri or (
                 f"viking://user/{self.user or 'default'}/memories/uploads/"
             )
-            ext = _guess_extension(content.media_type)
-            uri = f"{uploads_uri}{uuid.uuid4().hex[:12]}.{ext}"
+            # Viking server only allows .md files; store binary as base64
+            # text inside a .md container.
+            uri = f"{uploads_uri}{uuid.uuid4().hex[:12]}.md"
 
             # write() accepts text content; encode binary as base64
             import base64

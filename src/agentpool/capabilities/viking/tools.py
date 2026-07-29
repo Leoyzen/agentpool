@@ -462,11 +462,12 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             """
             try:
                 client = cap._get_client()
+                # SDK add_resource() does not accept processing_mode;
+                # pass only supported kwargs.
                 result = await client.add_resource(
                     path,
                     to=to,
                     parent=parent,
-                    processing_mode=processing_mode,
                     watch_interval=watch_interval,
                 )
                 return f"Added resource {path} to Viking. Result: {result}"

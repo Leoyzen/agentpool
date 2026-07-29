@@ -203,8 +203,15 @@ class TestLifecycle:
         mock_client.initialize.assert_not_called()
 
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_aenter_import_error_when_sdk_not_installed(self) -> None:
         """__aenter__ raises ImportError when openviking_sdk is not installed."""
+        try:
+            import openviking_sdk  # noqa: F401
+        except ImportError:
+            pass
+        else:
+            pytest.skip("openviking_sdk is installed — ImportError test not applicable")
         cap = VikingCapability(mode="all")
         assert cap._client is None
         with pytest.raises(ImportError):
@@ -822,7 +829,8 @@ class TestWriteTools:
         assert call_args[0] == "/local/file.txt"
         assert call_kwargs["to"] == "viking://user/alice/files/"
         assert call_kwargs["parent"] == "viking://user/alice/"
-        assert call_kwargs["processing_mode"] == "auto"
+        # processing_mode is NOT passed to SDK (not a supported kwarg)
+        assert "processing_mode" not in call_kwargs
         assert call_kwargs["watch_interval"] == 5.0
         assert "Added resource" in result
 
@@ -2160,7 +2168,7 @@ class TestMultimodalBridge:
         uri = await viking_cap._upload_binary(binary)
         assert uri is not None
         assert uri.startswith("viking://user/default/memories/uploads/")
-        assert uri.endswith(".png")
+        assert uri.endswith(".md")  # Viking only allows .md files
         mock_client.write.assert_called_once()
         call_kwargs = mock_client.write.call_args
         assert call_kwargs.kwargs["mode"] == "create"
@@ -2177,7 +2185,7 @@ class TestMultimodalBridge:
         uri = await cap._upload_binary(binary)
         assert uri is not None
         assert uri.startswith("viking://custom/uploads/")
-        assert uri.endswith(".jpg")
+        assert uri.endswith(".md")  # Viking only allows .md files
 
     async def test_upload_binary_error(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
