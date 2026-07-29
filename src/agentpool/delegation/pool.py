@@ -293,8 +293,13 @@ class AgentPool[TPoolDeps = None]:
                 # Command discovery is handled by ExtensionRegistry.get_command_resources().
                 # Create pool-scoped capabilities for all discovered skills
                 await self._rebuild_skill_capabilities()
-                # Register the unified ResourceCapability at pool scope.
+                # Create the unified ResourceCapability (not registered in registry).
                 await self._setup_resource_capability()
+                # Compile agent capabilities and register them at AGENT scope.
+                # This eagerly builds config-defined capabilities (e.g. Viking,
+                # MCP, code mode) so they are available in the ExtensionRegistry
+                # before any message handling occurs.
+                self._factory.compile(self.manifest, self.get_context())
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 # Use the StorageManager's already-initialized provider as session store.
@@ -718,7 +723,7 @@ class AgentPool[TPoolDeps = None]:
 
     @logfire.instrument("pool.setup_resource_capability")
     async def _setup_resource_capability(self) -> None:
-        """Create and register the ``ResourceCapability`` at pool scope.
+        """Create the ``ResourceCapability`` instance.
 
         The capability provides 5 agent-facing tools (``list_resources``,
         ``read_resource``, ``resource_exists``, ``list_resource_templates``,
@@ -728,15 +733,20 @@ class AgentPool[TPoolDeps = None]:
         The capability is stateless — it reads ``AgentContext`` at runtime
         to resolve providers. Per-agent opt-out is handled in
         ``get_agentlet()`` by checking ``agent_config.resources.enabled``.
+
+        Note: The capability is NOT registered in the ExtensionRegistry.
+        It is a tool wrapper/router, not a ``ResourceAccess`` data provider.
+        Its tool methods have ``RunContext`` as first arg, which is
+        incompatible with the ``ResourceAccess`` protocol signature.
+        Registering it would cause ``get_resource_access()`` to return it
+        via ``@runtime_checkable`` false-positive, leading to ``TypeError``
+        in ``resolve_resource_content()``.
         """
-        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
         from agentpool.capabilities.resource_capability import ResourceCapability
 
         cap = ResourceCapability()
         self._resource_capability = cap
-        pool_scope = Scope(level=ScopeLevel.POOL)
-        self._extension_registry.register(cap, pool_scope)
-        logger.debug("Registered ResourceCapability at pool scope")
+        logger.debug("Created ResourceCapability (not registered in ExtensionRegistry)")
 
     async def _on_skills_changed(self, event: Any) -> None:
         """Handle skills changed events from the skill provider.

@@ -211,11 +211,13 @@ class AgentFactory:
           includes a ``subagent`` toolset)
         - Config-level tool providers → added directly as native
           capabilities
+        - Config-defined capabilities (e.g. Viking, MCP, code mode) →
+          built from ``cfg.capabilities`` and included for AGENT-scope
+          registration so they are available before any message handling.
 
-        MCP servers, skill capabilities, and code mode are handled
-        separately by the native agent's ``get_agentlet()`` and the
-        pool's ``SkillManager``. They are NOT compiled here to avoid
-        duplication.
+        Skill capabilities and code mode are also handled by the native
+        agent's ``get_agentlet()`` for per-session tool injection, but
+        the registry registration happens here at pool init time.
 
         Args:
             agent_name: Name of the agent.
@@ -245,6 +247,36 @@ class AgentFactory:
         #    ResourceSource collection and hot-swap can discover them.
         if isinstance(cfg, NativeAgentConfig):
             caps.extend(cfg.get_tool_providers())
+
+        # 3b. Config-defined capabilities (e.g. Viking, MCP, code mode).
+        #     Built from cfg.capabilities using the same logic as
+        #     NativeAgent.__init__(). These are registered at AGENT scope
+        #     so the ExtensionRegistry has them before any message handling.
+        #     The agent instance builds its own copies in __init__() for
+        #     tool execution — the registry copies are for resource
+        #     resolution and capability discovery.
+        if isinstance(cfg, NativeAgentConfig) and cfg.capabilities:
+            from pydantic import BaseModel as _BaseModel
+
+            from agentpool_config.capabilities import (
+                EntryPointCapabilityConfig,
+                GenericCapabilityConfig,
+                build_capability,
+            )
+
+            for cap_cfg in cfg.capabilities:
+                if cap_cfg is None:
+                    continue
+                if isinstance(cap_cfg, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
+                    built = cap_cfg.build()
+                elif isinstance(cap_cfg, _BaseModel):
+                    from typing import cast as _cast
+
+                    built = build_capability(_cast(Any, cap_cfg))
+                else:
+                    # Pre-instantiated AbstractCapability
+                    built = cap_cfg
+                caps.append(built)
 
         # 4. Team communication capability — shared instance with session_metadata=None.
         #    Per-session instance with actual metadata is created in create_session_agent().
@@ -326,7 +358,7 @@ class AgentFactory:
 
         return resolve_capability_type(type_name, self._entry_point_capabilities)
 
-    async def create_session_agent(  # noqa: PLR0915
+    async def create_session_agent(
         self,
         agent_name: str,
         session_id: str,
@@ -459,18 +491,9 @@ class AgentFactory:
                 session_scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
                 self._pool.extension_registry.register(team_cap, session_scope)
 
-        # Register config-defined capabilities (e.g. Viking) at AGENT scope.
-        # These are eagerly built in NativeAgent.__init__ from the agent's
-        # YAML config and are the same across all sessions. AGENT scope makes
-        # them visible to all registry queries (SESSION scope includes AGENT).
-        from agentpool.agents.native_agent import Agent as _NativeAgent2
-
-        if isinstance(agent, _NativeAgent2) and agent._config_capabilities_built:
-            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
-
-            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
-            for cap in agent._config_capabilities_built:
-                self._pool.extension_registry.register(cap, agent_scope)
+        # Config-defined capabilities (e.g. Viking) are registered at AGENT
+        # scope during pool init in _compile_agent_capabilities(). No
+        # duplicate registration is needed here.
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)

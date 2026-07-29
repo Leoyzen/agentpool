@@ -392,3 +392,109 @@ async def test_extract_user_prompt_mixed_parts() -> None:
     assert result_list[0] == "prefix text"
     assert result_list[1] == '<resource uri="viking://doc">\nresource content\n</resource>'
     assert "researcher" in result_list[2]
+
+
+# =============================================================================
+# Timing bug reproducer — config-defined capabilities not yet in registry
+# =============================================================================
+
+
+async def test_resolve_resource_timing_bug() -> None:
+    """Reproduce: ResourceAccess cap in _all_capabilities but NOT in ExtensionRegistry.
+
+    Uses a real ``AgentPool`` with a ``NativeAgent`` that has a config-defined
+    ``ResourceAccess`` capability (``TestResourceAccessCap``). The capability
+    is eagerly built in ``NativeAgent.__init__()`` and stored in
+    ``_all_capabilities``. However, it is only registered in the
+    ``ExtensionRegistry`` during ``get_agentlet()``, which runs AFTER
+    ``extract_user_prompt_from_parts()`` in the message handling pipeline.
+
+    This test reproduces the production timing issue: before ``get_agentlet()``
+    is called, the ExtensionRegistry does not contain the config-defined
+    capability, so ``_resolve_resource()`` cannot find it.
+
+    Expected behavior after fix: ``_resolve_resource()`` should find the cap
+    even when the registry hasn't registered it yet.
+    """
+    from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
+    from agentpool_config.capabilities import GenericCapabilityConfig
+    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentpool_server.opencode_server.models import FilePartInput
+    from agentpool_server.opencode_server.models.common import TextSpan
+    from agentpool_server.opencode_server.models.parts import ResourceSource
+
+    # Build a real agent config with a GenericCapabilityConfig pointing to
+    # our test ResourceAccess capability.
+    cap_config = GenericCapabilityConfig(
+        type="tests.fixtures.test_resource_cap.TestResourceAccessCap",
+        args={"read_text": "hello world", "read_uri": "test://doc.md"},
+    )
+    agent_config = NativeAgentConfig(
+        name="test_agent",
+        model="test",
+        capabilities=[cap_config],
+    )
+    manifest = AgentsManifest(agents={"test_agent": agent_config})
+
+    async with AgentPool(manifest) as pool:
+        # Create the template agent directly from config.
+        # This populates _config_capabilities_built (eager build in __init__)
+        # but does NOT register them in the ExtensionRegistry — that only
+        # happens in get_agentlet(), which we deliberately do NOT call.
+        from agentpool.agents.native_agent import Agent
+
+        agent = Agent.from_config(
+            agent_config,
+            agent_pool=pool,
+        )
+
+        assert agent._config_capabilities_built, "No config capabilities built"
+
+        # Verify the cap is in _all_capabilities but NOT in the registry
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+        from agentpool.capabilities.resource_protocols import ResourceAccess
+
+        ra_caps = [c for c in agent._all_capabilities if isinstance(c, ResourceAccess)]
+        assert len(ra_caps) >= 1, "No ResourceAccess cap in _all_capabilities"
+
+        host_ctx = agent.host_context
+        assert host_ctx is not None
+        registry = host_ctx.extension_registry
+        assert registry is not None
+        scope = Scope(
+            level=ScopeLevel.SESSION,
+            agent_name="test_agent",
+            session_id="test-session",
+        )
+        registry_caps = registry.get_resource_access(scope)
+        # After the fix, the registry SHOULD have the config-defined cap
+        # at AGENT scope (registered during pool init via factory.compile()).
+        assert len(registry_caps) >= 1, "Registry should have config-defined cap at AGENT scope"
+        assert any(
+            isinstance(c, type(ra_caps[0])) for c in registry_caps
+        ), "Registry should contain the same type of ResourceAccess cap"
+
+        # Verify ResourceCapability is NOT in the registry (it's a tool wrapper,
+        # not a ResourceAccess provider).
+        from agentpool.capabilities.resource_capability import ResourceCapability
+
+        assert not any(
+            isinstance(c, ResourceCapability) for c in registry_caps
+        ), "ResourceCapability should not be in get_resource_access() results"
+
+        # Now test _resolve_resource — should find the resource via the registry.
+        source = ResourceSource(
+            text=TextSpan(value="@test:doc.md", start=0, end=12),
+            client_name="test",
+            uri="test://doc.md",
+        )
+        part = FilePartInput(mime="text/plain", url="", source=source)
+
+        result = await extract_user_prompt_from_parts(
+            [part], "test-session", agent=agent
+        )
+        result_list = list(result)
+
+        # Should resolve the resource content — not drop it silently.
+        assert len(result_list) == 1
+        assert result_list[0] == '<resource uri="test://doc.md">\nhello world\n</resource>'

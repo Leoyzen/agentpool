@@ -1879,20 +1879,25 @@ class TestResourceAccessProtocol:
     async def test_list_resources_success(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        # First call: top-level ls returns files + one directory
-        # Second call: recursive ls of the directory returns more files
-        mock_client.ls = AsyncMock(
-            side_effect=[
-                [
+        # Mock ls returns different results based on URI.
+        # list_resources() now lists from both viking://resources/ and
+        # viking://user/default/sessions/ in parallel.
+        async def mock_ls(uri, **kwargs):
+            if "sessions" in uri:
+                return []  # No sessions in test
+            if uri == "viking://resources/":
+                return [
                     {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
                     {"name": "doc2.txt", "uri": "viking://resources/doc2.txt", "isDir": False},
                     {"name": "subdir", "uri": "viking://resources/subdir", "isDir": True},
-                ],
-                [
+                ]
+            if "subdir" in uri:
+                return [
                     {"name": "doc3.md", "uri": "viking://resources/subdir/doc3.md", "isDir": False},
-                ],
-            ]
-        )
+                ]
+            return []
+
+        mock_client.ls = AsyncMock(side_effect=mock_ls)
         result = await viking_cap.list_resources()
         assert len(result) == 3  # only text files, no directories
         assert result[0].name == "doc1.md"

@@ -118,11 +118,11 @@ def test_base_agent_config_resources_disabled():
 
 
 async def test_resource_capability_registered_after_enter(minimal_pool):
-    """ResourceCapability is registered in ExtensionRegistry after __aenter__.
+    """ResourceCapability is created but NOT registered in ExtensionRegistry.
 
     The pool should have a non-None ``resource_capability`` property,
-    and the ExtensionRegistry should return it from ``get_resource_access``
-    at POOL scope.
+    but it should NOT appear in ``get_resource_access()`` results because
+    it is a tool wrapper, not a ``ResourceAccess`` data provider.
     """
     from agentpool.capabilities.extension_registry import Scope, ScopeLevel
     from agentpool.capabilities.resource_capability import ResourceCapability
@@ -131,11 +131,12 @@ async def test_resource_capability_registered_after_enter(minimal_pool):
     assert pool.resource_capability is not None
     assert isinstance(pool.resource_capability, ResourceCapability)
 
-    # Check it's registered in the ExtensionRegistry at POOL scope
+    # ResourceCapability should NOT be in the ExtensionRegistry.
+    # It's a tool wrapper, not a ResourceAccess provider.
     registry = pool.extension_registry
     pool_scope = Scope(level=ScopeLevel.POOL)
     resource_caps = list(registry.get_resource_access(pool_scope))
-    assert any(isinstance(cap, ResourceCapability) for cap in resource_caps)
+    assert not any(isinstance(cap, ResourceCapability) for cap in resource_caps)
 
 
 async def test_resource_capability_not_registered_before_enter(minimal_manifest):

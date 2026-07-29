@@ -16,12 +16,17 @@ Configuration is via ``VikingCapabilityConfig`` in
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
+
+from agentpool.log import get_logger
+
+logger = get_logger(__name__)
 
 
 if TYPE_CHECKING:
@@ -317,6 +322,7 @@ class VikingCapability(AbstractCapability[Any]):
                     )
             return skills
         except Exception:
+            logger.warning("list_skills failed", exc_info=True)
             return []
 
     async def read_skill(self, name: str) -> str | None:
@@ -334,6 +340,7 @@ class VikingCapability(AbstractCapability[Any]):
             content = await client.read(f"{uri}{name}.md")
             return str(content) if content else None
         except Exception:
+            logger.warning("read_skill failed", name=name, exc_info=True)
             return None
 
     async def skill_exists(self, name: str) -> bool:
@@ -362,6 +369,7 @@ class VikingCapability(AbstractCapability[Any]):
                     return True
             return False
         except Exception:
+            logger.warning("skill_exists failed", name=name, exc_info=True)
             return False
 
     # ---- ResourceAccess Protocol (Phase 5) ----
@@ -387,9 +395,7 @@ class VikingCapability(AbstractCapability[Any]):
             return self.sessions_uri
         return f"viking://user/{self.user or 'default'}/sessions/"
 
-    async def _list_resource_entries_from_uri(
-        self, client: Any, uri: str
-    ) -> list[ResourceEntry]:
+    async def _list_resource_entries_from_uri(self, client: Any, uri: str) -> list[ResourceEntry]:
         """Recursively list files under a single Viking URI.
 
         Performs a per-directory recursive ``client.ls()`` to work around
@@ -499,6 +505,7 @@ class VikingCapability(AbstractCapability[Any]):
 
             return resources
         except Exception:
+            logger.warning("list_resources failed", exc_info=True)
             return []
 
     async def read_resource(
@@ -549,6 +556,7 @@ class VikingCapability(AbstractCapability[Any]):
                 )
             ]
         except Exception:
+            logger.warning("read_resource failed", uri=uri, exc_info=True)
             return None
 
     async def resource_exists(self, uri: str) -> bool:
@@ -573,6 +581,7 @@ class VikingCapability(AbstractCapability[Any]):
                     return True
             return False
         except Exception:
+            logger.warning("resource_exists failed", uri=uri, exc_info=True)
             return False
 
     # ---- Multimodal Bridge (Phase 6) ----
@@ -728,6 +737,7 @@ class VikingCapability(AbstractCapability[Any]):
             await client.write(uri, b64_data, mode="create")
             return uri
         except Exception:
+            logger.warning("_upload_binary failed", uri=uri, exc_info=True)
             return None
 
 
