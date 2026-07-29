@@ -737,7 +737,7 @@ class VikingCapability(AbstractCapability[Any]):
             await client.write(uri, b64_data, mode="create")
             return uri
         except Exception:
-            logger.warning("_upload_binary failed", uri=uri, exc_info=True)
+            logger.warning("_upload_binary failed", exc_info=True)
             return None
 
 

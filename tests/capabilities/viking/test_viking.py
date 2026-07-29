@@ -1347,7 +1347,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_ensure_client_lazy_init(self) -> None:
         """_ensure_client lazily initializes the SDK client when not set."""
-        cap = VikingCapability(mode="all")
+        cap = VikingCapability(mode="all", url="https://dummy.example.com")
         # _ensure_client should create a client (lazy init), not raise.
         client = await cap._ensure_client()
         assert client is not None
