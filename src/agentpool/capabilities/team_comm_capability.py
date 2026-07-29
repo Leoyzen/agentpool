@@ -56,7 +56,7 @@ import contextlib
 import datetime
 import json
 import tempfile
-from typing import TYPE_CHECKING, Annotated, Any, cast, override
+from typing import TYPE_CHECKING, Annotated, Any, override
 import uuid
 
 from pydantic.fields import Field
@@ -226,8 +226,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContext:
         """Extract AgentContext from a pydantic-ai RunContext.
 
-        In production, PydanticAI wraps our AgentContext inside
-        ``agents.context.AgentContext.data``. This method unwraps it.
+        Delegates to the shared ``resolve_agent_context_from_deps`` utility
+        which handles both the production path (``RuntimeAgentContext.data``)
+        and the test path (direct ``AgentContext``).
 
         Args:
             ctx: The RunContext passed to a tool function.
@@ -238,27 +239,9 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         Raises:
             RuntimeError: If ``ctx.deps`` is None or AgentContext is not found.
         """
-        from agentpool.capabilities.agent_context import AgentContext
+        from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
-        deps = ctx.deps
-        if deps is None:
-            msg = "TeamCommCapability requires AgentContext as deps. Got: None"
-            raise RuntimeError(msg)
-        # In production, deps is agents.context.AgentContext (PydanticAI runtime
-        # context). Our capabilities.agent_context.AgentContext is stored at
-        # deps.data, set by NativeTurn (turn.py: agent_deps.data = run_ctx.deps).
-        from agentpool.agents.context import AgentContext as RuntimeAgentContext
-
-        if isinstance(deps, RuntimeAgentContext):
-            inner = deps.data
-            if inner is None:
-                msg = "TeamCommCapability requires AgentContext at deps.data. Got: None"
-                raise RuntimeError(msg)
-            return cast(AgentContext, inner)
-        # In tests, deps may be directly our AgentContext or a MagicMock(spec=AgentContext).
-        if isinstance(deps, AgentContext):
-            return deps
-        return cast(AgentContext, deps)
+        return resolve_agent_context_from_deps(ctx.deps, capability_name="TeamCommCapability")
 
     def _get_team_state(self, agent_ctx: AgentContext) -> FileTeamState | None:
         """Create a FileTeamState for the current team, or None if not in a team.

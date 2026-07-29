@@ -153,26 +153,22 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
 def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
     """Extract the ``AgentContext`` from the run context deps.
 
+    Delegates to the shared ``resolve_agent_context_from_deps`` utility
+    which handles both the production path (``RuntimeAgentContext.data``)
+    and the test path (direct ``AgentContext``).
+
     Args:
         ctx: The pydantic-ai run context.
 
     Returns:
-        The ``AgentContext`` instance from ``ctx.deps``.
+        The ``AgentContext`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
 
     Raises:
-        RuntimeError: If deps is not an ``AgentContext``.
+        RuntimeError: If deps is None or AgentContext is not found.
     """
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
-    deps = ctx.deps
-    if isinstance(deps, AgentContext):
-        return deps
-    msg = (
-        "SubagentCapability requires AgentContext as deps with a "
-        "'delegation' field. "
-        f"Got: {type(deps).__name__}"
-    )
-    raise RuntimeError(msg)
+    return resolve_agent_context_from_deps(ctx.deps, capability_name="SubagentCapability")
 
 
 # Kept for backward compatibility — callers that import
