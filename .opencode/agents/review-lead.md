@@ -1,7 +1,7 @@
 ---
 description: "PR review coordinator — delegates to code and docs specialists"
 mode: primary
-model: deepseek/deepseek-chat
+model: deepseek/deepseek-v4-flash
 temperature: 0.2
 permissions:
   - action: edit

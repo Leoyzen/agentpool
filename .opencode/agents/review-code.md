@@ -2,7 +2,7 @@
 description: "Code review specialist for type safety, testing, and regressions"
 mode: subagent
 hidden: true
-model: deepseek/deepseek-chat
+model: deepseek/deepseek-v4-flash
 temperature: 0.1
 permissions:
   - action: edit
