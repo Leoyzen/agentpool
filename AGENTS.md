@@ -301,7 +301,7 @@ Model API
 
 For `before_model_request`, the same ordering applies: ModalityFilter runs first (inner), then DCP's pruning runs on the already-filtered history.
 
-**Auto-injection**: `AgentFactory.get_agentlet()` auto-injects a `ModalityFilterCapability` when the resolved model capabilities indicate any unsupported input modality. If the user has already configured one in `capabilities:` config, the auto-injection populates the existing instance with resolved capabilities instead of creating a duplicate. This ensures user-configured strategy overrides (e.g. `drop` instead of `describe`) are preserved.
+**Explicit configuration**: `ModalityFilterCapability` requires explicit YAML configuration (`type: modality_filter`). It is NOT auto-injected by `get_agentlet()`. When configured, `get_agentlet()` populates the existing instance with resolved model capabilities. This ensures user-configured strategy overrides (e.g. `drop` instead of `describe`) are preserved.
 
 YAML-level user config:
 
@@ -1366,7 +1366,7 @@ model:
     document_input: true   # Explicitly enable document input
 ```
 
-When capabilities are set to `false`, `ModalityFilterCapability` is auto-injected to degrade unsupported multimodal content. See [Model Capabilities and Modality Filter](#model-capabilities-and-modality-filter) for details.
+When capabilities are set to `false`, a user-configured `ModalityFilterCapability` (via `type: modality_filter` in YAML) degrades unsupported multimodal content. See [Model Capabilities and Modality Filter](#model-capabilities-and-modality-filter) for details.
 
 ### Entry Points
 The project uses entry points for extensibility:

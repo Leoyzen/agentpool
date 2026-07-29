@@ -9,7 +9,6 @@ Tests cover:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from pydantic_ai.models.test import TestModel
@@ -318,8 +317,12 @@ async def test_resolve_capabilities_called_for_string_model() -> None:
 
 
 @pytest.mark.integration
-async def test_fallback_model_calls_resolve_for_each_sub_model() -> None:
-    """FallbackModelConfig should call resolve_capabilities for each sub-model."""
+async def test_fallback_model_does_not_call_resolve_per_sub_model() -> None:
+    """FallbackModelConfig should NOT call resolve_capabilities per sub-model.
+
+    Fallback models use declared capabilities directly without per-model
+    cache lookups or intersection.
+    """
     config = NativeAgentConfig(
         model=FallbackModelConfig(
             models=["openai:gpt-4o", "anthropic:claude-sonnet-4-5"],
@@ -328,27 +331,22 @@ async def test_fallback_model_calls_resolve_for_each_sub_model() -> None:
     )
     agent = Agent(name="test", model="test", agent_config=config)
 
-    # Each sub-model resolves to all-True (so no filter needed).
-    mock_caps = _all_true_caps()
     with patch(
         "agentpool.host.stubs.resolve_capabilities",
         new_callable=AsyncMock,
-        return_value=mock_caps,
     ) as mock_resolve:
         await agent.get_agentlet(model=None, output_type=str)
-        assert mock_resolve.call_count == 2
-        call_names = [call.args[0] for call in mock_resolve.call_args_list]
-        assert "openai:gpt-4o" in call_names
-        assert "anthropic:claude-sonnet-4-5" in call_names
+        # FallbackModelConfig returns declared caps directly — no per-model resolution.
+        assert mock_resolve.call_count == 0
 
 
 @pytest.mark.integration
-async def test_fallback_model_user_filter_populated_with_intersection() -> None:
-    """Fallback with user-configured modality_filter: resolved caps are intersection.
+async def test_fallback_model_user_filter_gets_declared_caps() -> None:
+    """Fallback with user-configured modality_filter: gets declared caps directly.
 
-    When the user explicitly configures ``type: modality_filter`` and
-    uses a FallbackModelConfig, the factory populates the capability with
-    the pessimistic intersection of all sub-models' resolved capabilities.
+    No per-model intersection is computed. When declared caps are all None
+    (default), the ModalityFilterCapability receives all-None capabilities.
+    _is_modality_supported() treats None as unsupported (text-only behavior).
     """
     user_filter = ModalityFilterCapability(
         capabilities=None,
@@ -367,27 +365,9 @@ async def test_fallback_model_user_filter_populated_with_intersection() -> None:
         capabilities=[user_filter],
     )
 
-    # gpt-4o has image, gpt-3.5-turbo does not -> intersection = False.
-    async def mock_resolve(name: str, declared: Any) -> ModelCapabilities:
-        if "gpt-4o" in name:
-            return ModelCapabilities(
-                image_input=True,
-                audio_input=True,
-                video_input=False,
-                document_input=False,
-                image_output=False,
-            )
-        return ModelCapabilities(
-            image_input=False,
-            audio_input=True,
-            video_input=False,
-            document_input=False,
-            image_output=False,
-        )
-
     with patch(
         "agentpool.host.stubs.resolve_capabilities",
-        side_effect=mock_resolve,
+        new_callable=AsyncMock,
     ):
         pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
         filter_caps = [
@@ -396,6 +376,151 @@ async def test_fallback_model_user_filter_populated_with_intersection() -> None:
             if isinstance(cap, ModalityFilterCapability)
         ]
         assert len(filter_caps) == 1
-        # Intersection: gpt-4o=True, gpt-3.5=False -> False (pessimistic).
+        # Declared caps are all None (from _caps()) — no intersection.
         assert filter_caps[0].capabilities is not None
-        assert filter_caps[0].capabilities.image_input is False
+        assert filter_caps[0].capabilities.image_input is None
+
+
+# ---------------------------------------------------------------------------
+# Cache-only resolution: no tokonomics queries at agent creation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+async def test_agent_creation_no_tokonomics_query_for_custom_model() -> None:
+    """Agent creation with a custom model should not initiate tokonomics queries.
+
+    No error log, no network call — defaults to text-only caps.
+    """
+    config = NativeAgentConfig(
+        model=StringModelConfig(identifier="wolf-ai:kimi-k2"),
+    )
+    agent = Agent(name="test", model="test", agent_config=config)
+
+    with patch(
+        "agentpool.host.stubs.CapabilityCache.get_capability",
+        new_callable=AsyncMock,
+    ) as mock_get:
+        pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
+        # get_capability (async, initiates queries) must NOT be called.
+        mock_get.assert_not_called()
+        # No ModalityFilterCapability configured, so none should exist.
+        filter_caps = [
+            cap
+            for cap in pydantic_agent.root_capability.capabilities
+            if isinstance(cap, ModalityFilterCapability)
+        ]
+        assert len(filter_caps) == 0
+
+
+@pytest.mark.integration
+async def test_agent_creation_uses_cached_values() -> None:
+    """Agent creation should use cached capability values when available."""
+    from agentpool.host.stubs import _get_default_cache
+
+    cache = _get_default_cache()
+    # Pre-populate cache for the model.
+    cache._cache["openai:gpt-4o:image_input"] = True
+    cache._cache["openai:gpt-4o:audio_input"] = True
+    cache._cache["openai:gpt-4o:video_input"] = False
+    cache._cache["openai:gpt-4o:document_input"] = False
+    cache._cache["openai:gpt-4o:image_output"] = False
+
+    config = NativeAgentConfig(
+        model=StringModelConfig(identifier="openai:gpt-4o"),
+    )
+    user_filter = ModalityFilterCapability(capabilities=None)
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        capabilities=[user_filter],
+    )
+
+    pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
+    filter_caps = [
+        cap
+        for cap in pydantic_agent.root_capability.capabilities
+        if isinstance(cap, ModalityFilterCapability)
+    ]
+    assert len(filter_caps) == 1
+    assert filter_caps[0].capabilities.image_input is True
+    assert filter_caps[0].capabilities.audio_input is True
+    assert filter_caps[0].capabilities.video_input is False
+
+
+# ---------------------------------------------------------------------------
+# Model variant capability resolution
+# ---------------------------------------------------------------------------
+
+
+def test_get_declared_capabilities_from_model_variant() -> None:
+    """_get_declared_capabilities reads from resolved_model_config (variant)."""
+    variant_caps = ModelCapabilities(image_input=True, audio_input=False)
+    variant_config = StringModelConfig(
+        identifier="openai:gpt-4o",
+        capabilities=variant_caps,
+    )
+    config = NativeAgentConfig(
+        model=StringModelConfig(identifier="my_variant"),
+    )
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        resolved_model_config=variant_config,
+    )
+    caps = agent._get_declared_capabilities()
+    assert caps is not None
+    assert caps.image_input is True
+    assert caps.audio_input is False
+
+
+def test_get_declared_capabilities_variant_without_caps() -> None:
+    """Variant without capabilities returns None."""
+    variant_config = StringModelConfig(identifier="openai:gpt-4o")
+    config = NativeAgentConfig(
+        model=StringModelConfig(identifier="my_variant"),
+    )
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        resolved_model_config=variant_config,
+    )
+    caps = agent._get_declared_capabilities()
+    assert caps is None
+
+
+def test_get_declared_capabilities_falls_back_to_config_model() -> None:
+    """When _resolved_model_config is None, falls back to self.config.model."""
+    config = NativeAgentConfig(
+        model=StringModelConfig(
+            identifier="openai:gpt-4o",
+            capabilities=ModelCapabilities(image_input=True),
+        ),
+    )
+    agent = Agent(
+        name="test",
+        model="test",
+        agent_config=config,
+        resolved_model_config=None,
+    )
+    caps = agent._get_declared_capabilities()
+    assert caps is not None
+    assert caps.image_input is True
+
+
+# ---------------------------------------------------------------------------
+# _apply_image_output_profile with text-only defaults
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_image_output_profile_false_no_crash() -> None:
+    """_apply_image_output_profile with image_output=False should not crash."""
+    agent = Agent(name="test", model="test")
+    caps = ModelCapabilities(image_output=False)
+    model = TestModel()
+    result = agent._apply_image_output_profile(model, caps)
+    assert result is model
+    assert result.profile.get("supports_image_output") is False

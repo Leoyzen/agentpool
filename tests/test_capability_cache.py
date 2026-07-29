@@ -190,7 +190,7 @@ async def test_single_flight_different_keys_run_concurrently() -> None:
 
 @pytest.mark.asyncio
 async def test_fallback_image_input_default_when_no_data() -> None:
-    """image_input defaults to True (optimistic) when tokonomics has no data."""
+    """image_input defaults to False (text-only) when tokonomics has no data."""
     cache = CapabilityCache()
     declared = ModelCapabilities()
 
@@ -201,12 +201,12 @@ async def test_fallback_image_input_default_when_no_data() -> None:
     ):
         resolved = await resolve_capabilities("unknown:model", declared, cache=cache)
 
-    assert resolved.image_input is True
+    assert resolved.image_input is False
 
 
 @pytest.mark.asyncio
 async def test_fallback_audio_input_default_when_no_data() -> None:
-    """audio_input defaults to True (optimistic) when tokonomics has no data."""
+    """audio_input defaults to False (text-only) when tokonomics has no data."""
     cache = CapabilityCache()
     declared = ModelCapabilities()
 
@@ -217,7 +217,7 @@ async def test_fallback_audio_input_default_when_no_data() -> None:
     ):
         resolved = await resolve_capabilities("unknown:model", declared, cache=cache)
 
-    assert resolved.audio_input is True
+    assert resolved.audio_input is False
 
 
 @pytest.mark.asyncio
@@ -297,8 +297,8 @@ async def test_fallback_all_defaults_when_tokonomics_errors() -> None:
     ):
         resolved = await resolve_capabilities("openai:gpt-4o", declared, cache=cache)
 
-    assert resolved.image_input is True
-    assert resolved.audio_input is True
+    assert resolved.image_input is False
+    assert resolved.audio_input is False
     assert resolved.video_input is False
     assert resolved.document_input is False
     assert resolved.image_output is False
@@ -527,8 +527,8 @@ async def test_tokonomics_exception_returns_none_and_uses_default() -> None:
     ):
         resolved = await resolve_capabilities("openai:gpt-4o", declared, cache=cache)
 
-    # Exception caught, None returned, optimistic default applied.
-    assert resolved.image_input is True
+    # Exception caught, None returned, text-only default applied.
+    assert resolved.image_input is False
 
 
 @pytest.mark.asyncio
@@ -537,3 +537,181 @@ async def test_get_capability_returns_none_for_image_output() -> None:
     cache = CapabilityCache()
     result = await cache.get_capability("openai:gpt-4o", "image_output")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# get_cached_only() — synchronous cache-only read
+# ---------------------------------------------------------------------------
+
+
+def test_get_cached_only_returns_cached_value() -> None:
+    """get_cached_only returns the cached value when present."""
+    cache = CapabilityCache()
+    cache._cache["openai:gpt-4o:image_input"] = True
+    assert cache.get_cached_only("openai:gpt-4o", "image_input") is True
+
+
+def test_get_cached_only_returns_none_on_miss() -> None:
+    """get_cached_only returns None when key is not in cache."""
+    cache = CapabilityCache()
+    assert cache.get_cached_only("unknown:model", "image_input") is None
+
+
+def test_get_cached_only_no_side_effects() -> None:
+    """get_cached_only does not modify the cache or initiate queries."""
+    cache = CapabilityCache()
+    result = cache.get_cached_only("openai:gpt-4o", "image_input")
+    assert result is None
+    assert "openai:gpt-4o:image_input" not in cache._cache
+    assert len(cache._inflight) == 0
+
+
+def test_get_cached_only_case_insensitive() -> None:
+    """get_cached_only normalizes model name to lowercase."""
+    cache = CapabilityCache()
+    cache._cache["openai:gpt-4o:image_input"] = True
+    assert cache.get_cached_only("openai:GPT-4O", "image_input") is True
+
+
+# ---------------------------------------------------------------------------
+# populate_cache_from_model_info() — passive cache population
+# ---------------------------------------------------------------------------
+
+
+def _make_full_model_info(
+    *,
+    model_id: str = "gpt-4o",
+    pydantic_ai_id: str = "openai:gpt-4o",
+    input_modalities: set[str] | None = None,
+    output_modalities: set[str] | None = None,
+) -> MagicMock:
+    """Build a mock tokonomics ModelInfo with all modality fields."""
+    info = MagicMock()
+    info.id = model_id
+    info.pydantic_ai_id = pydantic_ai_id
+    info.input_modalities = input_modalities if input_modalities is not None else {"text", "image"}
+    info.output_modalities = output_modalities if output_modalities is not None else {"text"}
+    return info
+
+
+def test_populate_cache_extracts_modalities_correctly() -> None:
+    """populate_cache_from_model_info stores correct modality booleans."""
+    cache = CapabilityCache()
+    model_info = _make_full_model_info(
+        input_modalities={"text", "image", "audio", "video", "file"},
+        output_modalities={"text", "image"},
+    )
+    cache.populate_cache_from_model_info(model_info)
+    assert cache.get_cached_only("gpt-4o", "image_input") is True
+    assert cache.get_cached_only("gpt-4o", "audio_input") is True
+    assert cache.get_cached_only("gpt-4o", "video_input") is True
+    assert cache.get_cached_only("gpt-4o", "document_input") is True
+    assert cache.get_cached_only("gpt-4o", "image_output") is True
+
+
+def test_populate_cache_pdf_maps_to_document_input() -> None:
+    """'pdf' in input_modalities maps to document_input=True."""
+    cache = CapabilityCache()
+    model_info = _make_full_model_info(input_modalities={"text", "pdf"})
+    cache.populate_cache_from_model_info(model_info)
+    assert cache.get_cached_only("gpt-4o", "document_input") is True
+
+
+def test_populate_cache_stores_under_both_id_and_pydantic_ai_id() -> None:
+    """Cache stores under both model_info.id and model_info.pydantic_ai_id."""
+    cache = CapabilityCache()
+    model_info = _make_full_model_info(
+        model_id="gpt-4o",
+        pydantic_ai_id="openai:gpt-4o",
+        input_modalities={"text", "image"},
+    )
+    cache.populate_cache_from_model_info(model_info)
+    assert cache.get_cached_only("gpt-4o", "image_input") is True
+    assert cache.get_cached_only("openai:gpt-4o", "image_input") is True
+
+
+def test_populate_cache_handles_missing_modalities_fields() -> None:
+    """populate_cache handles ModelInfo with None modalities gracefully."""
+    cache = CapabilityCache()
+    model_info = MagicMock()
+    model_info.id = "test-model"
+    model_info.pydantic_ai_id = "test-provider:test-model"
+    model_info.input_modalities = None
+    model_info.output_modalities = None
+    cache.populate_cache_from_model_info(model_info)
+    # All modalities should be False when input/output modalities are None/empty.
+    assert cache.get_cached_only("test-model", "image_input") is False
+    assert cache.get_cached_only("test-model", "image_output") is False
+
+
+def test_populate_cache_handles_missing_attributes() -> None:
+    """populate_cache handles ModelInfo missing required attributes gracefully."""
+    cache = CapabilityCache()
+    # Object without id/pydantic_ai_id attributes.
+    cache.populate_cache_from_model_info(object())  # type: ignore[arg-type]
+    # No crash, no data stored.
+    assert len(cache._cache) == 0
+
+
+# ---------------------------------------------------------------------------
+# resolve_capabilities(cache_only=True) — cache-only resolution
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_capabilities_cache_only_uses_cache() -> None:
+    """cache_only=True reads from cache without initiating queries."""
+    cache = CapabilityCache()
+    cache._cache["openai:gpt-4o:image_input"] = True
+    cache._cache["openai:gpt-4o:audio_input"] = False
+    cache._cache["openai:gpt-4o:video_input"] = False
+    cache._cache["openai:gpt-4o:document_input"] = False
+    cache._cache["openai:gpt-4o:image_output"] = False
+    declared = ModelCapabilities()
+    resolved = await resolve_capabilities(
+        "openai:gpt-4o", declared, cache=cache, cache_only=True,
+    )
+    assert resolved.image_input is True
+    assert resolved.audio_input is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_capabilities_cache_only_miss_defaults_to_false() -> None:
+    """cache_only=True defaults to False on cache miss."""
+    cache = CapabilityCache()
+    declared = ModelCapabilities()
+    resolved = await resolve_capabilities(
+        "unknown:model", declared, cache=cache, cache_only=True,
+    )
+    assert resolved.image_input is False
+    assert resolved.audio_input is False
+    assert resolved.video_input is False
+    assert resolved.document_input is False
+    assert resolved.image_output is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_capabilities_cache_only_no_network_calls() -> None:
+    """cache_only=True must not call get_capability (which initiates queries)."""
+    cache = CapabilityCache()
+    declared = ModelCapabilities()
+    with patch.object(
+        cache, "get_capability", new_callable=AsyncMock,
+    ) as mock_get:
+        await resolve_capabilities(
+            "openai:gpt-4o", declared, cache=cache, cache_only=True,
+        )
+        mock_get.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resolve_capabilities_cache_only_preserves_explicit_values() -> None:
+    """cache_only=True preserves explicit (non-None) declared values."""
+    cache = CapabilityCache()
+    cache._cache["openai:gpt-4o:image_input"] = True
+    declared = ModelCapabilities(image_input=False, audio_input=None)
+    resolved = await resolve_capabilities(
+        "openai:gpt-4o", declared, cache=cache, cache_only=True,
+    )
+    assert resolved.image_input is False  # explicit override preserved
+    assert resolved.audio_input is False  # cache miss -> False default
