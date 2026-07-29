@@ -1563,10 +1563,10 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
                 with tarfile.open(fileobj=io.BytesIO(tgz_data), mode="r:gz") as tar:
                     snapshot_file = tar.extractfile("package/dist/snapshot.js")
-                if snapshot_file is None:
-                    self.log.warning("snapshot.js not found in npmmirror tarball")
-                    return None
-                snapshot_content = snapshot_file.read().decode("utf-8")
+                    if snapshot_file is None:
+                        self.log.warning("snapshot.js not found in npmmirror tarball")
+                        return None
+                    snapshot_content = snapshot_file.read().decode("utf-8")
 
                 match = re.search(r'JSON\.parse\("(.+?)"\)', snapshot_content, re.DOTALL)
                 if match is None:
