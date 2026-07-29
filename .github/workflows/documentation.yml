@@ -41,7 +41,7 @@ jobs:
           uv sync --all-extras
       # NOTE: GitHub Pages must be enabled in repo Settings → Pages → Source: GitHub Actions
       - name: Build site
-        run: uv run mkdocs build
+        run: uv run --group docs zensical build
       - name: Generate JSON Schema HTML documentation
         run: |
           mkdir -p site/schema

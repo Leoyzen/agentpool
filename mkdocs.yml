@@ -50,7 +50,7 @@ theme:
     - navigation.indexes # documents can be directly attached to sections (overview pages)
     - navigation.footer # next/previous page buttons in footer
     - navigation.top # adds back-to-top button
-    - navigation.sections # top-level sections are rendered as groups
+    # - navigation.sections # top-level sections are rendered as groups
     # - navigation.expand # expand all subsections in left sidebar by default
     - toc.follow # makes toc follow scrolling
     # - toc.integrate  # integrates toc into left menu
@@ -175,29 +175,36 @@ nav:
           - User Interaction: how-to/configuration/toolsets/user-interaction.md
           - VFS: how-to/configuration/toolsets/vfs.md
           - Workers: how-to/configuration/toolsets/workers.md
-      - AI Models: how-to/configuration/model.md
-      - Built-in Tools: how-to/configuration/builtin-tools.md
-      - Commands: how-to/configuration/commands.md
-      - Conditions: how-to/configuration/conditions.md
-      - Connections: how-to/configuration/connections.md
-      - Event Handlers: how-to/configuration/events.md
-      - Event Sources: how-to/configuration/event-sources.md
-      - Execution Environments: how-to/configuration/execution-environments.md
-      - Hooks: how-to/configuration/hooks.md
-      - Inheritance: how-to/configuration/inheritance.md
-      - Knowledge Sources: how-to/configuration/knowledge.md
-      - MCP Servers: how-to/configuration/mcp.md
-      - Observability: how-to/configuration/observability.md
-      - Prompt Hubs: how-to/configuration/prompt-hubs.md
-      - Prompts: how-to/configuration/prompts.md
-      - Resources: how-to/configuration/resources.md
-      - Response Types: how-to/configuration/responses.md
-      - Sessions: how-to/configuration/session.md
-      - Skills: how-to/configuration/skills.md
-      - Storage: how-to/configuration/storage.md
-      - Tasks: how-to/configuration/tasks.md
-      - Path Resolution: how-to/configuration/path-resolution.md
-      - Skill URI Usage: how-to/configuration/skill-uri-usage.md
+      - Models & Tools:
+          - AI Models: how-to/configuration/model.md
+          - Built-in Tools: how-to/configuration/builtin-tools.md
+      - Events & Hooks:
+          - Event Handlers: how-to/configuration/events.md
+          - Event Sources: how-to/configuration/event-sources.md
+          - Hooks: how-to/configuration/hooks.md
+      - Behavior:
+          - Commands: how-to/configuration/commands.md
+          - Conditions: how-to/configuration/conditions.md
+          - Tasks: how-to/configuration/tasks.md
+          - Sessions: how-to/configuration/session.md
+      - Data & Storage:
+          - Knowledge Sources: how-to/configuration/knowledge.md
+          - Storage: how-to/configuration/storage.md
+          - Observability: how-to/configuration/observability.md
+      - Integrations:
+          - MCP Servers: how-to/configuration/mcp.md
+          - Skills: how-to/configuration/skills.md
+          - Skill URI Usage: how-to/configuration/skill-uri-usage.md
+          - Resources: how-to/configuration/resources.md
+      - Prompts & Responses:
+          - Prompts: how-to/configuration/prompts.md
+          - Prompt Hubs: how-to/configuration/prompt-hubs.md
+          - Response Types: how-to/configuration/responses.md
+      - Structural:
+          - Connections: how-to/configuration/connections.md
+          - Inheritance: how-to/configuration/inheritance.md
+          - Path Resolution: how-to/configuration/path-resolution.md
+          - Execution Environments: how-to/configuration/execution-environments.md
   - Core Concepts:
       - Overview: reference/core-concepts/index.md
       - Agent Pool: reference/core-concepts/agent-pool.md
