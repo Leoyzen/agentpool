@@ -65,6 +65,40 @@ documentation. You do NOT edit files.
    - Internal documentation links in `AGENTS.md` and `docs/` should not be broken
      by file moves or renames.
 
+7. **Document Placement (per `docs/meta/documentation-guide.md`)**
+   - New `.md` files MUST be placed in the correct directory per the placement
+     table in `docs/meta/documentation-guide.md`. Read that file first.
+   - Common placement rules:
+     - How-to guides → `docs/how-to/`
+     - Tutorials → `docs/tutorials/`
+     - Architecture explanations → `docs/explanation/`
+     - API/config reference → `docs/reference/`
+     - ADRs → `docs/adr/` (use `TEMPLATE.md`)
+     - RCs → `docs/rfcs/draft/`
+     - Bug reports → `docs/records/bugs/`
+     - RCAs → `docs/records/rca/`
+     - Audit reports → `docs/records/audit/`
+   - New top-level directories under `docs/` are FORBIDDEN. Flag any violation.
+   - If a new doc file's content doesn't match its directory, flag it with the
+     correct location suggestion.
+
+8. **Document Archival Detection**
+   - Docs referencing deprecated/removed features, stale APIs, or deleted modules
+     SHOULD be flagged for archival or update.
+   - Check if any modified doc references files, modules, or functions that no
+     longer exist in the codebase (stale references).
+   - If a doc file hasn't been modified in a long time AND its content describes
+     a feature that has since been significantly changed or removed, flag it as
+     a candidate for archival (move to `docs/archive/` or update).
+   - Duplicate content between `AGENTS.md` and `docs/` should be flagged —
+     `docs/` is the source of truth, `AGENTS.md` should be a thin pointer.
+
+9. **Navigation Consistency (mkdocs)**
+   - New `docs/` pages MUST be added to `mkdocs.yml` nav section.
+   - If a doc file is moved or renamed, `mkdocs.yml` nav MUST be updated.
+   - Consider adding `icon` frontmatter for CLI reference pages (e.g.
+     `icon: material/play`).
+
 ## Decision Questions
 
 Before flagging a documentation gap, ask:
