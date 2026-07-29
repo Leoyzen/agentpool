@@ -491,6 +491,7 @@ async def _route_message_locked(  # noqa: PLR0915
     # --- Extract user prompt ---
     user_prompt = await extract_user_prompt_from_parts(
         request.parts,
+        session_id,
         fs=state.fs,
         agent=state.agent,
     )
@@ -1038,6 +1039,7 @@ async def send_message_async(session_id: str, request: MessageRequest, state: St
 
             user_prompt = await extract_user_prompt_from_parts(
                 request.parts,
+                session_id,
                 fs=state.fs,
                 agent=state.agent,
             )
