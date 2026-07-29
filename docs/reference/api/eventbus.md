@@ -1,3 +1,7 @@
+---
+icon: material/transit-connection-variant
+---
+
 # EventBus and SessionController API Reference
 
 ## EventBus

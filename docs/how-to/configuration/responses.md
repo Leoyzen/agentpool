@@ -1,6 +1,7 @@
 ---
 title: Response Types
 description: Structured response type configuration
+icon: material/format-list-checks
 ---
 
 Response types define structured output formats for agents. They can be defined directly in YAML or imported from Python code.

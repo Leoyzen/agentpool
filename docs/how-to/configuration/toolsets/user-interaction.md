@@ -1,6 +1,7 @@
 ---
 title: User Interaction Toolset
 description: Interact with users via forms and questions
+icon: material/account-question
 ---
 
 # User Interaction Toolset

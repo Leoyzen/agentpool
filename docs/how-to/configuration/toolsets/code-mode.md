@@ -1,6 +1,7 @@
 ---
 title: Code Mode Toolset
 description: Wrap toolsets for code-based interaction
+icon: material/code-block-tags
 ---
 
 # Code Mode Toolset

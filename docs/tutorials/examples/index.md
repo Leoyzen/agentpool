@@ -2,6 +2,7 @@
 title: Examples
 description: Example configurations and usage patterns for AgentPool
 order: 5
+icon: material/application
 ---
 
 # Examples

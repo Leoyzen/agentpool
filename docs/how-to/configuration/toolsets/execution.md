@@ -1,6 +1,7 @@
 ---
 title: Execution Environment Toolset
 description: Execute code and commands
+icon: material/console
 ---
 
 # Execution Environment Toolset

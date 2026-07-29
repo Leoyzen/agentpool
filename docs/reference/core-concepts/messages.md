@@ -1,6 +1,7 @@
 ---
 title: Messages and Responses
 description: Message types and response handling
+icon: material/message-text
 ---
 
 AgentPool's messaging system provides a unified way to handle communication between agents and teams. The system is built around two core concepts:

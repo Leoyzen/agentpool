@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/nodes.py
 title: Agent
 description: Agent configuration options
+icon: material/robot
 ---
 
 Individual agent configurations define the behavior, capabilities, and settings for each agent in your manifest. Each agent entry in the `agents` dictionary represents a complete agent setup.

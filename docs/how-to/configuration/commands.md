@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/commands.py
 title: Commands
 description: Slash command configuration
+icon: material/slash-forward-box
 ---
 
 Commands (slash commands) provide reusable prompt templates that can be invoked during conversations. They allow you to define frequently used prompts with parameters.

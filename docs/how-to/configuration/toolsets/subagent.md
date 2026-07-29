@@ -1,6 +1,7 @@
 ---
 title: Subagent Toolset
 description: Delegate tasks to other agents
+icon: material/account-switch
 ---
 
 # Subagent Toolset

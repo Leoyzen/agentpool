@@ -2,6 +2,7 @@
 title: CLI
 description: Command-line interface overview
 order: 4
+icon: material/console
 ---
 
 The AgentPool CLI provides a comprehensive set of commands to manage and interact with AI agents.

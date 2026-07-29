@@ -1,6 +1,7 @@
 ---
 title: Tools and Tool Management
 description: Tool management and registration
+icon: material/wrench
 ---
 
 ## Overview

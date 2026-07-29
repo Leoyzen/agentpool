@@ -1,6 +1,7 @@
 ---
 title: MCP Servers
 description: Advanced MCP server features
+icon: material/server-network
 ---
 
 # MCP Server Integration

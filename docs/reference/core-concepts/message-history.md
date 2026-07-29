@@ -1,6 +1,7 @@
 ---
 title: Message history
 description: Message history and management
+icon: material/history
 ---
 
 ## Overview

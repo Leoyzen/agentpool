@@ -5,6 +5,7 @@ sync:
     - src/agentpool/models/acp_agents.py
 title: ACP Agents
 description: External ACP agent integration
+icon: material/link-variant
 ---
 
 ACP (Agent Communication Protocol) agents allow integration of external coding agents and AI assistants into the AgentPool pool. These agents run as separate processes and communicate via the ACP protocol.

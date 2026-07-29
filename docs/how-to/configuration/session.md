@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/session.py
 title: Sessions
 description: Session management and configuration
+icon: material/account-clock
 ---
 
 Session configuration allows loading previous conversations and managing agent state. Sessions can be identified by name or configured using detailed query parameters.

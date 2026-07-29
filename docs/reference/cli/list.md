@@ -1,6 +1,7 @@
 ---
 title: list
 description: Show agents from configuration
+icon: material/format-list-bulleted
 ---
 
 # list

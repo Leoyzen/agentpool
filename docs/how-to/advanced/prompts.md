@@ -1,6 +1,7 @@
 ---
 title: Prompts
 description: Advanced prompt handling
+icon: material/format-text
 ---
 
 # Prompts in AgentPool

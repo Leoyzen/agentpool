@@ -1,6 +1,7 @@
 ---
 title: Execution environments
 description: Event handler setup and configuration
+icon: material/docker
 ---
 
 Execution environments allow you to configure the runtime environment for your agent. It's where code is run and where processes are managed / commands are executed.

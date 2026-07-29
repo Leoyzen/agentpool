@@ -1,6 +1,7 @@
 ---
 title: Connections
 description: Advanced connection patterns
+icon: material/transit-connection
 ---
 
 # Node Connection System

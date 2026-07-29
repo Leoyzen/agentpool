@@ -1,6 +1,7 @@
 ---
 title: serve-agui
 description: Start AG-UI server
+icon: material/monitor
 ---
 
 # serve-agui

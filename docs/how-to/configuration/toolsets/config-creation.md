@@ -1,6 +1,7 @@
 ---
 title: Config Creation Toolset
 description: Create agent configurations
+icon: material/file-plus
 ---
 
 # Config Creation Toolset

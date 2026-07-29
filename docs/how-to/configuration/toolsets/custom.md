@@ -1,6 +1,7 @@
 ---
 title: Custom Toolset
 description: Load custom toolset implementations
+icon: material/handball
 ---
 
 # Custom Toolset

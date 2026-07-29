@@ -1,6 +1,7 @@
 ---
 title: Models & Providers
 description: Advanced model and provider features
+icon: material/brain
 ---
 
 # Provider models

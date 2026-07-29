@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/teams.py
 title: Teams
 description: Team configuration and setup
+icon: material/account-group
 ---
 
 # Team Configuration

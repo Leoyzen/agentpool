@@ -1,6 +1,7 @@
 ---
 title: Data Extraction
 description: Extracting structured data
+icon: material/text-search
 ---
 
 # Extracting Data with extract() and extract_multiple()

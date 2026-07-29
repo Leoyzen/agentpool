@@ -1,6 +1,7 @@
 ---
 title: Server Integrations
 description: Run AgentPool agents through various server protocols
+icon: material/server
 ---
 
 # Server Integrations

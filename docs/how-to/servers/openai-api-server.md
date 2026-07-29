@@ -1,6 +1,7 @@
 ---
 title: OpenAI API Server
 description: OpenAI-compatible API server for AgentPool agents
+icon: material/api
 ---
 
 # OpenAI API Server

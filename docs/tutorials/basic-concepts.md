@@ -1,6 +1,7 @@
 ---
 title: Basic Concepts
 description: Core concepts and architecture overview of AgentPool
+icon: material/lightbulb
 ---
 
 # Basic Concepts

@@ -1,6 +1,7 @@
 ---
 title: MCP Server
 description: Expose AgentPool tools via Model Context Protocol
+icon: material/tools
 ---
 
 # MCP Server

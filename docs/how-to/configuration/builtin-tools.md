@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/builtin_tools.py
 title: Built-in Tools
 description: PydanticAI built-in tool configuration
+icon: material/wrench
 ---
 
 Built-in tools are native tools provided by LLM providers that can be used to enhance your agent's capabilities. They are executed directly by the model provider.

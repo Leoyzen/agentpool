@@ -1,6 +1,7 @@
 ---
 title: AI Models
 description: Language model setup and configuration
+icon: material/brain
 ---
 
 ## Overview

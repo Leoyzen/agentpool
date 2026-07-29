@@ -1,6 +1,7 @@
 ---
 title: VFS Toolset
 description: Access manifest-defined resources
+icon: material/folder-multiple
 ---
 
 # VFS Toolset

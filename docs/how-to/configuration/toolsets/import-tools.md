@@ -1,6 +1,7 @@
 ---
 title: Import Tools Toolset
 description: Import individual functions as tools
+icon: material/import
 ---
 
 # Import Tools Toolset

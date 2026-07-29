@@ -1,6 +1,7 @@
 ---
 title: Quickstart
 description: Quick introduction to using AgentPool
+icon: material/rocket-launch
 ---
 
 # Quickstart Guide

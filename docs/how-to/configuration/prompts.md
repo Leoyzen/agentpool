@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/system_prompts.py
 title: System Prompts
 description: System prompt configuration and library
+icon: material/format-text
 ---
 
 ## Overview

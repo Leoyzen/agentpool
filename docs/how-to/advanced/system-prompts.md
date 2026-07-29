@@ -1,6 +1,7 @@
 ---
 title: System Prompts
 description: Advanced system prompt features
+icon: material/format-text
 ---
 
 # System Prompts

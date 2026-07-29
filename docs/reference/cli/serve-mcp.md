@@ -1,6 +1,7 @@
 ---
 title: serve-mcp
 description: Start MCP server
+icon: material/tools
 ---
 
 # serve-mcp

@@ -1,6 +1,7 @@
 ---
 title: Dependencies
 description: Project dependencies and dependency tree
+icon: material/package-variant-closed
 ---
 
 # Dependencies

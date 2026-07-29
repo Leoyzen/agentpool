@@ -2,6 +2,7 @@
 title: Programmatic usage
 description: Using AgentPool as a library
 order: 7
+icon: material/language-python
 ---
 
 !!! warning

@@ -1,6 +1,7 @@
 ---
 title: Knowledge System
 description: Knowledge management and access
+icon: material/book-open-variant
 ---
 
 ## Overview

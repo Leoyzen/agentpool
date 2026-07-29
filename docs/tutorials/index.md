@@ -2,6 +2,7 @@
 title: Installation
 description: Installation instructions for AgentPool
 order: 1
+icon: material/school
 ---
 
 # Installation

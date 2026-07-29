@@ -1,6 +1,7 @@
 ---
 title: File Access Toolset
 description: Read, write, and edit files on any filesystem
+icon: material/file-edit
 ---
 
 # File Access Toolset

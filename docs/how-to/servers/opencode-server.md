@@ -1,6 +1,7 @@
 ---
 title: OpenCode Server
 description: REST/SSE server compatible with the OpenCode API protocol
+icon: material/code-braces
 ---
 
 # OpenCode Server

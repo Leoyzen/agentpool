@@ -1,6 +1,7 @@
 ---
 title: Agent Toolsets
 description: Agent toolset system
+icon: material/tools
 ---
 
 ## What are Toolsets?

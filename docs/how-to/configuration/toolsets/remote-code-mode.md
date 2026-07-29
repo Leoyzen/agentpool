@@ -1,6 +1,7 @@
 ---
 title: Remote Code Mode Toolset
 description: Wrap toolsets for remote code-based interaction
+icon: material/cloud-tags
 ---
 
 # Remote Code Mode Toolset

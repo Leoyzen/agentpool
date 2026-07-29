@@ -1,6 +1,7 @@
 ---
 title: Commands
 description: Slash commands for agent interaction
+icon: material/slash-forward-box
 ---
 
 # Commands

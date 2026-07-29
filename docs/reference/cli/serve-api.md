@@ -1,6 +1,7 @@
 ---
 title: serve-api
 description: Start OpenAI-compatible API server
+icon: material/api
 ---
 
 # serve-api

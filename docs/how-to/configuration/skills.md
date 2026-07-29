@@ -2,6 +2,7 @@
 title: Skills Configuration
 description: Configure automatic skills injection into agent prompts
 order: 10
+icon: material/lightning-bolt
 ---
 
 Skills provide specialized instructions and techniques that agents can follow. AgentPool supports automatic injection of skills into agent system prompts using structured XML formatting.

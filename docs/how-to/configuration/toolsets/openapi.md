@@ -1,6 +1,7 @@
 ---
 title: OpenAPI Toolset
 description: Generate tools from OpenAPI specifications
+icon: material/api
 ---
 
 # OpenAPI Toolset

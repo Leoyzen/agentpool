@@ -1,6 +1,7 @@
 ---
 title: Document Conversion
 description: Document conversion features
+icon: material/file-document
 ---
 
 # Document Conversion

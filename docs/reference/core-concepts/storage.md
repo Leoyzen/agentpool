@@ -1,6 +1,7 @@
 ---
 title: Storage System
 description: Storage and persistence system
+icon: material/database
 ---
 
 The storage system in AgentPool provides flexible logging and history management through multiple storage providers. It allows tracking conversations, tool usage, and commands while supporting different storage backends and filtering options.

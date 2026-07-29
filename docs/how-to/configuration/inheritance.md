@@ -1,6 +1,7 @@
 ---
 title: Inheritance
 description: Configuration inheritance system
+icon: material/file-tree
 ---
 
 AgentPool supports YAML file inheritance using Yamling, making configurations more reusable and maintainable.

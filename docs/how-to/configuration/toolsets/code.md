@@ -1,6 +1,7 @@
 ---
 title: Code Toolset
 description: Code analysis and manipulation
+icon: material/code-braces
 ---
 
 # Code Toolset

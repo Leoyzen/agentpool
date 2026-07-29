@@ -1,6 +1,7 @@
 ---
 title: AG-UI Server
 description: Expose AgentPool agents via the AG-UI protocol
+icon: material/monitor
 ---
 
 # AG-UI Server

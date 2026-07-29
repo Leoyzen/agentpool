@@ -1,6 +1,7 @@
 ---
 title: Multi-Agent Patterns
 description: Orchestration patterns for multiple agents
+icon: material/account-multiple
 ---
 
 # Multi-Agent Orchestration Patterns

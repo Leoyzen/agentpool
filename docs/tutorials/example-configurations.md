@@ -1,6 +1,7 @@
 ---
 title: Example Configurations
 description: Ready-to-use agent configuration examples
+icon: material/file-document-multiple
 ---
 
 # Examples

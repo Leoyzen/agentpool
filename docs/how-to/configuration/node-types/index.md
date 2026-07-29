@@ -2,6 +2,7 @@
 title: Node Types
 description: Agent and team node configuration
 order: 0
+icon: material/sitemap
 ---
 
 # Node Types

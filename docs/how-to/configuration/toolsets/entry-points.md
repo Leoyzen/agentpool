@@ -1,6 +1,7 @@
 ---
 title: Entry Points Toolset
 description: Load tools from Python entry points
+icon: material/import
 ---
 
 # Entry Points Toolset

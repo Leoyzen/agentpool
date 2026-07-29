@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/prompt_hubs.py
 title: Prompt Hubs
 description: External prompt hub integration
+icon: material/library
 ---
 
 Prompt hubs are external platforms for managing, versioning, and sharing prompts. AgentPool integrates with popular prompt management platforms to leverage curated prompt libraries and collaborative prompt development.

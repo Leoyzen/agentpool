@@ -1,6 +1,7 @@
 ---
 title: Search Toolset
 description: Web and news search capabilities
+icon: material/magnify
 ---
 
 # Search Toolset

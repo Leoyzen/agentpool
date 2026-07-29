@@ -1,6 +1,7 @@
 ---
 title: Hooks
 description: Lifecycle hooks for intercepting agent behavior
+icon: material/fish
 ---
 
 Hooks allow you to intercept and customize agent behavior at key lifecycle points. They can add context, block operations, modify inputs, or trigger side effects.

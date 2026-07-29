@@ -1,6 +1,7 @@
 ---
 title: Agent Pool
 description: Agent pool management and features
+icon: material/pool
 ---
 
 ## Pool Basics

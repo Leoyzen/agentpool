@@ -1,6 +1,7 @@
 ---
 title: Team
 description: Working with agent teams and groups
+icon: material/account-group
 ---
 
 ## Overview

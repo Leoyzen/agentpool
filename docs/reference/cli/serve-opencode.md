@@ -1,6 +1,7 @@
 ---
 title: serve-opencode
 description: Start OpenCode server
+icon: material/code-braces
 ---
 
 # serve-opencode

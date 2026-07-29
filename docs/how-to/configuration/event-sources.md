@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/events.py
 title: Event Sources
 description: Event source configuration for triggering agent actions
+icon: material/bell-ring
 ---
 
 Event sources define external triggers that can start agent tasks or workflows. They allow agents to respond to file changes, webhooks, scheduled events, and connection events.

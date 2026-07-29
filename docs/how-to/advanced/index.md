@@ -4,6 +4,7 @@ description: Advanced usage patterns
 order: 6
 hide:
   - toc
+icon: material/fire
 ---
 
 ````python exec="true"

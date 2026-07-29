@@ -1,6 +1,7 @@
 ---
 title: Composio Toolset
 description: Integration with Composio tool platform
+icon: material/puzzle
 ---
 
 # Composio Toolset

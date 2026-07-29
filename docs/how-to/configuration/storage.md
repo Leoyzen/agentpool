@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/storage.py
 title: Storage 
 description: Database and storage setup
+icon: material/database
 ---
 
 The storage configuration defines how agent interactions, messages, and tool usage are logged. It's defined at the root level of the manifest.

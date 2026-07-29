@@ -1,6 +1,7 @@
 ---
 title: Database
 description: Database integration
+icon: material/database
 ---
 
 # Agent Logging & Memory Management

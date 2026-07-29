@@ -1,6 +1,7 @@
 ---
 title: add
 description: Register a new agent configuration file
+icon: material/plus
 ---
 
 # add

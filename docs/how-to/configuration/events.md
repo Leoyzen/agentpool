@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/event_handlers.py
 title: Event Handlers
 description: Event handler setup and configuration
+icon: material/bell
 ---
 
 Event handlers allow you to respond to various agent events such as messages, tool calls, and state changes.

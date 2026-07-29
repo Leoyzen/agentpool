@@ -1,6 +1,7 @@
 ---
 title: set
 description: Set the active configuration file
+icon: material/file-cog
 ---
 
 # set

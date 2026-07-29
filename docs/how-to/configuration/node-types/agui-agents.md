@@ -5,6 +5,7 @@ sync:
     - src/agentpool/models/agui_agents.py
 title: AG-UI Agents
 description: AG-UI protocol agent integration
+icon: material/monitor
 ---
 
 AG-UI (Agent User Interface) agents connect to remote HTTP endpoints that implement the AG-UI protocol, enabling integration of any AG-UI compatible server into the AgentPool pool.

@@ -1,6 +1,7 @@
 ---
 title: Creating Agents
 description: Guide to creating and configuring agents
+icon: material/robot
 ---
 
 # Creating Agents

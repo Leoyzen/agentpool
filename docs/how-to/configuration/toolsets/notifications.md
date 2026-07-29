@@ -1,6 +1,7 @@
 ---
 title: Notifications Toolset
 description: Send notifications via various channels
+icon: material/bell
 ---
 
 # Notifications Toolset

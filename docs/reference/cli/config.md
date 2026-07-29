@@ -1,6 +1,7 @@
 ---
 title: config
 description: Configuration management and diagnostics
+icon: material/cog
 ---
 
 The `config` command group helps you understand and manage AgentPool's layered configuration system.

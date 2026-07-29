@@ -1,3 +1,7 @@
+---
+icon: material/lightning-bolt
+---
+
 # Skill Commands
 
 ## Overview

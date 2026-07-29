@@ -2,6 +2,7 @@
 title: Skill URI Usage
 description: Using skill:// URIs to load skills and reference content
 order: 11
+icon: material/link-variant
 ---
 
 # Skill URI Usage

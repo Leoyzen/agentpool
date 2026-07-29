@@ -1,6 +1,7 @@
 ---
 title: Async Operations
 description: Asynchronous operations and patterns
+icon: material/lightning-bolt
 ---
 
 # Asynchronous Operations in AgentPool

@@ -1,6 +1,7 @@
 ---
 title: Skills Toolset
 description: Load and execute skills
+icon: material/lightning-bolt
 ---
 
 # Skills Toolset

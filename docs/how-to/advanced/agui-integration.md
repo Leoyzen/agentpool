@@ -1,6 +1,7 @@
 ---
 title: AG-UI Integration
 description: Agent User Interaction Protocol for frontend applications
+icon: material/monitor
 ---
 
 # AG-UI Integration

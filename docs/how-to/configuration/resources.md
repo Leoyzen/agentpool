@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/loaders.py
 title: Resources
 description: Resource loader configuration
+icon: material/file-multiple
 ---
 
 Resources provide dynamic content that can be accessed by agents during execution. They allow agents to fetch data from various sources like files, CLI commands, source code, and external systems.

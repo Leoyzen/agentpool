@@ -6,6 +6,7 @@ sync:
     - src/agentpool_config/context.py
 title: Configuration Path Resolution
 description: How relative paths are resolved in configuration files
+icon: material/map-marker-path
 ---
 
 # Configuration Path Resolution

@@ -1,6 +1,7 @@
 ---
 title: task
 description: Execute a defined task
+icon: material/clipboard-check
 ---
 
 # task

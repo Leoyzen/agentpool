@@ -5,6 +5,7 @@ sync:
     - src/agentpool/models/codex_agents.py
 title: Codex Agents
 description: Codex app-server integration
+icon: material/code-braces
 ---
 
 Codex agents provide AgentPool's integration with the Codex app-server, enabling advanced code editing, terminal access, and tool execution through Codex's JSON-RPC protocol.

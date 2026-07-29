@@ -1,6 +1,7 @@
 ---
 title: Agent Usage
 description: Using agents in your application
+icon: material/robot
 ---
 
 # Agent

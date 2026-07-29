@@ -1,6 +1,7 @@
 ---
 title: history
 description: View agent interaction history
+icon: material/history
 ---
 
 # history

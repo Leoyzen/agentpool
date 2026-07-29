@@ -1,6 +1,7 @@
 ---
 title: ACP Integration
 description: Agent Client Protocol integration for desktop applications
+icon: material/link-variant
 ---
 
 ## What is ACP?

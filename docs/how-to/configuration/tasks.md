@@ -1,6 +1,7 @@
 ---
 title: Tasks
 description: Task definition and configuration
+icon: material/clipboard-check
 ---
 
 # Task Configuration

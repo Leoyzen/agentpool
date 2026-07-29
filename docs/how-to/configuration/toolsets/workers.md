@@ -1,6 +1,7 @@
 ---
 title: Workers Toolset
 description: Delegate tasks to other agents and teams
+icon: material/account-multiple
 ---
 
 # Workers Toolset

@@ -1,6 +1,7 @@
 ---
 title: Talk & TeamTalk
 description: Agent communication system
+icon: material/chat
 ---
 
 # Agent Connection System

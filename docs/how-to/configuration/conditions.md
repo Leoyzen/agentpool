@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/conditions.py
 title: Conditions
 description: Conditional logic for message flow and lifecycle control
+icon: material/filter-variant
 ---
 
 Conditions control message flow, connection lifecycle, and process termination. They provide fine-grained control over when messages are processed, when connections stop, and when the system should exit.

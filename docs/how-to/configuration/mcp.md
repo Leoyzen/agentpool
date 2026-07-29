@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/mcp_server.py
 title: MCP Servers
 description: MCP server configuration and integration
+icon: material/server-network
 ---
 
 MCP (Model Control Protocol) servers allow agents to use external tools through a standardized protocol. They can be configured at both agent and manifest levels.

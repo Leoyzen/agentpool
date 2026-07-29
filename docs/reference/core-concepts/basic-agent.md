@@ -1,6 +1,7 @@
 ---
 title: Basic Agent
 description: Core Agent implementation and features
+icon: material/robot
 ---
 
 ## Core Interface

@@ -5,6 +5,7 @@ sync:
     - src/agentpool_config/observability.py
 title: Observability
 description: Monitoring and tracing configuration
+icon: material/chart-line
 ---
 
 Observability providers enable monitoring, tracing, and logging of agent operations. This helps you understand agent behavior, track performance, and debug issues in production.

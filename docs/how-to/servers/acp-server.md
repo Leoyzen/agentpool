@@ -1,6 +1,7 @@
 ---
 title: ACP Server
 description: Agent Communication Protocol server for IDE integration
+icon: material/server
 ---
 
 # ACP Server
