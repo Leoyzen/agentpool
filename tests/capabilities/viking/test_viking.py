@@ -60,8 +60,11 @@ def mock_client() -> AsyncMock:
 
 @pytest.fixture
 def viking_cap(mock_client: AsyncMock) -> VikingCapability:
-    """Create a VikingCapability with a mock client pre-injected."""
-    cap = VikingCapability(mode="all")
+    """Create a VikingCapability with a mock client pre-injected.
+
+    Enables link and memory features so all tools are available for testing.
+    """
+    cap = VikingCapability(mode="all", enable_link=True, enable_memory=True)
     cap._client = mock_client
     return cap
 
@@ -1547,32 +1550,39 @@ class TestSkillResource:
 class TestModeFiltering:
     """Tests that mode filtering exposes the correct number of tools."""
 
-    def test_retrieve_mode_7_tools(self) -> None:
-        """Retrieve mode exposes 7 tools."""
+    def test_retrieve_mode_6_tools_default(self) -> None:
+        """Retrieve mode exposes 6 tools (recall gated by enable_memory)."""
         cap = VikingCapability(mode="retrieve")
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 7
+        assert len(tools) == 6
         names = {t.__name__ for t in tools}
         assert names == {
             "viking_search",
             "viking_find",
-            "viking_recall",
             "viking_grep",
             "viking_glob",
             "viking_ls",
             "viking_read",
         }
 
-    def test_write_mode_6_tools(self) -> None:
-        """Write mode exposes 6 tools."""
+    def test_retrieve_mode_7_tools_with_memory(self) -> None:
+        """Retrieve mode exposes 7 tools when enable_memory=True."""
+        cap = VikingCapability(mode="retrieve", enable_memory=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        assert len(tools) == 7
+        names = {t.__name__ for t in tools}
+        assert "viking_recall" in names
+
+    def test_write_mode_5_tools_default(self) -> None:
+        """Write mode exposes 5 tools (remember gated by enable_memory)."""
         cap = VikingCapability(mode="write")
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 6
+        assert len(tools) == 5
         names = {t.__name__ for t in tools}
         assert names == {
-            "viking_remember",
             "viking_write",
             "viking_edit",
             "viking_mkdir",
@@ -1580,24 +1590,49 @@ class TestModeFiltering:
             "viking_forget",
         }
 
-    def test_graph_mode_2_tools(self) -> None:
-        """Graph mode exposes 2 tools."""
+    def test_write_mode_6_tools_with_memory(self) -> None:
+        """Write mode exposes 6 tools when enable_memory=True."""
+        cap = VikingCapability(mode="write", enable_memory=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        assert len(tools) == 6
+        names = {t.__name__ for t in tools}
+        assert "viking_remember" in names
+
+    def test_graph_mode_1_tool_default(self) -> None:
+        """Graph mode exposes 1 tool (link gated by enable_link)."""
         cap = VikingCapability(mode="graph")
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        assert len(tools) == 1
+        names = {t.__name__ for t in tools}
+        assert names == {"viking_set_tags"}
+
+    def test_graph_mode_2_tools_with_link(self) -> None:
+        """Graph mode exposes 2 tools when enable_link=True."""
+        cap = VikingCapability(mode="graph", enable_link=True)
         cap._client = AsyncMock()
         tools = build_tools(cap)
         assert len(tools) == 2
         names = {t.__name__ for t in tools}
         assert names == {"viking_link", "viking_set_tags"}
 
-    def test_all_mode_15_tools(self) -> None:
-        """All mode exposes 15 tools."""
+    def test_all_mode_12_tools_default(self) -> None:
+        """All mode exposes 12 tools by default (link and memory gated off)."""
         cap = VikingCapability(mode="all")
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        assert len(tools) == 12
+
+    def test_all_mode_15_tools_with_flags(self) -> None:
+        """All mode exposes 15 tools when enable_link + enable_memory."""
+        cap = VikingCapability(mode="all", enable_link=True, enable_memory=True)
         cap._client = AsyncMock()
         tools = build_tools(cap)
         assert len(tools) == 15
 
     def test_get_toolset_retrieve(self) -> None:
-        """get_toolset() returns a FunctionToolset with 7 tools for retrieve mode."""
+        """get_toolset() returns a FunctionToolset with 6 tools for retrieve mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="retrieve")
@@ -1606,10 +1641,10 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 7
+        assert len(tool_names) == 6
 
     def test_get_toolset_write(self) -> None:
-        """get_toolset() returns a FunctionToolset with 6 tools for write mode."""
+        """get_toolset() returns a FunctionToolset with 5 tools for write mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="write")
@@ -1618,10 +1653,10 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 6
+        assert len(tool_names) == 5
 
     def test_get_toolset_graph(self) -> None:
-        """get_toolset() returns a FunctionToolset with 2 tools for graph mode."""
+        """get_toolset() returns a FunctionToolset with 1 tool for graph mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="graph")
@@ -1630,10 +1665,10 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 2
+        assert len(tool_names) == 1
 
     def test_get_toolset_all(self) -> None:
-        """get_toolset() returns a FunctionToolset with 15 tools for all mode."""
+        """get_toolset() returns a FunctionToolset with 12 tools for all mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="all")
@@ -1642,7 +1677,7 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 15
+        assert len(tool_names) == 12
 
     def test_get_toolset_id_is_viking(self) -> None:
         """get_toolset() returns a FunctionToolset with id='viking'."""

@@ -186,6 +186,13 @@ class VikingCapabilityConfig(BaseModel):
     """Override for uploads URI."""
     public_download_base_url: str | None = None
     """Base URL for public download links."""
+    enable_link: bool = False
+    """Enable viking_link tool. Requires backend graph link API support.
+    Disabled by default — not all Viking deployments support linking."""
+    enable_memory: bool = False
+    """Enable viking_remember and viking_recall tools. Requires backend
+    session-based memory support. Disabled by default — not all Viking
+    deployments support memory sessions."""
 
 
 # ---------------------------------------------------------------------------

@@ -80,6 +80,14 @@ class VikingCapability(AbstractCapability[Any]):
     before sending to the model."""
     uploads_uri: str | None = None
     public_download_base_url: str | None = None
+    enable_link: bool = False
+    """Enable the ``viking_link`` tool. Requires backend support for
+    the graph link API. Disabled by default since not all Viking
+    deployments support linking."""
+    enable_memory: bool = False
+    """Enable ``viking_remember`` and ``viking_recall`` tools. Requires
+    backend support for session-based memory. Disabled by default
+    since not all Viking deployments support memory sessions."""
     model_capabilities: ModelCapabilities | None = None
     """Resolved model capabilities for multimodal bridge. Set by the
     agent factory after capability construction."""
@@ -193,6 +201,8 @@ class VikingCapability(AbstractCapability[Any]):
             multimodal_bridge=self.multimodal_bridge,
             uploads_uri=self.uploads_uri,
             public_download_base_url=self.public_download_base_url,
+            enable_link=self.enable_link,
+            enable_memory=self.enable_memory,
             model_capabilities=self.model_capabilities,
             _client=self._client,
             _owns_client=False,

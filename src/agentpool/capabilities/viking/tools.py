@@ -314,15 +314,17 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_read error: {e}"
 
-        tools.extend([
+        retrieve_tools = [
             viking_search,
             viking_find,
-            viking_recall,
             viking_grep,
             viking_glob,
             viking_ls,
             viking_read,
-        ])
+        ]
+        if cap.enable_memory:
+            retrieve_tools.append(viking_recall)
+        tools.extend(retrieve_tools)
 
     # ---- Write tools (6) ----
 
@@ -511,14 +513,16 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_forget error: {e}"
 
-        tools.extend([
-            viking_remember,
+        write_tools = [
             viking_write,
             viking_edit,
             viking_mkdir,
             viking_add_resource,
             viking_forget,
-        ])
+        ]
+        if cap.enable_memory:
+            write_tools.append(viking_remember)
+        tools.extend(write_tools)
 
     # ---- Graph tools (2) ----
 
@@ -574,6 +578,9 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_set_tags error: {e}"
 
-        tools.extend([viking_link, viking_set_tags])
+        graph_tools = [viking_set_tags]
+        if cap.enable_link:
+            graph_tools.append(viking_link)
+        tools.extend(graph_tools)
 
     return tools
