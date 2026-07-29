@@ -356,42 +356,73 @@ class VikingCapability(AbstractCapability[Any]):
     async def list_resources(self) -> Sequence[ResourceEntry]:
         """List Viking resources under ``resources_uri``.
 
-        Calls ``client.ls(resources_uri)`` and returns entries as
-        ``ResourceEntry`` objects. Both files and directories are
-        included so that the OpenCode @ mention list can show
-        browsable resource trees.
+        Performs a recursive ``client.ls()`` to find actual files (not
+        directories) and returns them as ``ResourceEntry`` objects.
+        Files are what users @ mention — directories can't be read as
+        content.
+
+        Uses per-directory recursive listing to work around Viking's
+        incomplete root-level recursive traversal.
 
         Returns:
-            A sequence of ``ResourceEntry`` descriptors. Returns an empty
-            list on error.
+            A sequence of ``ResourceEntry`` descriptors for text files.
+            Returns an empty list on error.
         """
         try:
             client = await self._ensure_client()
             uri = self._resolve_resources_uri()
-            entries = await client.ls(uri)
-            if not isinstance(entries, list):
+
+            # Viking's recursive ls from root may not traverse all
+            # subdirectories completely. Work around this by first listing
+            # top-level entries, then recursively listing each subdirectory.
+            top_entries = await client.ls(uri)
+            if not isinstance(top_entries, list):
                 return []
+
+            all_entries: list[dict[str, Any]] = []
+            for entry in top_entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("isDir"):
+                    sub_uri = str(entry.get("uri") or "")
+                    if sub_uri:
+                        sub_entries = await client.ls(sub_uri, recursive=True, node_limit=5000)
+                        if isinstance(sub_entries, list):
+                            all_entries.extend(e for e in sub_entries if isinstance(e, dict))
+                else:
+                    all_entries.append(entry)
 
             from agentpool.capabilities.resource_protocols import ResourceEntry
 
             resources: list[ResourceEntry] = []
-            for entry in entries:
+            for entry in all_entries:
                 if not isinstance(entry, dict):
                     continue
-                # Include both files and directories for @ mention browsing
-                name = str(entry.get("name") or entry.get("uri") or "")
-                resource_uri = str(entry.get("uri") or f"{uri}{name}")
-                description = str(
-                    entry.get("meta", {}).get("abstract", "")
-                    if isinstance(entry.get("meta"), dict)
-                    else ""
-                )
-                mime_type = "text/markdown" if name.endswith(".md") else ""
+                if entry.get("isDir"):
+                    continue
+                resource_uri = str(entry.get("uri") or "")
+                if not resource_uri:
+                    continue
+                name = str(entry.get("name") or resource_uri.rsplit("/", 1)[-1] or resource_uri)
+                # Infer MIME type from extension; skip non-text files
+                mime_type = ""
+                if name.endswith(".md"):
+                    mime_type = "text/markdown"
+                elif name.endswith(".txt"):
+                    mime_type = "text/plain"
+                elif name.endswith(".json"):
+                    mime_type = "application/json"
+                elif name.endswith((".yaml", ".yml")):
+                    mime_type = "text/yaml"
+                elif name.endswith(".html"):
+                    mime_type = "text/html"
+                else:
+                    continue  # skip images, binaries, etc.
                 resources.append(
                     ResourceEntry(
                         uri=resource_uri,
                         name=name,
-                        description=description,
+                        description=resource_uri.removeprefix(uri),
                         mime_type=mime_type,
                     )
                 )
