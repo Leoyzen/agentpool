@@ -11,6 +11,9 @@ theme:
   custom_dir: overrides
   icon:
     logo: material/robot-outline
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
@@ -57,7 +60,6 @@ theme:
 
 extra_javascript: # for code blocks with { .interactive }
   - js/run_code_config.js
-  - "https://phil65.github.io/mkdocs-run-code/run_code.js"
 
 markdown_extensions:
   - abbr
