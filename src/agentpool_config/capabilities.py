@@ -193,6 +193,16 @@ class VikingCapabilityConfig(BaseModel):
     """Enable viking_remember and viking_recall tools. Requires backend
     session-based memory support. Disabled by default — not all Viking
     deployments support memory sessions."""
+    resource_file_extensions: tuple[str, ...] = (
+        ".md",
+        ".txt",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".html",
+    )
+    """File extensions to include in list_resources(). Files with extensions
+    not in this set are skipped. Set to an empty list to include all files."""
 
 
 # ---------------------------------------------------------------------------

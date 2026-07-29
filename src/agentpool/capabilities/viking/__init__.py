@@ -88,6 +88,17 @@ class VikingCapability(AbstractCapability[Any]):
     """Enable ``viking_remember`` and ``viking_recall`` tools. Requires
     backend support for session-based memory. Disabled by default
     since not all Viking deployments support memory sessions."""
+    resource_file_extensions: tuple[str, ...] = (
+        ".md",
+        ".txt",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".html",
+    )
+    """File extensions to include in ``list_resources()``. Files with
+    extensions not in this set are skipped. Set to an empty tuple to
+    include all files regardless of extension."""
     model_capabilities: ModelCapabilities | None = None
     """Resolved model capabilities for multimodal bridge. Set by the
     agent factory after capability construction."""
@@ -203,6 +214,7 @@ class VikingCapability(AbstractCapability[Any]):
             public_download_base_url=self.public_download_base_url,
             enable_link=self.enable_link,
             enable_memory=self.enable_memory,
+            resource_file_extensions=self.resource_file_extensions,
             model_capabilities=self.model_capabilities,
             _client=self._client,
             _owns_client=False,
@@ -404,20 +416,24 @@ class VikingCapability(AbstractCapability[Any]):
                 if not resource_uri:
                     continue
                 name = str(entry.get("name") or resource_uri.rsplit("/", 1)[-1] or resource_uri)
-                # Infer MIME type from extension; skip non-text files
+                # Filter by configured extensions; skip files not in the set
+                lowered = name.lower()
+                if self.resource_file_extensions and not lowered.endswith(
+                    self.resource_file_extensions
+                ):
+                    continue
+                # Infer MIME type from extension
                 mime_type = ""
-                if name.endswith(".md"):
+                if lowered.endswith(".md"):
                     mime_type = "text/markdown"
-                elif name.endswith(".txt"):
+                elif lowered.endswith(".txt"):
                     mime_type = "text/plain"
-                elif name.endswith(".json"):
+                elif lowered.endswith(".json"):
                     mime_type = "application/json"
-                elif name.endswith((".yaml", ".yml")):
+                elif lowered.endswith((".yaml", ".yml")):
                     mime_type = "text/yaml"
-                elif name.endswith(".html"):
+                elif lowered.endswith(".html"):
                     mime_type = "text/html"
-                else:
-                    continue  # skip images, binaries, etc.
                 resources.append(
                     ResourceEntry(
                         uri=resource_uri,
