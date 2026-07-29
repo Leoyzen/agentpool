@@ -96,6 +96,105 @@ def test_compile_returns_empty_registry(minimal_pool: AgentPool) -> None:
     assert registry.list_names() == []
 
 
+def test_compile_does_not_register_skills_tools_provider_at_agent_scope(
+    minimal_pool: AgentPool,
+) -> None:
+    """skills_tools_provider is registered at POOL scope by _rebuild_skill_capabilities().
+
+    _compile_agent_capabilities() must NOT include it in the returned list,
+    otherwise it gets registered at AGENT scope too, causing duplicate
+    capability entries in get_visible_capabilities() and tool name conflicts.
+    """
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+    skills_provider = MagicMock()
+    skills_provider.__class__ = type("FakeSkillsProvider", (), {})
+
+    factory = AgentFactory(pool=minimal_pool)
+    # Simulate skills_tools_provider already at POOL scope
+    minimal_pool.extension_registry.register(skills_provider, Scope(level=ScopeLevel.POOL))
+
+    # Build a manifest with one agent
+    manifest = MagicMock()
+    manifest.agents = {"test_agent": MagicMock()}
+    manifest.team_mode = None
+
+    factory.compile(
+        manifest=manifest,
+        host_context=_make_host_context(skills_tools_provider=skills_provider),
+    )
+
+    # Check AGENT scope does NOT have skills_provider
+    agent_scope = Scope(level=ScopeLevel.AGENT, agent_name="test_agent")
+    visible = minimal_pool.extension_registry.get_visible_capabilities(agent_scope)
+    # skills_provider should appear exactly once (from POOL scope), not twice
+    count = sum(1 for c in visible if c is skills_provider)
+    assert count == 1, f"skills_tools_provider should appear once, not {count}"
+
+
+def test_compile_registers_config_capabilities_at_agent_scope(
+    minimal_pool: AgentPool,
+) -> None:
+    """Config-defined capabilities (e.g. Viking) are registered at AGENT scope."""
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+    # Use our test ResourceAccess capability
+    from tests.fixtures.test_resource_cap import TestResourceAccessCap
+
+    test_cap = TestResourceAccessCap(read_text="test", read_uri="test://x")
+
+    # Build a mock NativeAgentConfig with capabilities
+    cfg = MagicMock()
+    cfg.name = "test_agent"
+    cfg.capabilities = [test_cap]
+    cfg.get_tool_providers = MagicMock(return_value=[])
+    cfg.team_mode = None
+
+    # Make isinstance(cfg, NativeAgentConfig) return True
+    manifest = MagicMock()
+    manifest.agents = {"test_agent": cfg}
+    manifest.team_mode = None
+
+    factory = AgentFactory(pool=minimal_pool)
+
+    with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
+        factory.compile(
+            manifest=manifest,
+            host_context=_make_host_context(skills_tools_provider=None),
+        )
+
+    agent_scope = Scope(level=ScopeLevel.AGENT, agent_name="test_agent")
+    visible = minimal_pool.extension_registry.get_visible_capabilities(agent_scope)
+    # TestResourceAccessCap should be at AGENT scope
+    from agentpool.capabilities.resource_protocols import ResourceAccess
+
+    ra_caps = [c for c in visible if isinstance(c, ResourceAccess)]
+    assert len(ra_caps) == 1
+    assert isinstance(ra_caps[0], TestResourceAccessCap)
+
+
+def test_get_visible_capabilities_no_duplicates_across_scopes(
+    minimal_pool: AgentPool,
+) -> None:
+    """Same capability at POOL + AGENT scope appears twice — document this behavior.
+
+    ExtensionRegistry.get_visible_capabilities() does NOT deduplicate.
+    This test documents that behavior so callers know to handle duplicates
+    or avoid cross-scope registration of the same instance.
+    """
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+    cap = MagicMock()
+    reg = minimal_pool.extension_registry
+    reg.register(cap, Scope(level=ScopeLevel.POOL))
+    reg.register(cap, Scope(level=ScopeLevel.AGENT, agent_name="a1"))
+
+    agent_scope = Scope(level=ScopeLevel.AGENT, agent_name="a1")
+    visible = reg.get_visible_capabilities(agent_scope)
+    count = sum(1 for c in visible if c is cap)
+    assert count == 2, "Same cap at POOL + AGENT appears twice (no dedup)"
+
+
 # ---------------------------------------------------------------------------
 # create_session_agent — native main path
 # ---------------------------------------------------------------------------
