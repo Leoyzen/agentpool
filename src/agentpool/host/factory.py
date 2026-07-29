@@ -249,12 +249,13 @@ class AgentFactory:
             caps.extend(cfg.get_tool_providers())
 
         # 3b. Config-defined capabilities (e.g. Viking, MCP, code mode).
-        #     Built from cfg.capabilities using the same logic as
-        #     NativeAgent.__init__(). These are registered at AGENT scope
-        #     so the ExtensionRegistry has them before any message handling.
-        #     The agent instance builds its own copies in __init__() for
-        #     tool execution — the registry copies are for resource
-        #     resolution and capability discovery.
+        #     Built from cfg.capabilities and registered directly at AGENT
+        #     scope so the ExtensionRegistry has them before any message
+        #     handling. NOT included in the returned list — the agent
+        #     instance builds its own copies in __init__() for tool
+        #     execution. If we returned them here, they'd be injected as
+        #     _extra_capabilities (line ~438) and conflict with the
+        #     agent's own _external_capabilities (duplicate tools).
         if isinstance(cfg, NativeAgentConfig) and cfg.capabilities:
             from pydantic import BaseModel as _BaseModel
 
@@ -264,6 +265,7 @@ class AgentFactory:
                 build_capability,
             )
 
+            config_caps: list[AbstractCapability[Any]] = []
             for cap_cfg in cfg.capabilities:
                 if cap_cfg is None:
                     continue
@@ -276,7 +278,14 @@ class AgentFactory:
                 else:
                     # Pre-instantiated AbstractCapability
                     built = cap_cfg
-                caps.append(built)
+                config_caps.append(built)
+
+            # Register directly at AGENT scope — do NOT add to `caps`.
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
+            for c in config_caps:
+                self._pool.extension_registry.register(c, agent_scope)
 
         # 4. Team communication capability — shared instance with session_metadata=None.
         #    Per-session instance with actual metadata is created in create_session_agent().
