@@ -474,30 +474,43 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
     Returns a dictionary mapping resource keys to McpResource objects.
     Keys are formatted as "{client}:{resource_name}" for uniqueness.
 
-    Uses the ``ResourceAccess`` protocol to discover resources from all
-    capabilities that implement it (e.g., ``McpServerCap``,
-    ``VikingCapability``).
+    Supports two resource-providing protocols:
+    - ``get_resources()``: legacy protocol (FunctionToolsetCapability)
+    - ``list_resources()``: ResourceAccess protocol (VikingCapability, McpServerCap)
     """
     try:
         result: dict[str, McpResource] = {}
+        from typing import Protocol, runtime_checkable
+
+        @runtime_checkable
+        class _ResourceProviding(Protocol):
+            async def get_resources(self) -> Any: ...
+
+        @runtime_checkable
+        class _ResourceAccess(Protocol):
+            async def list_resources(self) -> Any: ...
+
         import asyncio
 
-        from agentpool.capabilities.resource_protocols import ResourceAccess
-
         caps = state.agent._all_capabilities
-        resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
-        if resource_caps:
-            results = await asyncio.gather(
-                *(cap.list_resources() for cap in resource_caps),
-                return_exceptions=True,
-            )
-            for cap, res in zip(resource_caps, results, strict=False):
+        coros: list[Any] = []
+        caps_with_resources: list[Any] = []
+        for cap in caps:
+            if isinstance(cap, _ResourceProviding):
+                coros.append(cap.get_resources())
+                caps_with_resources.append(cap)
+            elif isinstance(cap, _ResourceAccess):
+                coros.append(cap.list_resources())
+                caps_with_resources.append(cap)
+        if coros:
+            results = await asyncio.gather(*coros, return_exceptions=True)
+            for cap, res in zip(caps_with_resources, results, strict=False):
                 if isinstance(res, BaseException):
                     continue
                 for resource in res:
-                    # ResourceEntry doesn't have a .client field;
+                    # ResourceAccess entries (ResourceEntry) don't have .client;
                     # use the capability class name as the client identifier.
-                    client = type(cap).__name__
+                    client = getattr(resource, "client", None) or type(cap).__name__
                     client_name = client.replace("/", "_")
                     resource_name = resource.name.replace("/", "_")
                     result[f"{client_name}:{resource_name}"] = McpResource(
