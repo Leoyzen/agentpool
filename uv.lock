@@ -141,6 +141,9 @@ tiktoken = [
 tts = [
     { name = "anyvoice", extra = ["openai", "tts-edge"] },
 ]
+viking = [
+    { name = "openviking-sdk" },
+]
 watchdog = [
     { name = "watchdog" },
 ]
@@ -188,9 +191,6 @@ lint = [
     { name = "types-pygments" },
     { name = "types-pyyaml" },
 ]
-viking = [
-    { name = "openviking-sdk" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -229,6 +229,7 @@ requires-dist = [
     { name = "markitdown", marker = "python_full_version < '3.14' and extra == 'markitdown'" },
     { name = "mcp", specifier = ">=1.2.0" },
     { name = "mcpx-py", marker = "extra == 'mcp-run'", specifier = ">=0.7.0" },
+    { name = "openviking-sdk", marker = "extra == 'viking'", specifier = ">=0.1.0" },
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "platformdirs" },
     { name = "promptantic", specifier = ">=0.4.5" },
@@ -279,7 +280,7 @@ requires-dist = [
     { name = "yamling", specifier = ">=2.0.2" },
     { name = "zstandard", marker = "extra == 'zed'", specifier = ">=0.23.0" },
 ]
-provides-extras = ["a2a", "bot", "braintrust", "clipboard", "coding", "composio", "events", "langfuse", "markitdown", "mcp-discovery", "mcp-run", "notifications", "promptlayer", "tiktoken", "tts", "watchdog", "zed"]
+provides-extras = ["a2a", "bot", "braintrust", "clipboard", "coding", "composio", "events", "langfuse", "markitdown", "mcp-discovery", "mcp-run", "notifications", "promptlayer", "tiktoken", "tts", "watchdog", "zed", "viking"]
 
 [package.metadata.requires-dev]
 benchmark = [{ name = "pyinstrument" }]
@@ -319,7 +320,6 @@ lint = [
     { name = "types-pygments" },
     { name = "types-pyyaml" },
 ]
-viking = [{ name = "openviking-sdk", specifier = ">=0.1.0" }]
 
 [[package]]
 name = "aiofile"

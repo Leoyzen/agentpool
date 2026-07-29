@@ -432,16 +432,15 @@ class TestRetrieveTools:
         ctx = _make_ctx()
         result = await recall_tool(ctx, query="remember when")
 
-        assert mock_client.find.call_count == 4
+        assert mock_client.find.call_count == 3
         context_types = [c.kwargs["context_type"] for c in mock_client.find.call_args_list]
-        assert "events" in context_types
-        assert "entities" in context_types
-        assert "preferences" in context_types
-        assert "experiences" in context_types
+        assert "memory" in context_types
+        assert "resource" in context_types
+        assert "skill" in context_types
         for call in mock_client.find.call_args_list:
             assert call.kwargs["query"] == "remember when"
-        assert "=== events ===" in result
-        assert "=== entities ===" in result
+        assert "=== memory ===" in result
+        assert "=== resource ===" in result
 
     @pytest.mark.asyncio
     async def test_viking_recall_custom_quotas(
@@ -453,15 +452,15 @@ class TestRetrieveTools:
         recall_tool = _get_tool(tools, "viking_recall")
 
         ctx = _make_ctx()
-        custom_quotas = {"events": 2, "entities": 3}
+        custom_quotas = {"memory": 2, "resource": 3}
         result = await recall_tool(ctx, query="test", quotas=custom_quotas)
 
         assert mock_client.find.call_count == 2
         quotas_used = [c.kwargs["limit"] for c in mock_client.find.call_args_list]
         assert 2 in quotas_used
         assert 3 in quotas_used
-        assert "=== events ===" in result
-        assert "=== entities ===" in result
+        assert "=== memory ===" in result
+        assert "=== resource ===" in result
 
     @pytest.mark.asyncio
     async def test_viking_grep(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1086,7 +1085,7 @@ class TestVikingRecallDetailed:
     async def test_default_quotas(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        """Default quotas are {events: 3, entities: 5, preferences: 3, experiences: 3}."""
+        """Default quotas are {memory: 5, resource: 3, skill: 2}."""
         mock_client.find = AsyncMock(return_value={"results": []})
         tools = build_tools(viking_cap)
         recall_tool = _get_tool(tools, "viking_recall")
@@ -1096,7 +1095,7 @@ class TestVikingRecallDetailed:
 
         calls = mock_client.find.call_args_list
         quota_map = {c.kwargs["context_type"]: c.kwargs["limit"] for c in calls}
-        assert quota_map == {"events": 3, "entities": 5, "preferences": 3, "experiences": 3}
+        assert quota_map == {"memory": 5, "resource": 3, "skill": 2}
 
     @pytest.mark.asyncio
     async def test_result_merge(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1110,11 +1109,10 @@ class TestVikingRecallDetailed:
         ctx = _make_ctx()
         result = await recall_tool(ctx, query="test", max_chars=10000)
 
-        assert "=== events ===" in result
-        assert "=== entities ===" in result
-        assert "=== preferences ===" in result
-        assert "=== experiences ===" in result
-        assert result.count("viking://mem.md") == 4
+        assert "=== memory ===" in result
+        assert "=== resource ===" in result
+        assert "=== skill ===" in result
+        assert result.count("viking://mem.md") == 3
 
     @pytest.mark.asyncio
     async def test_truncation(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:

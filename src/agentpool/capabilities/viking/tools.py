@@ -147,10 +147,17 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             Performs multiple ``find`` calls with different context types
             and merges the results into a single formatted string.
 
+            Valid context types are: ``memory``, ``resource``, ``skill``.
+            These correspond to the three top-level namespaces in Viking:
+            - ``memory``: personal memories and conversation history
+            - ``resource``: ingested documents and resources
+            - ``skill``: stored skill definitions
+
             Args:
                 query: Natural-language query for memory retrieval.
-                quotas: Per-context-type result limits. Defaults to
-                    ``{"events": 3, "entities": 5, "preferences": 3, "experiences": 3}``.
+                quotas: Per-context-type result limits. Valid context types
+                    are ``memory``, ``resource``, ``skill``. Defaults to
+                    ``{"memory": 5, "resource": 3, "skill": 2}``.
                 max_chars: Maximum total characters in the output.
 
             Returns:
@@ -160,10 +167,9 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 client = await cap._ensure_client()
                 if quotas is None:
                     quotas = {
-                        "events": 3,
-                        "entities": 5,
-                        "preferences": 3,
-                        "experiences": 3,
+                        "memory": 5,
+                        "resource": 3,
+                        "skill": 2,
                     }
                 sections: list[str] = []
                 for context_type, quota in quotas.items():
@@ -357,8 +363,14 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
         ) -> str:
             """Write content to a Viking URI.
 
+            URIs must be under ``memories/`` or ``resources/`` paths
+            (e.g. ``viking://user/default/memories/notes.md`` or
+            ``viking://resources/wiki/Device/SY215.md``). Other paths
+            will be rejected by the backend.
+
             Args:
-                uri: Full viking:// URI to write to.
+                uri: Full viking:// URI to write to. Must be under
+                    ``memories/`` or ``resources/``.
                 content: Content to write.
                 mode: Write mode — ``"create"`` (default, fails if exists),
                     ``"replace"`` (overwrite), or ``"append"`` (add to end).
@@ -382,8 +394,10 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
         ) -> str:
             """Edit a Viking document by replacing a string.
 
-            Reads the current content, replaces ``old_string`` with
-            ``new_string``, and writes it back.
+            Uses a read-modify-write cycle: reads the current content,
+            replaces ``old_string`` with ``new_string``, then writes back.
+            The URI must be under ``memories/`` or ``resources/`` (same
+            restriction as ``viking_write``).
 
             Args:
                 uri: Full viking:// URI of the document to edit.
@@ -448,13 +462,15 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             """Add an external resource to the Viking knowledge graph.
 
             Ingests a local file or directory into the graph, making it
-            searchable and linkable.
+            searchable and linkable. The ``to`` target must be under
+            ``viking://resources/`` (e.g. ``viking://resources/wiki/``).
 
             Args:
                 path: Local file or directory path to ingest.
-                to: Target viking:// URI to store the resource.
-                parent: Parent viking:// URI to attach the resource to.
-                processing_mode: Processing mode for the resource.
+                to: Target viking:// URI under ``resources/`` to store the resource.
+                parent: Parent viking:// URI under ``resources/`` for nesting.
+                processing_mode: Processing mode for the resource (unused by
+                    current SDK — kept for API compatibility).
                 watch_interval: Watch interval in seconds (0 = no watch).
 
             Returns:
@@ -516,9 +532,12 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
         ) -> str:
             """Create a link between nodes in the Viking knowledge graph.
 
+            Both ``from_uri`` and all ``to_uris`` must point to existing
+            nodes. The backend rejects links to non-existent nodes.
+
             Args:
-                from_uri: Source viking:// URI.
-                to_uris: Target viking:// URI or list of URIs.
+                from_uri: Source viking:// URI. Must exist.
+                to_uris: Target viking:// URI or list of URIs. All must exist.
                 reason: Optional reason/label for the link.
 
             Returns:
