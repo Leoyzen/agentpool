@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypedDict, TypeVar, overload
@@ -1494,16 +1494,249 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     async def get_available_models(self) -> list[ModelInfo] | None:
         """Get available models for this agent.
 
-        Uses tokonomics model discovery to fetch models from configured providers.
-        Defaults to models.dev if no providers specified.
+        Fetches model data from the npmmirror CDN (Alibaba China mirror),
+        which mirrors the ``@opencode-ai/models`` npm package containing
+        the same data as ``models.dev/api.json``.  This avoids direct
+        access to ``models.dev`` which may be unreachable from China.
+
+        Falls back to the original tokonomics discovery when the
+        ``MODELS_DEV_FALLBACK`` environment variable is set to ``"1"``.
 
         Returns:
             List of tokonomics ModelInfo, or None if discovery fails
         """
-        from tokonomics.model_discovery import get_all_models
+        import os
 
+        if os.environ.get("MODELS_DEV_FALLBACK") == "1":
+            from tokonomics.model_discovery import get_all_models
+
+            delta = timedelta(days=200)
+            try:
+                async with asyncio.timeout(30):
+                    return await get_all_models(
+                        providers=self._providers or ["models.dev"], max_age=delta
+                    )
+            except TimeoutError:
+                self.log.warning("Model discovery (tokonomics) timed out after 30s")
+                return None
+            except Exception:
+                self.log.warning("Model discovery (tokonomics) failed", exc_info=True)
+                return None
+
+        return await self._fetch_models_from_npmmirror()
+
+    async def _fetch_models_from_npmmirror(self) -> list[ModelInfo] | None:
+        """Fetch models from npmmirror CDN (China-accessible).
+
+        Downloads the ``@opencode-ai/models`` npm package tarball from
+        ``registry.npmmirror.com``, extracts ``dist/snapshot.js``, and
+        parses it into a list of ``ModelInfo`` objects.
+
+        The snapshot data has the same structure as ``models.dev/api.json``:
+        ``{providers: {provider_id: {models: {model_id: {...}}}}}``
+        """
+        import io
+        import json
+        import re
+        import tarfile
+        import urllib.request
+
+        provider_name_map: dict[str, str] = {
+            "amazon-bedrock": "bedrock",
+            "fireworks-ai": "fireworks",
+            "google": "google-gla",
+            "togetherai": "together",
+            "github-models": "github",
+            "xai": "grok",
+        }
+
+        url = "https://registry.npmmirror.com/@opencode-ai/models/-/models-0.0.26.tgz"
+
+        try:
+            async with asyncio.timeout(30):
+                # run_in_executor avoids blocking the event loop during HTTP download
+                loop = asyncio.get_running_loop()
+                tgz_data = await loop.run_in_executor(
+                    None,
+                    lambda: urllib.request.urlopen(url, timeout=15).read(),
+                )
+
+                with tarfile.open(fileobj=io.BytesIO(tgz_data), mode="r:gz") as tar:
+                    snapshot_file = tar.extractfile("package/dist/snapshot.js")
+                    if snapshot_file is None:
+                        self.log.warning("snapshot.js not found in npmmirror tarball")
+                        return None
+                    snapshot_content = snapshot_file.read().decode("utf-8")
+
+                match = re.search(r'JSON\.parse\("(.+?)"\)', snapshot_content, re.DOTALL)
+                if match is None:
+                    self.log.warning("Could not extract JSON from snapshot.js")
+                    return None
+                json_str = match.group(1).encode().decode("unicode_escape")
+                data = json.loads(json_str)
+        except TimeoutError:
+            self.log.warning("Model discovery (npmmirror) timed out after 30s")
+            return None
+        except Exception:
+            self.log.warning("Model discovery (npmmirror) failed", exc_info=True)
+            return None
+
+        all_models = self._parse_npmmirror_providers(data, provider_name_map)
+
+        self.log.info(
+            "Fetched %d models from %d providers via npmmirror",
+            len(all_models),
+            len({m.provider for m in all_models}),
+        )
+        return all_models if all_models else None
+
+    def _parse_npmmirror_providers(
+        self,
+        data: dict[str, Any],
+        provider_name_map: dict[str, str],
+    ) -> list[ModelInfo]:
+        """Parse provider data from the npmmirror snapshot into ModelInfo list.
+
+        Args:
+            data: Parsed JSON data from the snapshot.
+            provider_name_map: Mapping from models.dev provider names to
+                pydantic-ai provider names.
+
+        Returns:
+            List of parsed ModelInfo objects.
+        """
+        providers_data: dict[str, Any] = data.get("providers", {})
+        selected_providers = self._providers or None
         delta = timedelta(days=200)
-        return await get_all_models(providers=self._providers or ["models.dev"], max_age=delta)
+        cutoff = datetime.now() - delta
+        all_models: list[ModelInfo] = []
+
+        for provider_id, provider_data in providers_data.items():
+            if selected_providers is not None and provider_id not in selected_providers:
+                continue
+
+            if not isinstance(provider_data, dict):
+                continue
+            provider_models = provider_data.get("models")
+            if not isinstance(provider_models, dict):
+                continue
+
+            mapped_provider = provider_name_map.get(provider_id, provider_id)
+
+            for model_id, model_info in provider_models.items():
+                if not isinstance(model_info, dict):
+                    continue
+
+                try:
+                    model = self._parse_npmmirror_model(
+                        model_info,
+                        model_id=model_id,
+                        provider_id=mapped_provider,
+                        cutoff=cutoff,
+                    )
+                except Exception:
+                    self.log.debug(
+                        "Failed to parse model %s from provider %s",
+                        model_id,
+                        provider_id,
+                        exc_info=True,
+                    )
+                    continue
+
+                if model is not None:
+                    all_models.append(model)
+
+        return all_models
+
+    @staticmethod
+    def _parse_npmmirror_model(
+        data: dict[str, Any],
+        *,
+        model_id: str,
+        provider_id: str,
+        cutoff: datetime,
+    ) -> ModelInfo | None:
+        """Parse a single model entry from the npmmirror snapshot data.
+
+        Mirrors the field mapping in ``ModelsDevProvider._parse_model``.
+
+        Args:
+            data: Raw model data dict from the snapshot.
+            model_id: The model identifier key.
+            provider_id: Mapped provider name (pydantic-ai convention).
+            cutoff: Only include models created after this datetime.
+                    Models without ``created_at`` are always included.
+
+        Returns:
+            ``ModelInfo`` instance, or ``None`` if the model should be skipped.
+        """
+        import contextlib
+
+        from tokonomics.model_discovery.model_info import Modality, ModelInfo, ModelPricing
+
+        is_embedding = "embedding" in model_id.lower() or "embed" in model_id.lower()
+        if is_embedding:
+            return None
+
+        pricing: ModelPricing | None = None
+        cost = data.get("cost")
+        if isinstance(cost, dict):
+            pricing = ModelPricing(
+                prompt=cost.get("input", 0) / 1_000_000 if "input" in cost else None,
+                completion=cost.get("output", 0) / 1_000_000 if "output" in cost else None,
+                input_cache_read=cost.get("cache_read", 0) / 1_000_000
+                if "cache_read" in cost
+                else None,
+                input_cache_write=cost.get("cache_write", 0) / 1_000_000
+                if "cache_write" in cost
+                else None,
+            )
+
+        input_modalities: set[Modality] = {"text"}
+        output_modalities: set[Modality] = {"text"}
+        modalities = data.get("modalities")
+        if isinstance(modalities, dict):
+            raw_input = modalities.get("input", ["text"])
+            raw_output = modalities.get("output", ["text"])
+            input_modalities = {"file" if m == "pdf" else m for m in raw_input}
+            output_modalities = {"file" if m == "pdf" else m for m in raw_output}
+
+        created_at: datetime | None = None
+        release_date = data.get("release_date")
+        if release_date:
+            with contextlib.suppress(ValueError, TypeError):
+                created_at = datetime.strptime(release_date, "%Y-%m-%d")
+
+        if created_at is not None and created_at < cutoff:
+            return None
+
+        limit = data.get("limit")
+        if not isinstance(limit, dict):
+            limit = {}
+
+        return ModelInfo(
+            id=str(model_id),
+            name=str(data.get("name", model_id)),
+            provider=provider_id,
+            description=None,
+            pricing=pricing,
+            context_window=limit.get("context"),
+            max_output_tokens=limit.get("output"),
+            is_embedding=False,
+            input_modalities=input_modalities,
+            output_modalities=output_modalities,
+            is_free=pricing is not None and pricing.prompt == 0 and pricing.completion == 0,
+            created_at=created_at,
+            metadata={
+                "attachment": data.get("attachment", False),
+                "reasoning": data.get("reasoning", False),
+                "temperature": data.get("temperature", True),
+                "tool_call": data.get("tool_call", False),
+                "knowledge": data.get("knowledge"),
+                "last_updated": data.get("last_updated"),
+                "open_weights": data.get("open_weights", False),
+            },
+        )
 
     async def get_modes(self) -> list[ModeCategory]:
         """Get available mode categories for this agent."""
