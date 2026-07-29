@@ -4,6 +4,8 @@ import asyncio
 from contextlib import suppress
 from typing import TYPE_CHECKING, Protocol
 
+import anyio
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -34,7 +36,7 @@ class InMemoryMessageQueue:
 
     async def publish(self, task: RpcTask) -> None:
         if self._closed:
-            raise RuntimeError("mssage queue already closed")
+            raise anyio.ClosedResourceError("message queue is closed")
         await self._queue.put(task)
 
     async def close(self) -> None:
