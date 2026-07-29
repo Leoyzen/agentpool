@@ -420,17 +420,17 @@ async def test_resolve_resource_timing_bug() -> None:
         # After the fix, the registry SHOULD have the config-defined cap
         # at AGENT scope (registered during pool init via factory.compile()).
         assert len(registry_caps) >= 1, "Registry should have config-defined cap at AGENT scope"
-        assert any(
-            isinstance(c, type(ra_caps[0])) for c in registry_caps
-        ), "Registry should contain the same type of ResourceAccess cap"
+        assert any(isinstance(c, type(ra_caps[0])) for c in registry_caps), (
+            "Registry should contain the same type of ResourceAccess cap"
+        )
 
         # Verify ResourceCapability is NOT in the registry (it's a tool wrapper,
         # not a ResourceAccess provider).
         from agentpool.capabilities.resource_capability import ResourceCapability
 
-        assert not any(
-            isinstance(c, ResourceCapability) for c in registry_caps
-        ), "ResourceCapability should not be in get_resource_access() results"
+        assert not any(isinstance(c, ResourceCapability) for c in registry_caps), (
+            "ResourceCapability should not be in get_resource_access() results"
+        )
 
         # Now test _resolve_resource — should find the resource via the registry.
         source = ResourceSource(
@@ -440,9 +440,7 @@ async def test_resolve_resource_timing_bug() -> None:
         )
         part = FilePartInput(mime="text/plain", url="", source=source)
 
-        result = await extract_user_prompt_from_parts(
-            [part], "test-session", agent=agent
-        )
+        result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
         result_list = list(result)
 
         # Should resolve the resource content — not drop it silently.
@@ -503,9 +501,10 @@ async def test_e2e_at_mention_resolves_resource() -> None:
     4. extract_user_prompt_from_parts() → _resolve_resource() → registry query
     5. Resource content returned as XML-wrapped text
     """
+    import yamling
+
     from agentpool import AgentPool, AgentsManifest
     from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    import yamling
 
     config = _make_pool_config(
         cap_args={"read_text": "hello world", "read_uri": "test://doc.md"},
@@ -521,9 +520,7 @@ async def test_e2e_at_mention_resolves_resource() -> None:
         )
 
         part = _make_resource_part("test://doc.md")
-        result = await extract_user_prompt_from_parts(
-            [part], "test-session", agent=agent
-        )
+        result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
         result_list = list(result)
 
         assert len(result_list) == 1
@@ -532,9 +529,10 @@ async def test_e2e_at_mention_resolves_resource() -> None:
 
 async def test_e2e_at_mention_wrong_uri_returns_empty() -> None:
     """L2: @-mention with a URI that no cap can resolve → content dropped."""
+    import yamling
+
     from agentpool import AgentPool, AgentsManifest
     from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    import yamling
 
     config = _make_pool_config(
         cap_args={"read_text": "hello world", "read_uri": "test://doc.md"},
@@ -551,9 +549,7 @@ async def test_e2e_at_mention_wrong_uri_returns_empty() -> None:
 
         # Wrong URI — no cap can resolve it
         part = _make_resource_part("test://nonexistent.md")
-        result = await extract_user_prompt_from_parts(
-            [part], "test-session", agent=agent
-        )
+        result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
         result_list = list(result)
 
         # Resource content dropped — only text parts (if any) remain
@@ -568,10 +564,11 @@ async def test_e2e_resource_capability_excluded_from_registry() -> None:
     It must not appear in registry query results to prevent signature
     mismatch errors (read_resource(ctx, uri) vs read_resource(uri)).
     """
+    import yamling
+
+    from agentpool import AgentPool, AgentsManifest
     from agentpool.capabilities.extension_registry import Scope, ScopeLevel
     from agentpool.capabilities.resource_capability import ResourceCapability
-    from agentpool import AgentPool, AgentsManifest
-    import yamling
 
     config = _make_pool_config()
     manifest = AgentsManifest.model_validate(yamling.load_yaml(config, verify_type=dict))
@@ -585,9 +582,9 @@ async def test_e2e_resource_capability_excluded_from_registry() -> None:
         )
         resource_caps = list(registry.get_resource_access(scope))
 
-        assert not any(
-            isinstance(c, ResourceCapability) for c in resource_caps
-        ), "ResourceCapability must not be in get_resource_access()"
+        assert not any(isinstance(c, ResourceCapability) for c in resource_caps), (
+            "ResourceCapability must not be in get_resource_access()"
+        )
 
 
 async def test_e2e_multiple_agents_resource_isolation() -> None:
@@ -597,10 +594,11 @@ async def test_e2e_multiple_agents_resource_isolation() -> None:
     Agent B has TestResourceAccessCap with read_uri="test://b.md".
     Querying with agent_name="a" should NOT find agent B's cap.
     """
+    import yamling
+
     from agentpool import AgentPool, AgentsManifest
     from agentpool.capabilities.extension_registry import Scope, ScopeLevel
     from agentpool.capabilities.resource_protocols import ResourceAccess
-    import yamling
 
     config = """\
 agents:
@@ -640,9 +638,10 @@ agents:
 
 async def test_e2e_skill_resource_resolution() -> None:
     """L2: SkillResource cap → skill:// URI resolved via _resolve_resource."""
+    import yamling
+
     from agentpool import AgentPool, AgentsManifest
     from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    import yamling
 
     config = _make_pool_config(
         cap_type="tests.fixtures.test_resource_cap.TestSkillResourceCap",
@@ -659,9 +658,7 @@ async def test_e2e_skill_resource_resolution() -> None:
         )
 
         part = _make_resource_part("skill://test-skill", client_name="test")
-        result = await extract_user_prompt_from_parts(
-            [part], "test-session", agent=agent
-        )
+        result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
         result_list = list(result)
 
         assert len(result_list) == 1
@@ -674,16 +671,16 @@ async def test_e2e_skill_resource_resolution() -> None:
 
 
 @pytest.mark.parametrize(
-    "cap_scope_level,query_scope_level,expected_found",
+    ("cap_scope_level", "query_scope_level", "expected_found"),
     [
         # Cap at AGENT scope → query at different scopes
-        ("AGENT", "SESSION", True),   # SESSION includes AGENT
-        ("AGENT", "AGENT", True),     # AGENT sees AGENT
-        ("AGENT", "POOL", False),     # POOL does NOT see AGENT
+        ("AGENT", "SESSION", True),  # SESSION includes AGENT
+        ("AGENT", "AGENT", True),  # AGENT sees AGENT
+        ("AGENT", "POOL", False),  # POOL does NOT see AGENT
         # Cap at POOL scope → query at different scopes
-        ("POOL", "SESSION", True),    # SESSION includes POOL
-        ("POOL", "AGENT", True),      # AGENT includes POOL
-        ("POOL", "POOL", True),       # POOL sees POOL
+        ("POOL", "SESSION", True),  # SESSION includes POOL
+        ("POOL", "AGENT", True),  # AGENT includes POOL
+        ("POOL", "POOL", True),  # POOL sees POOL
     ],
     ids=[
         "agent_cap_visible_at_session",
@@ -709,7 +706,6 @@ async def test_scope_visibility_matrix(
         Scope,
         ScopeLevel,
     )
-    from agentpool.capabilities.resource_protocols import ResourceAccess
 
     registry = ExtensionRegistry()
     cap = FakeResourceAccess(read_result=[TextResourceContent(text="x", uri="test://x")])
@@ -731,9 +727,9 @@ async def test_scope_visibility_matrix(
 
 
 @pytest.mark.parametrize(
-    "agent_name_cap,agent_name_query,expected_found",
+    ("agent_name_cap", "agent_name_query", "expected_found"),
     [
-        ("agent_a", "agent_a", True),   # Same agent → found
+        ("agent_a", "agent_a", True),  # Same agent → found
         ("agent_a", "agent_b", False),  # Different agent → NOT found
     ],
     ids=[
@@ -756,9 +752,7 @@ async def test_agent_isolation_matrix(
     registry = ExtensionRegistry()
     cap = FakeResourceAccess(read_result=[TextResourceContent(text="x", uri="test://x")])
 
-    registry.register(
-        cap, Scope(level=ScopeLevel.AGENT, agent_name=agent_name_cap)
-    )
+    registry.register(cap, Scope(level=ScopeLevel.AGENT, agent_name=agent_name_cap))
 
     query_scope = Scope(
         level=ScopeLevel.SESSION,
@@ -830,6 +824,5 @@ async def test_config_cap_no_duplicate_tools_after_get_agentlet() -> None:
         # _external_capabilities should have exactly 1 (from __init__).
         ext_ra = [c for c in agent._external_capabilities if isinstance(c, ResourceAccess)]
         assert len(ext_ra) == 1, (
-            f"_external_capabilities has {len(ext_ra)} ResourceAccess caps, "
-            "expected exactly 1"
+            f"_external_capabilities has {len(ext_ra)} ResourceAccess caps, expected exactly 1"
         )
