@@ -16,9 +16,8 @@ Configuration is via ``VikingCapabilityConfig`` in
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai.capabilities import AbstractCapability
@@ -497,24 +496,6 @@ class VikingCapability(AbstractCapability[Any]):
                     if entry.uri not in seen_uris:
                         seen_uris.add(entry.uri)
                         resources.append(entry)
-
-            # Enrich with L0 abstracts — batch-call client.abstract() for each
-            # resource. If abstracts fail, keep the path-based description.
-            if resources:
-
-                async def _safe_abstract(client: Any, r_uri: str) -> str:
-                    try:
-                        return str(await client.abstract(r_uri) or "")
-                    except Exception:
-                        return ""
-
-                abstracts = await asyncio.gather(
-                    *[_safe_abstract(client, r.uri) for r in resources],
-                    return_exceptions=True,
-                )
-                for i, ab in enumerate(abstracts):
-                    if isinstance(ab, str) and ab.strip():
-                        resources[i] = replace(resources[i], description=ab.strip())
 
             return resources
         except Exception:

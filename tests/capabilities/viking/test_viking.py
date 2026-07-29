@@ -1881,7 +1881,6 @@ class TestResourceAccessProtocol:
     ) -> None:
         # First call: top-level ls returns files + one directory
         # Second call: recursive ls of the directory returns more files
-        # abstract() calls enrich descriptions with L0 abstracts
         mock_client.ls = AsyncMock(
             side_effect=[
                 [
@@ -1894,19 +1893,19 @@ class TestResourceAccessProtocol:
                 ],
             ]
         )
-        mock_client.abstract = AsyncMock(return_value="L0 abstract")
         result = await viking_cap.list_resources()
         assert len(result) == 3  # only text files, no directories
         assert result[0].name == "doc1.md"
         assert result[0].uri == "viking://resources/doc1.md"
         assert result[0].mime_type == "text/markdown"
-        # Descriptions enriched with L0 abstracts
-        assert result[0].description == "L0 abstract"
+        # Descriptions use relative path (Viking abstract() returns parent dir
+        # abstract, not file-level, so we don't enrich files with abstracts)
+        assert result[0].description == "doc1.md"
         assert result[1].name == "doc2.txt"
         assert result[1].mime_type == "text/plain"
-        assert result[1].description == "L0 abstract"
+        assert result[1].description == "doc2.txt"
         assert result[2].name == "doc3.md"
-        assert result[2].description == "L0 abstract"
+        assert result[2].description == "subdir/doc3.md"
 
     async def test_list_resources_empty(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
@@ -2443,7 +2442,11 @@ class TestTieredLoadingListResources:
     async def test_list_resources_with_abstracts(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        """list_resources enriches descriptions with L0 abstracts."""
+        """list_resources uses relative path as description (no abstract enrichment).
+
+        Viking's abstract() returns the parent directory's abstract, not the
+        file's own, so we don't enrich file descriptions with abstracts.
+        """
         mock_client.ls = AsyncMock(
             side_effect=[
                 [
@@ -2451,18 +2454,18 @@ class TestTieredLoadingListResources:
                 ],
             ]
         )
-        mock_client.abstract = AsyncMock(return_value="This is the L0 abstract")
         result = await viking_cap.list_resources()
 
         assert len(result) == 1
-        assert result[0].description == "This is the L0 abstract"
-        mock_client.abstract.assert_called_once_with("viking://resources/doc1.md")
+        assert result[0].description == "doc1.md"
+        # abstract should not be called for files
+        mock_client.abstract.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_list_resources_abstract_failure_keeps_path(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        """list_resources keeps path-based description when abstract fails."""
+        """list_resources uses path-based description (no abstract calls)."""
         mock_client.ls = AsyncMock(
             side_effect=[
                 [
@@ -2470,18 +2473,16 @@ class TestTieredLoadingListResources:
                 ],
             ]
         )
-        mock_client.abstract = AsyncMock(side_effect=RuntimeError("not available"))
         result = await viking_cap.list_resources()
 
         assert len(result) == 1
-        # Falls back to path-based description
         assert result[0].description == "doc1.md"
 
     @pytest.mark.asyncio
     async def test_list_resources_empty_abstract_keeps_path(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        """list_resources keeps path-based description when abstract is empty."""
+        """list_resources uses path-based description (no abstract calls)."""
         mock_client.ls = AsyncMock(
             side_effect=[
                 [
@@ -2489,7 +2490,6 @@ class TestTieredLoadingListResources:
                 ],
             ]
         )
-        mock_client.abstract = AsyncMock(return_value="")
         result = await viking_cap.list_resources()
 
         assert len(result) == 1
