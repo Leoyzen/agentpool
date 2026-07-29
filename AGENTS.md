@@ -151,7 +151,8 @@ The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
   - `agents/` - Agent implementations (native, ACP)
-  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
+  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, ModalityFilterCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability, AgentContext, DelegationService, ResourceSource, entry-point registry)
+  - `capabilities/modality_utils.py` - Modality classification and description utilities for `ModalityFilterCapability`
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
   - `lifecycle/` - RunLoop lifecycle dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
   - `messaging/` - Message processing, MessageNode abstraction, compaction
@@ -236,6 +237,7 @@ In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai
 | `CombinedToolsetCapability` | `AggregatingResourceProvider` | `capabilities/combined_toolset.py` |
 | `FilteredToolsetCapability` | `FilteringResourceProvider` | `capabilities/filtered_toolset.py` |
 | `CodeModeCapability` | `CodeModeResourceProvider` | `capabilities/code_mode_capability.py` |
+| `ModalityFilterCapability` | — (new) | `capabilities/modality_filter.py` |
 | `DynamicContextPruningCapability` | — (new) | `capabilities/dcp/capability.py` |
 | `ToolOutputBudgetCapability` | — (new) | `capabilities/tool_output_budget.py` |
 | `ResourceCapability` | — (new) | `capabilities/resource_capability.py` |
@@ -248,6 +250,78 @@ In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai
 - `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream).
 - Entry-point registry (`capabilities/registry.py`) — Discovers custom capabilities via `agentpool.capabilities` entry-point group.
 - Resource Protocols (`capabilities/resource_protocols.py`) — Domain-specific `@runtime_checkable` Protocols for unified extension access: `ToolAccess`, `ResourceAccess`, `ResourceTemplateAccess`, `SkillResource`, `CommandResource`, `ChangeObservable`. The deprecated `McpResource` Protocol has been split into `ToolAccess` + `ResourceAccess` and emits `DeprecationWarning` on `isinstance()` checks. Note: `agentpool_server.opencode_server.models.mcp.McpResource` (Pydantic model) is unrelated and NOT affected.
+
+#### Model Capabilities and Modality Filter
+
+**`ModelCapabilities`** (`agentpool_config/model_capabilities.py`) is a tri-state config model declaring which multimodal input/output modalities a model supports. Each field defaults to `None` (defer to tokonomics runtime discovery), with explicit `True`/`False` as override.
+
+| Field | Modality | Default |
+|---|---|---|
+| `image_input` | Image input | `None` (tokonomics) |
+| `audio_input` | Audio input | `None` (tokonomics) |
+| `video_input` | Video input | `None` (tokonomics) |
+| `document_input` | Document input | `None` (tokonomics) |
+| `image_output` | Image output | `None` (tokonomics) |
+
+Attach to any `BaseModelConfig` via the `capabilities` field in YAML:
+
+```yaml
+model:
+  type: string
+  identifier: "openai:gpt-4o-mini"
+  capabilities:
+    image_input: false
+    audio_input: false
+    video_input: false
+    document_input: false
+    image_output: false
+```
+
+**`ModalityFilterCapability`** (`agentpool/capabilities/modality_filter.py`) degrades unsupported multimodal content for models that lack certain input modalities. It intercepts at two points:
+
+- **Tool returns** — via `wrap_tool_execute()` on `AbstractCapability`, filtering `ToolReturnPart` content before it reaches the model.
+- **Message history** — via `before_model_request()`, scanning `UserPromptPart` and `ToolReturnPart` in the conversation history.
+
+Each modality has a configurable strategy:
+
+| Strategy | Effect |
+|---|---|
+| `describe` (default) | Replace multimodal content with a text description placeholder. |
+| `drop` | Remove the content entirely. If all items in a list are dropped, a fallback string is returned. |
+| `pass` | Leave the content unchanged (no filtering). |
+
+**Capability chain ordering:** `ModalityFilterCapability` declares itself `wrapped_by` both `ToolOutputBudgetCapability` and `DynamicContextPruningCapability` via `get_ordering()`. This makes it INNER to both — tool returns are modality-filtered BEFORE budget truncation and BEFORE DCP pruning:
+
+```
+Model API
+  ↑ outer — ToolOutputBudgetCapability.wrap_tool_execute()
+    ↑ outer — DynamicContextPruningCapability.wrap_tool_execute()
+      ↑ inner — ModalityFilterCapability.wrap_tool_execute()  ← tool return
+```
+
+For `before_model_request`, the same ordering applies: ModalityFilter runs first (inner), then DCP's pruning runs on the already-filtered history.
+
+**Auto-injection**: `AgentFactory.get_agentlet()` auto-injects a `ModalityFilterCapability` when the resolved model capabilities indicate any unsupported input modality. If the user has already configured one in `capabilities:` config, the auto-injection populates the existing instance with resolved capabilities instead of creating a duplicate. This ensures user-configured strategy overrides (e.g. `drop` instead of `describe`) are preserved.
+
+YAML-level user config:
+
+```yaml
+agents:
+  text_only_agent:
+    type: native
+    model:
+      type: string
+      identifier: "openai:gpt-4o-mini"
+      capabilities:
+        image_input: false
+        audio_input: false
+        video_input: false
+        document_input: false
+    capabilities:
+      - type: modality_filter
+        image_strategy: describe
+        audio_strategy: drop
+```
 
 **Deleted alongside ResourceProviders:**
 - `src/agentpool/tools/factory.py` (194 LOC, 6 `ToolsetFactory` classes) — became dead code after all providers migrated.
@@ -1280,6 +1354,20 @@ Use `UPath` (universal_pathlib) not `Path` - supports remote filesystems (s3://,
 Prefer string shorthand in YAML: `model: "openai:gpt-4o"`
 Fallback models: `type: fallback, models: [primary, backup]`
 
+**Multimodal capability overrides**: Use the `capabilities:` field on any model config to explicitly declare which modalities the model supports. All fields default to `None` (discover at runtime via tokonomics):
+
+```yaml
+model:
+  type: string
+  identifier: "openai:gpt-4o-mini"
+  capabilities:
+    image_input: false     # Explicitly disable image input
+    audio_input: false     # Explicitly disable audio input
+    document_input: true   # Explicitly enable document input
+```
+
+When capabilities are set to `false`, `ModalityFilterCapability` is auto-injected to degrade unsupported multimodal content. See [Model Capabilities and Modality Filter](#model-capabilities-and-modality-filter) for details.
+
 ### Entry Points
 The project uses entry points for extensibility:
 - `agentpool_toolsets` - Register custom toolsets
@@ -1311,10 +1399,13 @@ The project uses entry points for extensibility:
 - `src/agentpool/skills/registry.py` - Skill discovery
 - `src/agentpool/skills/capability.py` - `SkillCapability(AbstractCapability)` with `ResourceSource` implementation
 - `src/agentpool/skills/instruction_provider.py` - `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
-- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability)
+- `src/agentpool/capabilities/` - All native capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, ModalityFilterCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability)
 - `src/agentpool/capabilities/agent_context.py` - `AgentContext` frozen dataclass
 - `src/agentpool/capabilities/dcp/` - Dynamic Context Pruning (DCP) capability package — `DynamicContextPruningCapability`, `DCPConfig`, `DCPState`, 3 model-facing tools (prune/distill/decompress), 4-level watermark, auto-strategies (dedup, purge_errors), prunable-tools list, nudge injection, clear thinking
 - `src/agentpool/capabilities/tool_output_budget.py` - `ToolOutputBudgetCapability` — truncates large tool outputs with configurable suffix
+- `src/agentpool/capabilities/modality_filter.py` - `ModalityFilterCapability` — degrades unsupported multimodal content via configurable strategies (describe/drop/pass)
+- `src/agentpool/capabilities/modality_utils.py` — Modality classification utilities (`classify_binary_content`, `describe_multimodal_content`)
+- `src/agentpool_config/model_capabilities.py` — `ModelCapabilities` tri-state config model for multimodal capability overrides
 - `src/agentpool/capabilities/resource_capability.py` - `ResourceCapability` — unified resource access via 5 agent-facing tools (list_resources, read_resource, resource_exists, list_resource_templates, complete_resource_template)
 - `src/agentpool/capabilities/resource_protocols.py` - Domain-specific Protocols (`ToolAccess`, `ResourceAccess`, `ResourceTemplateAccess`, `SkillResource`, `CommandResource`, `ChangeObservable`) + deprecated `McpResource` alias
 - `src/agentpool/capabilities/delegation.py` - `DelegationService` Protocol

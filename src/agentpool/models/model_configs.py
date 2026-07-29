@@ -19,6 +19,8 @@ from tokonomics.model_names.anthropic import AnthropicModelName
 from tokonomics.model_names.gemini import GeminiModelName
 from tokonomics.model_names.openai import OpenaiModelName
 
+from agentpool_config.model_capabilities import ModelCapabilities
+
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
@@ -113,6 +115,20 @@ class BaseModelConfig(Schema):
     Controls the model's context window for display in protocol UIs
     (OpenCode, ACP) and compaction/truncation decisions.
     When not set, falls back to tokonomics discovery or DEFAULT_MODEL_CONTEXT_LIMIT.
+    """
+
+    capabilities: ModelCapabilities | None = Field(
+        default=None,
+        title="Model capabilities",
+        description="Explicit multimodal capability overrides. When omitted, "
+        "capabilities are discovered at runtime via tokonomics.",
+    )
+    """Explicit multimodal input/output capability overrides.
+
+    When ``None`` (default), capabilities are discovered at runtime via
+    tokonomics. When set, each field in the ``ModelCapabilities`` model
+    acts as a tri-state: ``None`` (defer to discovery), ``True``
+    (explicitly supported), or ``False`` (explicitly unsupported).
     """
 
     def get_model(self) -> Model:

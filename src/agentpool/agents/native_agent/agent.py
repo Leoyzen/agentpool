@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from agentpool.ui.base import InputProvider
     from agentpool_config.knowledge import Knowledge
     from agentpool_config.mcp_server import MCPServerConfig
+    from agentpool_config.model_capabilities import ModelCapabilities
     from agentpool_config.nodes import ToolConfirmationMode
     from agentpool_config.session import MemoryConfig, SessionQuery
 
@@ -94,6 +95,80 @@ def _build_capability_from_config(config: Any) -> Any:
     from agentpool_config.capabilities import build_capability
 
     return build_capability(config)
+
+
+def _model_config_names(config: Any) -> list[str]:
+    """Extract model name string(s) from a BaseModelConfig.
+
+    For ``FallbackModelConfig``, returns all sub-model names.
+    For configs with an ``identifier`` field, returns ``[identifier]``.
+    For ``TestModelConfig``, returns ``[]`` (no tokonomics lookup).
+    """
+    from agentpool.models.model_configs import (
+        AnthropicModelConfig,
+        FallbackModelConfig,
+        GeminiModelConfig,
+        OpenAIModelConfig,
+        StringModelConfig,
+    )
+
+    if isinstance(config, FallbackModelConfig):
+        names: list[str] = []
+        for sub in config.models:
+            match sub:
+                case _ if isinstance(sub, FallbackModelConfig):
+                    names.extend(_model_config_names(sub))
+                case str():
+                    names.append(sub)
+                case StringModelConfig():
+                    names.append(str(sub.identifier))
+                case OpenAIModelConfig():
+                    names.append(str(sub.identifier))
+                case AnthropicModelConfig():
+                    names.append(str(sub.identifier))
+                case GeminiModelConfig():
+                    names.append(str(sub.identifier))
+                case _:
+                    pass
+        return names
+    if isinstance(config, StringModelConfig):
+        return [str(config.identifier)]
+    if isinstance(config, OpenAIModelConfig):
+        return [str(config.identifier)]
+    if isinstance(config, AnthropicModelConfig):
+        return [str(config.identifier)]
+    if isinstance(config, GeminiModelConfig):
+        return [str(config.identifier)]
+    # TestModelConfig, ImportModelConfig, etc. — no tokonomics lookup.
+    return []
+
+
+def _intersect_capabilities(
+    caps_list: list[ModelCapabilities],
+) -> ModelCapabilities:
+    """Compute pessimistic intersection of resolved capabilities.
+
+    For each field, ``False`` wins over ``True`` — if any model says
+    ``False``, the result is ``False``.
+    """
+    from agentpool_config.model_capabilities import ModelCapabilities
+
+    fields = (
+        "image_input",
+        "audio_input",
+        "video_input",
+        "document_input",
+        "image_output",
+    )
+    result: dict[str, bool] = {}
+    for field in fields:
+        values = [getattr(c, field) for c in caps_list]
+        # If any model says False, result is False (pessimistic).
+        if any(v is False for v in values):
+            result[field] = False
+        else:
+            result[field] = True
+    return ModelCapabilities(**result)
 
 
 TResult = TypeVar("TResult")
@@ -773,6 +848,110 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         wrapped_tool.__name__ = tool_name
         return Tool.from_callable(wrapped_tool, source="agent")
 
+    # ------------------------------------------------------------------
+    # Multimodal capability resolution & ModalityFilter injection
+    # ------------------------------------------------------------------
+
+    def _get_model_names_for_capability_resolution(self) -> list[str]:
+        """Return model name(s) for tokonomics capability lookup.
+
+        For fallback models, returns all sub-model names so the caller
+        can compute the intersection (pessimistic) of capabilities.
+        """
+        from agentpool.models.model_configs import (
+            BaseModelConfig,
+            FallbackModelConfig,
+        )
+
+        if self.config is None:
+            return []
+        model_cfg = self.config.model
+        if not isinstance(model_cfg, BaseModelConfig):
+            # model is a plain string (ModelId | str)
+            return [str(model_cfg)]
+        if isinstance(model_cfg, FallbackModelConfig):
+            names: list[str] = []
+            for sub in model_cfg.models:
+                match sub:
+                    case BaseModelConfig():
+                        names.extend(_model_config_names(sub))
+                    case str():
+                        names.append(sub)
+                    case _:
+                        pass
+            return names
+        return _model_config_names(model_cfg)
+
+    def _get_declared_capabilities(self) -> ModelCapabilities | None:
+        """Extract declared ModelCapabilities from the agent's model config.
+
+        Returns ``None`` when no model config or no capabilities field is
+        present.
+        """
+        from agentpool.models.model_configs import BaseModelConfig
+
+        if self.config is None:
+            return None
+        model_cfg = self.config.model
+        if not isinstance(model_cfg, BaseModelConfig):
+            return None
+        return model_cfg.capabilities
+
+    async def _resolve_model_capabilities(
+        self,
+        model_: Model,
+    ) -> ModelCapabilities | None:
+        """Resolve full ModelCapabilities (all fields bool) for the agent.
+
+        Returns ``None`` when no model name is available for tokonomics
+        lookup and no capabilities are declared.  For FallbackModelConfig,
+        computes the intersection (pessimistic) of all sub-models'
+        resolved capabilities.
+        """
+        from agentpool.host.stubs import resolve_capabilities
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        declared = self._get_declared_capabilities()
+        model_names = self._get_model_names_for_capability_resolution()
+
+        if not model_names:
+            # No model name for tokonomics — return declared (or None).
+            return declared
+
+        if declared is None:
+            declared = ModelCapabilities()
+
+        if len(model_names) == 1:
+            return await resolve_capabilities(model_names[0], declared)
+
+        # Fallback: intersection (pessimistic) of all sub-models.
+        resolved_list = [await resolve_capabilities(name, declared) for name in model_names]
+        return _intersect_capabilities(resolved_list)
+
+    def _apply_image_output_profile(
+        self,
+        model_: Model,
+        caps: ModelCapabilities,
+    ) -> Model:
+        """Apply image_output capability to the pydantic-ai Model profile.
+
+        When ``image_output`` is explicitly set (not None), merges the
+        override into the model's existing profile.  Returns the same
+        model instance with ``_profile`` updated.
+        """
+        if caps.image_output is None:
+            return model_
+
+        existing = model_._profile
+        match existing:
+            case None:
+                model_._profile = {"supports_image_output": caps.image_output}
+            case dict():
+                model_._profile = {**existing, "supports_image_output": caps.image_output}
+            case _:  # callable form
+                model_._profile = {"supports_image_output": caps.image_output}
+        return model_
+
     async def get_agentlet[AgentOutputType](  # noqa: PLR0915
         self,
         model: ModelType | None,
@@ -974,6 +1153,34 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 else:
                     # Pre-instantiated AbstractCapability
                     tool_capabilities.append(cap)
+
+        # ------------------------------------------------------------------
+        # Model capability resolution — resolve ModelCapabilities for
+        # image_output profile mapping and for populating any
+        # user-configured ModalityFilterCapability instances.
+        # ------------------------------------------------------------------
+        resolved_caps = await self._resolve_model_capabilities(model_)
+        if resolved_caps is not None:
+            # 5.4 — Apply image_output profile to the pydantic-ai Model.
+            model_ = self._apply_image_output_profile(model_, resolved_caps)
+
+            # Populate any user-configured ModalityFilterCapability with
+            # resolved model capabilities.  This is NOT auto-injection —
+            # the user must explicitly configure ``type: modality_filter``
+            # in YAML capabilities for this to activate.
+            from agentpool.capabilities.modality_filter import (
+                ModalityFilterCapability,
+            )
+
+            for i, cap in enumerate(tool_capabilities):
+                if isinstance(cap, ModalityFilterCapability):
+                    tool_capabilities[i] = ModalityFilterCapability(
+                        capabilities=resolved_caps,
+                        image_strategy=cap.image_strategy,
+                        audio_strategy=cap.audio_strategy,
+                        video_strategy=cap.video_strategy,
+                        document_strategy=cap.document_strategy,
+                    )
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:

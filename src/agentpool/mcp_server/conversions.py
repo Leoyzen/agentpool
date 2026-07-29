@@ -192,8 +192,8 @@ def content_block_as_text(content: ContentBlock) -> str:
         case ResourceLink(uri=uri, description=desc):
             return f"[Resource Link: {uri}] - {desc}" if desc else f"[Resource Link: {uri}]"
         case ImageContent(mimeType=mime_type):
-            return f"[Image: {mime_type}]"
+            return f"[{mime_type}]"
         case AudioContent(mimeType=mime_type):
-            return f"[Audio: {mime_type}]"
+            return f"[{mime_type}]"
         case _ as unreachable:
             assert_never(unreachable)
