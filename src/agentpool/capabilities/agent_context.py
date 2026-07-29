@@ -41,6 +41,8 @@ class AgentContextDeps:
         host: Infrastructure handles (mcp, storage, skills, etc.).
         extension_registry: ExtensionRegistry for scoped capability access.
         team_mode_config: Global team mode config from manifest, if enabled.
+        agent_name: Name of the agent this context belongs to. Used for
+            AGENT scope queries in the ExtensionRegistry.
     """
 
     agent_registry: AgentRegistry
@@ -50,6 +52,7 @@ class AgentContextDeps:
     host: HostContext
     extension_registry: ExtensionRegistry | None = None
     team_mode_config: TeamModeConfig | None = None
+    agent_name: str = ""
 
 
 def resolve_agent_context_from_deps(

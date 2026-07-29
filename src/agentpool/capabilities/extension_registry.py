@@ -2,16 +2,17 @@
 
 Replaces fragmented infrastructure (SkillURIResolver._providers,
 AggregatedResourceSource) with a single registry
-that supports pool, session, agent, and turn-level capability scoping.
+that supports pool, agent, session, and turn-level capability scoping.
 
 Scope hierarchy (outer → inner):
-    POOL → SESSION → AGENT → TURN
+    POOL → AGENT → SESSION → TURN
 
-Pool-level capabilities are visible to all sessions. Session-level
-capabilities are visible only within their session. Agent-level
-capabilities are visible only to the named agent. Turn-level capabilities
-are visible only for the duration of one turn and are guarded by an
-``asyncio.Lock`` for concurrent access.
+Pool-level capabilities are visible to all agents and sessions.
+Agent-level capabilities are visible to a specific named agent across
+all sessions (agent configs are compiled once and reused). Session-level
+capabilities are visible only within their session (e.g. MCP connections).
+Turn-level capabilities are visible only for the duration of one turn
+and are guarded by an ``asyncio.Lock`` for concurrent access.
 """
 
 from __future__ import annotations
@@ -53,15 +54,15 @@ class ScopeLevel(Enum):
     """Capability scope level.
 
     Attributes:
-        POOL: Visible to all sessions, agents, and turns.
+        POOL: Visible to all agents, sessions, and turns.
+        AGENT: Visible to a specific named agent across all sessions.
         SESSION: Visible only within a specific session.
-        AGENT: Visible only to a specific named agent.
         TURN: Visible only for the duration of one turn.
     """
 
     POOL = auto()
-    SESSION = auto()
     AGENT = auto()
+    SESSION = auto()
     TURN = auto()
 
 
@@ -70,15 +71,15 @@ class Scope:
     """Immutable scope identifying where a capability is visible.
 
     Attributes:
-        level: The scope level (POOL/SESSION/AGENT/TURN).
-        session_id: Session identifier (required for SESSION/AGENT/TURN).
-        agent_name: Agent name (required for AGENT/TURN).
+        level: The scope level (POOL/AGENT/SESSION/TURN).
+        agent_name: Agent name (required for AGENT scope).
+        session_id: Session identifier (required for SESSION/TURN).
         turn_id: Turn identifier (required for TURN).
     """
 
     level: ScopeLevel
-    session_id: str = ""
     agent_name: str = ""
+    session_id: str = ""
     turn_id: str = ""
 
 
@@ -97,12 +98,25 @@ class ExtensionRegistry:
     """Registry for capabilities with 4-level scope storage.
 
     Capabilities are registered at a specific scope level and are
-    visible to all inner scopes. The registry provides typed query
-    methods that filter by Resource Protocol type, URI resolution
-    by scheme, and change stream merging.
+    visible to all inner scopes. The scope hierarchy is::
+
+        POOL > AGENT > SESSION > TURN
+
+    - **POOL**: visible to all agents and sessions (e.g. skills, subagent).
+    - **AGENT**: visible to a specific named agent across all sessions
+      (e.g. config-derived caps compiled by ``AgentFactory.compile()``).
+    - **SESSION**: visible within a specific session (e.g. MCP connections).
+    - **TURN**: visible for one turn (e.g. ModalityFilter with resolved
+      model caps).
+
+    A SESSION scope query returns ``POOL + AGENT + SESSION`` capabilities,
+    providing a complete view for a specific agent in a specific session.
+
+    The registry provides typed query methods that filter by Resource
+    Protocol type, URI resolution by scheme, and change stream merging.
 
     Turn-level registration is guarded by an ``asyncio.Lock`` to
-    prevent concurrent modification. Pool, session, and agent-level
+    prevent concurrent modification. Pool, agent, and session-level
     dicts do not require locking (mutated only at startup/shutdown).
 
     Composition cycle detection and depth limiting are performed at
@@ -122,13 +136,14 @@ class ExtensionRegistry:
         """
         self._max_composition_depth = max_composition_depth
 
-        # 4-level scope storage
+        # 4-level scope storage: POOL > AGENT > SESSION > TURN
         self._pool: list[AbstractCapability[Any]] = []
+        self._agent: dict[str, list[AbstractCapability[Any]]] = {}
+        # agent: agent_name → caps (pool lifetime, reused across sessions)
         self._session: dict[str, list[AbstractCapability[Any]]] = {}
-        self._agent: dict[str, dict[str, list[AbstractCapability[Any]]]] = {}
-        # agent: session_id → agent_name → caps
+        # session: session_id → caps (session lifetime)
         self._turn: dict[str, dict[str, dict[str, list[AbstractCapability[Any]]]]] = {}
-        # turn: session_id → agent_name → turn_id → caps
+        # turn: session_id → agent_name → turn_id → caps (turn lifetime)
 
         # Lock for turn-level mutations
         self._turn_lock = asyncio.Lock()
@@ -165,12 +180,10 @@ class ExtensionRegistry:
         match scope.level:
             case ScopeLevel.POOL:
                 self._pool.append(capability)
+            case ScopeLevel.AGENT:
+                self._agent.setdefault(scope.agent_name, []).append(capability)
             case ScopeLevel.SESSION:
                 self._session.setdefault(scope.session_id, []).append(capability)
-            case ScopeLevel.AGENT:
-                self._agent.setdefault(scope.session_id, {}).setdefault(
-                    scope.agent_name, []
-                ).append(capability)
             case ScopeLevel.TURN:
                 # Turn-level registration requires the lock
                 # But register() is sync — we need to use the async variant
@@ -226,15 +239,14 @@ class ExtensionRegistry:
                     self._pool.remove(capability)
                     return True
                 return False
-            case ScopeLevel.SESSION:
-                caps = self._session.get(scope.session_id, [])
+            case ScopeLevel.AGENT:
+                caps = self._agent.get(scope.agent_name, [])
                 if capability in caps:
                     caps.remove(capability)
                     return True
                 return False
-            case ScopeLevel.AGENT:
-                agent_map = self._agent.get(scope.session_id, {})
-                caps = agent_map.get(scope.agent_name, [])
+            case ScopeLevel.SESSION:
+                caps = self._session.get(scope.session_id, [])
                 if capability in caps:
                     caps.remove(capability)
                     return True
@@ -292,6 +304,17 @@ class ExtensionRegistry:
         if not session_map:
             self._turn.pop(session_id, None)
 
+    def clear_session(self, session_id: str) -> None:
+        """Clear all SESSION and TURN level entries for the given session.
+
+        AGENT and POOL level caps are NOT affected (they outlive sessions).
+
+        Args:
+            session_id: Session identifier to clean up.
+        """
+        self._session.pop(session_id, None)
+        self._turn.pop(session_id, None)
+
     # ------------------------------------------------------------------
     # Query
     # ------------------------------------------------------------------
@@ -302,24 +325,27 @@ class ExtensionRegistry:
     ) -> list[AbstractCapability[Any]]:
         """Get all capabilities visible at the given scope.
 
-        Walks the scope hierarchy from pool → session → agent → turn,
+        Walks the scope hierarchy from pool → agent → session → turn,
         collecting all capabilities at each level.
+
+        With the hierarchy ``POOL > AGENT > SESSION > TURN``, a SESSION
+        scope query returns ``POOL + AGENT + SESSION`` capabilities —
+        the complete view for a specific agent in a specific session.
 
         Args:
             scope: The scope to query.
 
         Returns:
-            List of visible capabilities (pool + matching session +
-            matching agent + matching turn).
+            List of visible capabilities (pool + matching agent +
+            matching session + matching turn).
         """
         result: list[AbstractCapability[Any]] = list(self._pool)
 
+        if scope.level.value >= ScopeLevel.AGENT.value:
+            result.extend(self._agent.get(scope.agent_name, []))
+
         if scope.level.value >= ScopeLevel.SESSION.value:
             result.extend(self._session.get(scope.session_id, []))
-
-        if scope.level.value >= ScopeLevel.AGENT.value:
-            agent_map = self._agent.get(scope.session_id, {})
-            result.extend(agent_map.get(scope.agent_name, []))
 
         if scope.level.value >= ScopeLevel.TURN.value:
             session_map = self._turn.get(scope.session_id, {})

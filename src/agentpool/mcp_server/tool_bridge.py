@@ -299,8 +299,27 @@ class ToolManagerBridge:
         logger.info("ToolManagerBridge stopped")
 
     def _subscribe_to_tool_changes(self) -> None:
-        """Subscribe to tool changes from all providers via signals."""
-        for _provider in self.node._all_capabilities:
+        """Subscribe to tool changes from all observable capabilities."""
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+        node = self.node
+        host_ctx = node.host_context
+        registry = host_ctx.extension_registry if host_ctx is not None else None
+        if registry is not None:
+            session_id = node.session_id or ""
+            if session_id:
+                scope = Scope(
+                    level=ScopeLevel.SESSION,
+                    agent_name=node.name,
+                    session_id=session_id,
+                )
+            else:
+                scope = Scope(level=ScopeLevel.AGENT, agent_name=node.name)
+            _providers = registry.get_observable_capabilities(scope)
+        else:
+            _providers = node._all_capabilities
+
+        for _provider in _providers:
             on_change = getattr(_provider, "on_change", None)
             if callable(on_change):
                 # on_change returns an async iterator or None
@@ -308,8 +327,27 @@ class ToolManagerBridge:
                 pass  # Signal-based change notification handled per-capability
 
     def _unsubscribe_from_tool_changes(self) -> None:
-        """Disconnect from tool change signals on all providers."""
-        for _provider in self.node._all_capabilities:
+        """Disconnect from tool change signals on all observable capabilities."""
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+        node = self.node
+        host_ctx = node.host_context
+        registry = host_ctx.extension_registry if host_ctx is not None else None
+        if registry is not None:
+            session_id = node.session_id or ""
+            if session_id:
+                scope = Scope(
+                    level=ScopeLevel.SESSION,
+                    agent_name=node.name,
+                    session_id=session_id,
+                )
+            else:
+                scope = Scope(level=ScopeLevel.AGENT, agent_name=node.name)
+            _providers = registry.get_observable_capabilities(scope)
+        else:
+            _providers = node._all_capabilities
+
+        for _provider in _providers:
             pass  # No-op: signal subscriptions are managed per-capability
 
     async def _on_tools_changed(self, event: ChangeEvent) -> None:

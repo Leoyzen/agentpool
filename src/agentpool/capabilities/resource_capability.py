@@ -146,15 +146,18 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     def _make_scope(agent_ctx: AgentContextDeps) -> Scope:
         """Build a ``Scope`` from ``AgentContextDeps`` fields.
 
+        Uses SESSION level to get the complete view (POOL + AGENT + SESSION).
+
         Args:
             agent_ctx: The per-turn agent context.
 
         Returns:
-            A ``Scope`` at AGENT level with session/agent identifiers.
+            A ``Scope`` at SESSION level with agent and session identifiers.
         """
         session_id = agent_ctx.session.session_id if agent_ctx.session else ""
         return Scope(
-            level=ScopeLevel.AGENT,
+            level=ScopeLevel.SESSION,
+            agent_name=agent_ctx.agent_name,
             session_id=session_id,
         )
 

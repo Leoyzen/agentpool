@@ -135,16 +135,19 @@ async def _resolve_resource(
     """Resolve a resource and return its content as a list of UserContent items.
 
     Uses the agent's ``ExtensionRegistry`` (via ``host_context``) with a
-    session-scoped ``Scope`` to find ``ResourceAccess`` and ``SkillResource``
-    providers. Falls back to ``agent._all_capabilities`` if the registry
-    is unavailable.
+    session-scoped ``Scope`` (including ``agent_name``) to find
+    ``ResourceAccess`` and ``SkillResource`` providers.
 
     Returns None if the resource is not found.
     """
     from agentpool.capabilities.extension_registry import Scope, ScopeLevel
     from agentpool.capabilities.resource_resolver import resolve_resource_content
 
-    scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
+    scope = Scope(
+        level=ScopeLevel.SESSION,
+        agent_name=agent.name,
+        session_id=session_id,
+    )
     host_ctx = agent.host_context
     if host_ctx is None:
         raise RuntimeError(f"Agent host_context is None, cannot resolve resource {source.uri!r}")
@@ -182,8 +185,8 @@ async def extract_user_prompt_from_parts(
         parts: List of OpenCode message input parts
         fs: Optional async filesystem for PathReference resolution
         agent: Optional agent for resolving MCP resources
-        session_id: Optional session ID for scoped resource resolution via
-            ExtensionRegistry. When empty, falls back to agent._all_capabilities.
+        session_id: Session ID for scoped resource resolution via
+            ExtensionRegistry.
 
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
