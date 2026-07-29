@@ -902,6 +902,60 @@ async def test_resolve_agent_context_wrong_deps_type() -> None:
         await cap.list_resources(ctx)
 
 
+async def test_resolve_agent_context_from_runtime_context() -> None:
+    """_resolve_agent_context unwraps AgentContext from RuntimeAgentContext.data.
+
+    In production, PydanticAI wraps our AgentContext inside
+    agents.context.AgentContext.data. The tool functions receive
+    ctx.deps = agents.context.AgentContext, and our
+    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    """
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    agent_ctx = _make_agent_context(registry=None)
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = agent_ctx
+
+    ctx = MagicMock()
+    ctx.deps = runtime_ctx
+
+    cap = ResourceCapability()
+    result = await cap.list_resources(ctx)
+
+    # Should NOT raise — should return "No resources available." since
+    # extension_registry is None on the inner AgentContext.
+    assert result == "No resources available."
+
+
+async def test_resolve_agent_context_none_deps() -> None:
+    """_resolve_agent_context raises RuntimeError when deps is None."""
+    ctx = MagicMock()
+    ctx.deps = None
+
+    cap = ResourceCapability()
+    with pytest.raises(
+        RuntimeError, match=r"ResourceCapability requires AgentContext as deps\. Got: None"
+    ):
+        await cap.list_resources(ctx)
+
+
+async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
+    """_resolve_agent_context raises RuntimeError when RuntimeAgentContext.data is None."""
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = None
+
+    ctx = MagicMock()
+    ctx.deps = runtime_ctx
+
+    cap = ResourceCapability()
+    with pytest.raises(
+        RuntimeError, match=r"ResourceCapability requires AgentContext at deps\.data\. Got: None"
+    ):
+        await cap.list_resources(ctx)
+
+
 async def test_list_resources_providers_return_empty() -> None:
     """list_resources returns 'No resources available.' when providers return empty lists."""
     ra = FakeResourceAccess(resources=[])

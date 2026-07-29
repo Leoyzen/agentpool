@@ -17,7 +17,7 @@ Tools exposed:
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, cast
 
 import logfire
 from pydantic import Field
@@ -128,18 +128,36 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
         """Extract the ``AgentContext`` from the run context deps.
 
+        In production, ``ctx.deps`` is ``agents.context.AgentContext`` (the
+        PydanticAI runtime context). Our ``capabilities.agent_context.AgentContext``
+        is stored at ``deps.data``, set by ``NativeTurn`` (turn.py:
+        ``agent_deps.data = run_ctx.deps``). In tests, deps may be directly
+        our ``AgentContext``.
+
         Args:
             ctx: The pydantic-ai run context.
 
         Returns:
-            The ``AgentContext`` instance from ``ctx.deps``.
+            The ``AgentContext`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
 
         Raises:
-            RuntimeError: If deps is not an ``AgentContext``.
+            RuntimeError: If deps is None or AgentContext is not found.
         """
+        from agentpool.agents.context import AgentContext as RuntimeAgentContext
         from agentpool.capabilities.agent_context import AgentContext
 
         deps = ctx.deps
+        if deps is None:
+            msg = "ResourceCapability requires AgentContext as deps. Got: None"
+            raise RuntimeError(msg)
+        # Production path: deps is RuntimeAgentContext, M2 AgentContext at .data
+        if isinstance(deps, RuntimeAgentContext):
+            inner = deps.data
+            if inner is None:
+                msg = "ResourceCapability requires AgentContext at deps.data. Got: None"
+                raise RuntimeError(msg)
+            return cast(AgentContext, inner)
+        # Test path: deps is directly our AgentContext
         if isinstance(deps, AgentContext):
             return deps
         msg = (

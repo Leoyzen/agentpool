@@ -231,3 +231,69 @@ def test_agent_not_found_error_message() -> None:
     err = AgentNotFoundError("my_agent")
     assert err.agent_name == "my_agent"
     assert "my_agent" in str(err)
+
+
+# =============================================================================
+# Regression tests: _resolve_agent_context unwrapping
+# =============================================================================
+
+
+async def test_resolve_agent_context_from_runtime_context() -> None:
+    """_resolve_agent_context unwraps AgentContext from RuntimeAgentContext.data.
+
+    In production, PydanticAI wraps our AgentContext inside
+    agents.context.AgentContext.data. The tool functions receive
+    ctx.deps = agents.context.AgentContext, and our
+    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    """
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    delegation = FakeDelegationService(agents=["alpha", "beta"])
+    host = MagicMock()
+    host.session_pool = None
+    agent_registry = MagicMock()
+    agent_registry.list_names = MagicMock(return_value=delegation.get_available_agents())
+
+    cap_ctx = AgentContext(
+        agent_registry=agent_registry,
+        delegation=delegation,
+        session=MagicMock(),
+        scope=RunScope(),
+        host=host,
+    )
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = cap_ctx
+
+    ctx = MagicMock()
+    ctx.deps = runtime_ctx
+
+    result = await SubagentCapability.get_available_agents(ctx)
+
+    assert result == ["alpha", "beta"]
+
+
+async def test_resolve_agent_context_none_deps() -> None:
+    """_resolve_agent_context raises RuntimeError when deps is None."""
+    ctx = MagicMock()
+    ctx.deps = None
+
+    with pytest.raises(
+        RuntimeError, match=r"SubagentCapability requires AgentContext as deps\. Got: None"
+    ):
+        await SubagentCapability.get_available_agents(ctx)
+
+
+async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
+    """_resolve_agent_context raises RuntimeError when RuntimeAgentContext.data is None."""
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = None
+
+    ctx = MagicMock()
+    ctx.deps = runtime_ctx
+
+    with pytest.raises(
+        RuntimeError, match=r"SubagentCapability requires AgentContext at deps\.data\. Got: None"
+    ):
+        await SubagentCapability.get_available_agents(ctx)
