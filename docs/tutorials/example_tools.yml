@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+agents:
+  file_manager:
+    type: native
+    model: openai:gpt-5
+    system_prompt: "You help users manage their files and directories."
+    tools:
+      - type: import
+        import_path: os.listdir
+        name: list_files
+        description: "List directory contents"
+      - type: import
+        import_path: os.remove
+        name: delete_file
+        description: "Delete a file"
+      - type: import
+        import_path: custom_tools.modify_file
+        name: modify_file
+        description: "Modify file contents"

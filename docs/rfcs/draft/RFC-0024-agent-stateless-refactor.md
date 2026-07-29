@@ -15,7 +15,7 @@ related_rfcs:
 
 # RFC-0024: Agent Stateless Refactor — Decouple Session State from BaseAgent
 
-> **Phase 2 of the Multi-Session Isolation Roadmap.** Depends on [RFC-0026](./RFC-0026-per-session-agent-isolation.md) (Phase 1). Enables [RFC-0025](./RFC-0025-shared-agent-architecture.md) (Phase 3).
+> **Phase 2 of the Multi-Session Isolation Roadmap.** Depends on [RFC-0026](../implemented/RFC-0026-per-session-agent-isolation.md) (Phase 1). Enables [RFC-0025](./RFC-0025-shared-agent-architecture.md) (Phase 3).
 
 ## Overview
 
@@ -57,7 +57,7 @@ Key design elements:
 
 ### Why This Matters Now
 
-After [RFC-0026](./RFC-0026-per-session-agent-isolation.md), each session has its own `BaseAgent` instance. This works, but has a cost: each instance spawns its own MCP subprocesses (~10–50MB, ~1–4s init). If `BaseAgent` were stateless, a single agent instance could serve all sessions (Phase 3), reducing resource cost by N× (where N = concurrent sessions).
+After [RFC-0026](../implemented/RFC-0026-per-session-agent-isolation.md), each session has its own `BaseAgent` instance. This works, but has a cost: each instance spawns its own MCP subprocesses (~10–50MB, ~1–4s init). If `BaseAgent` were stateless, a single agent instance could serve all sessions (Phase 3), reducing resource cost by N× (where N = concurrent sessions).
 
 ## Problem Statement
 
@@ -409,7 +409,7 @@ class AgentContext:
 
 ### Dependencies
 
-- Requires [RFC-0026](./RFC-0026-per-session-agent-isolation.md) (Phase 1) to be complete
+- Requires [RFC-0026](../implemented/RFC-0026-per-session-agent-isolation.md) (Phase 1) to be complete
 - `AgentRunContext` (from RFC-0021) provides per-run isolation for event_queue, injection_manager, cancellation
 
 ### Rollback
@@ -464,8 +464,8 @@ Each phase is independently revertable. If `_active_run_ctx` registry proves pro
 
 ## References
 
-- [RFC-0021: Agent Concurrent Execution Safety](../accepted/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
-- [RFC-0026: Per-Session Agent Instances](./RFC-0026-per-session-agent-isolation.md) — Phase 1: Remove `agent_lock`
+- [RFC-0021: Agent Concurrent Execution Safety](../implemented/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
+- [RFC-0026: Per-Session Agent Instances](../implemented/RFC-0026-per-session-agent-isolation.md) — Phase 1: Remove `agent_lock`
 - [RFC-0025: Shared Agent Architecture](./RFC-0025-shared-agent-architecture.md) — Phase 3: Single agent, per-session state
 - pydantic-ai `Agent.run()` — `message_history` parameter pattern
 - pydantic-ai `GraphAgentState` — Internal per-run state pattern

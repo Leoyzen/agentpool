@@ -860,9 +860,9 @@ TBD
 
 ### Related Documents
 
-- [OpenSpec Change: pre-m4-protocol-cleanup](../../openspec/changes/pre-m4-protocol-cleanup/proposal.md)
-- [Design Document](../../openspec/changes/pre-m4-protocol-cleanup/design.md)
-- [Task Breakdown](../../openspec/changes/pre-m4-protocol-cleanup/tasks.md)
+- [OpenSpec Change: pre-m4-protocol-cleanup](../../openspec/changes/archive/proposal.md)
+- [Design Document](../../openspec/changes/archive/design.md)
+- [Task Breakdown](../../openspec/changes/archive/tasks.md)
 - [RFC-0050: AgentWolf v1 Foundation Architecture](./RFC-0050-agentwolf-v1-foundation-architecture.md)
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md)
 - [RFC-0041: Loop/Run Separation](./RFC-0041-loop-run-separation.md)

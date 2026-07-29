@@ -1844,7 +1844,7 @@ Based on comprehensive review by Metis, Momus, and Oracle during initial develop
 - [x] Security audit with path traversal protection
 
 **Documentation**:
-- [Skill URI Usage](../../configuration/skill-uri-usage.md) - Complete usage guide
+- [Skill URI Usage](../../how-to/configuration/skill-uri-usage.md) - Complete usage guide
 - [Skill URI Loading Example](../../../examples/skill_uri_loading/) - Loading skills by URI
 - [Skills with References Example](../../../examples/skill_with_references/) - Creating skills with references
 - [MCP Skills Example](../../../examples/mcp_skills/) - Using MCP-exposed skills

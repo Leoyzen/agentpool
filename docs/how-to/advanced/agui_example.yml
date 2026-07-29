@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# AG-UI Integration Example Configuration
+# This file demonstrates various AG-UI agent configurations
+
+# Basic AG-UI agent connection
+agents:
+  # Simple remote agent
+  remote_assistant:
+    type: agui
+    endpoint: http://localhost:8000/agent/run
+    description: Basic remote AG-UI agent
+    timeout: 60.0
+
+  # Agent with authentication
+  authenticated_agent:
+    type: agui
+    endpoint: https://api.example.com/agent/run
+    headers:
+      Authorization: Bearer ${API_TOKEN}
+      X-Custom-Header: value
+    description: Authenticated AG-UI agent
+    timeout: 120.0
+
+  # Agent with client-side tools
+  tool_enabled_agent:
+    type: agui
+    endpoint: http://localhost:8000/agent/run
+    description: Agent with local tool execution
+    tools:
+      # User confirmation tool
+      - import_path: myapp.tools.confirm_action
+        name: confirm_action
+        description: Ask user to confirm important actions
+        enabled: true
+
+      # Data retrieval tool
+      - import_path: myapp.tools.fetch_data
+        name: fetch_data
+        description: Retrieve data from local database
+
+      # File operations
+      - import_path: myapp.tools.read_file
+        description: Read files from local filesystem
+
+  # Managed agent (auto-start/stop)
+  managed_agent:
+    type: agui
+    endpoint: http://localhost:8765/agent/run
+    startup_command: "uv run ag-ui-server config.yml"
+    startup_delay: 3.0
+    description: Automatically managed AG-UI server
+    tools:
+      - import_path: myapp.tools.local_tool
+
+  # Agent with MCP servers
+  enhanced_agent:
+    type: agui
+    endpoint: http://localhost:8000/agent/run
+    description: AG-UI agent with MCP server access
+    mcp_servers:
+      - name: filesystem
+        type: stdio
+        command: npx
+        args:
+          - "-y"
+          - "@modelcontextprotocol/server-filesystem"
+          - "/path/to/workspace"
+
+      - name: database
+        type: stdio
+        command: python
+        args:
+          - "-m"
+          - "mcp_server_sqlite"
+  # Native agents for comparison/composition
+  local_assistant:
+    type: native
+    model: openai:gpt-4
+    system_prompt: You are a helpful local assistant
+    tools:
+      - import_path: local_tools.calculator
+
+  coordinator:
+    type: native
+    model: anthropic:claude-sonnet-4
+    system_prompt: You coordinate between local and remote agents
+    tools:
+      - type: agent_cli
+
+# Teams mixing native and AG-UI agents
+teams:
+  hybrid_team:
+    members:
+      - local_assistant
+      - remote_assistant
+    mode: parallel
+    description: Team with both local and remote agents
+
+  sequential_team:
+    members:
+      - coordinator
+      - tool_enabled_agent
+    mode: sequential
+    description: Coordinator delegates to AG-UI agent
