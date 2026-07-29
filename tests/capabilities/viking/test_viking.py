@@ -1679,11 +1679,11 @@ class TestGetInstructions:
         assert "Read" in instructions
 
     def test_contains_tool_selection_priority(self) -> None:
-        """Instructions contain the tool selection priority section."""
+        """Instructions contain the tool selection section."""
         cap = VikingCapability(mode="all")
         instructions = cap.get_instructions()
         assert instructions is not None
-        assert "Tool Selection Priority" in instructions
+        assert "Tool Selection" in instructions
 
     def test_contains_three_tier_model(self) -> None:
         """Instructions contain the three-tier content model section."""
@@ -1704,7 +1704,7 @@ class TestGetInstructions:
         cap = VikingCapability(mode="all")
         instructions = cap.get_instructions()
         assert instructions is not None
-        assert "URI Conventions" in instructions
+        assert "URI Path Rules" in instructions
 
     def test_contains_memory_tools(self) -> None:
         """Instructions contain memory tools section."""
