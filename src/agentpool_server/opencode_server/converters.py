@@ -130,21 +130,31 @@ def _get_input_from_state(state: ToolState, *, convert_params: bool = False) -> 
 
 
 async def _resolve_resource(
-    source: ResourceSource, agent: BaseAgent[Any, Any]
+    source: ResourceSource, agent: BaseAgent[Any, Any], session_id: str
 ) -> list[UserContent] | None:
     """Resolve a resource and return its content as a list of UserContent items.
 
+    Uses the agent's ``ExtensionRegistry`` (via ``host_context``) with a
+    session-scoped ``Scope`` to find ``ResourceAccess`` and ``SkillResource``
+    providers. Falls back to ``agent._all_capabilities`` if the registry
+    is unavailable.
+
     Returns None if the resource is not found.
     """
-    from agentpool.capabilities.resource_protocols import ResourceAccess, SkillResource
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
     from agentpool.capabilities.resource_resolver import resolve_resource_content
 
-    resource_caps: list[ResourceAccess] = [
-        cap for cap in agent._all_capabilities if isinstance(cap, ResourceAccess)
-    ]
-    skill_caps: list[SkillResource] = [
-        cap for cap in agent._all_capabilities if isinstance(cap, SkillResource)
-    ]
+    scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
+    host_ctx = agent.host_context
+    if host_ctx is None:
+        raise RuntimeError(f"Agent host_context is None, cannot resolve resource {source.uri!r}")
+    registry = host_ctx.extension_registry
+    if registry is None:
+        raise RuntimeError(
+            f"Agent extension_registry is None, cannot resolve resource {source.uri!r}"
+        )
+    resource_caps = registry.get_resource_access(scope)
+    skill_caps = registry.get_skill_resources(scope)
 
     content = await resolve_resource_content(source.uri, resource_caps, skill_caps)
     if content is None:
@@ -154,6 +164,7 @@ async def _resolve_resource(
 
 async def extract_user_prompt_from_parts(
     parts: list[PartInput],
+    session_id: str,
     fs: AsyncFileSystem | None = None,
     agent: BaseAgent[Any, Any] | None = None,
 ) -> Sequence[UserContent | PathReference]:
@@ -171,6 +182,8 @@ async def extract_user_prompt_from_parts(
         parts: List of OpenCode message input parts
         fs: Optional async filesystem for PathReference resolution
         agent: Optional agent for resolving MCP resources
+        session_id: Optional session ID for scoped resource resolution via
+            ExtensionRegistry. When empty, falls back to agent._all_capabilities.
 
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
@@ -183,7 +196,7 @@ async def extract_user_prompt_from_parts(
             case TextPartInput(text=text):
                 result.append(text)
             case FilePartInput(source=ResourceSource() as resource) if agent is not None:
-                content = await _resolve_resource(resource, agent)
+                content = await _resolve_resource(resource, agent, session_id=session_id)
                 if content is not None:
                     result.extend(content)
             case FilePartInput(mime=mime, url=url, filename=filename):

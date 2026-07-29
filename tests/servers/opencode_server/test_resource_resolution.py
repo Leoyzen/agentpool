@@ -13,6 +13,7 @@ The tests are written against the target API where:
 from __future__ import annotations
 
 import base64
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import BinaryContent
@@ -96,10 +97,25 @@ class FakeSkillResource:
 
 
 class FakeAgent:
-    """Minimal agent with ``_all_capabilities`` for integration tests."""
+    """Minimal agent with ``host_context`` for integration tests.
+
+    Provides an ``ExtensionRegistry`` with the given capabilities registered
+    at POOL scope so ``_resolve_resource`` can find them via the registry.
+    """
 
     def __init__(self, capabilities: list[Any]) -> None:
-        self._all_capabilities = capabilities
+        from agentpool.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
+
+        registry = ExtensionRegistry()
+        pool_scope = Scope(level=ScopeLevel.POOL)
+        for cap in capabilities:
+            registry.register(cap, pool_scope)
+        # Lightweight fake host_context — only extension_registry is accessed
+        self._host_context = SimpleNamespace(extension_registry=registry)
+
+    @property
+    def host_context(self) -> Any:
+        return self._host_context
 
 
 # =============================================================================
@@ -251,7 +267,7 @@ async def test_extract_user_prompt_with_resource_source() -> None:
     )
     part = FilePartInput(mime="text/plain", url="", source=source)
 
-    result = await extract_user_prompt_from_parts([part], agent=agent)
+    result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
     result_list = list(result)
     assert len(result_list) == 1
     assert result_list[0] == '<resource uri="viking://doc.md">\nhello\n</resource>'
@@ -279,7 +295,7 @@ async def test_extract_user_prompt_with_binary_resource() -> None:
     )
     part = FilePartInput(mime="image/png", url="", source=source)
 
-    result = await extract_user_prompt_from_parts([part], agent=agent)
+    result = await extract_user_prompt_from_parts([part], "test-session", agent=agent)
     result_list = list(result)
     assert len(result_list) == 3
     assert result_list[0] == '<resource uri="viking://img.png">\n'
@@ -308,7 +324,7 @@ async def test_extract_user_prompt_resource_no_agent() -> None:
         source=source,
     )
 
-    result = await extract_user_prompt_from_parts([part], agent=None)
+    result = await extract_user_prompt_from_parts([part], "test-session", agent=None)
     result_list = list(result)
     # The generic handler should produce some content (not None)
     assert len(result_list) >= 1
@@ -332,7 +348,9 @@ async def test_extract_user_prompt_resource_returns_none() -> None:
     resource_part = FilePartInput(mime="text/plain", url="", source=source)
     text_part = TextPartInput(text="hello world")
 
-    result = await extract_user_prompt_from_parts([resource_part, text_part], agent=agent)
+    result = await extract_user_prompt_from_parts(
+        [resource_part, text_part], "test-session", agent=agent
+    )
     result_list = list(result)
     # Only the text part should appear — resource resolution returned None
     assert len(result_list) == 1
@@ -365,7 +383,7 @@ async def test_extract_user_prompt_mixed_parts() -> None:
     agent_part = AgentPartInput(name="researcher")
 
     result = await extract_user_prompt_from_parts(
-        [text_part, resource_part, agent_part], agent=agent
+        [text_part, resource_part, agent_part], "test-session", agent=agent
     )
     result_list = list(result)
     # 1 text + 1 resource (XML-wrapped) + 1 agent instruction
