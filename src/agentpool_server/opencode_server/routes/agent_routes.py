@@ -92,20 +92,37 @@ class AddMCPServerRequest(BaseModel):
 
 
 def _find_mcp_manager(state: Any, session_id: str | None = None) -> MCPManager | None:
-    """Find the MCPManager from the agent's tool providers.
+    """Find the MCPManager from the agent's capabilities.
+
+    Queries the ``ExtensionRegistry`` at SESSION scope (falling back to
+    AGENT scope when no session is available) to find an ``MCPManager``
+    instance among the visible capabilities.
 
     Args:
         state: Server state
-        session_id: Optional session ID. If provided, looks up the session's
-            per-session agent instead of the shared pool-level agent.
+        session_id: Optional session ID for scoped capability lookup.
     """
-    agent = state.agent
-    if session_id is not None:
-        # SessionPool manages per-session agents; routes use the shared
-        # pool-level agent for MCP manager discovery.
-        agent = state.agent
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
 
-    for provider in agent._all_capabilities:
+    agent = state.agent
+    host_ctx = agent.host_context
+    registry = host_ctx.extension_registry if host_ctx is not None else None
+
+    if registry is not None:
+        effective_session_id = session_id or agent.session_id or ""
+        if effective_session_id:
+            scope = Scope(
+                level=ScopeLevel.SESSION,
+                agent_name=agent.name,
+                session_id=effective_session_id,
+            )
+        else:
+            scope = Scope(level=ScopeLevel.AGENT, agent_name=agent.name)
+        caps = registry.get_visible_capabilities(scope)
+    else:
+        caps = agent._all_capabilities
+
+    for provider in caps:
         match provider:
             case MCPManager():
                 return provider
@@ -298,7 +315,7 @@ async def get_mcp_status(state: StateDep) -> dict[str, MCPStatus]:
     """Get MCP server status."""
     # NOTE: GET /mcp uses state.agent.get_mcp_server_info() (which delegates
     # to self.mcp / host_context.mcp directly) instead of _find_mcp_manager
-    # because _find_mcp_manager searches agent._all_capabilities for
+    # because _find_mcp_manager queries the ExtensionRegistry for
     # MCPManager instances, but the MCPManager lives on self.mcp (MessageNode
     # property), not in capabilities. _find_mcp_manager is kept for sibling
     # /mcp/* routes (POST, connect, disconnect) that need the manager for
@@ -474,18 +491,34 @@ async def list_mcp_resources(state: StateDep) -> dict[str, McpResource]:
     Returns a dictionary mapping resource keys to McpResource objects.
     Keys are formatted as "{client}:{resource_name}" for uniqueness.
 
-    Uses the ``ResourceAccess`` protocol to discover resources from all
-    capabilities that implement it (e.g., ``McpServerCap``,
-    ``VikingCapability``).
+    Uses the ``ExtensionRegistry`` to discover ``ResourceAccess`` providers
+    at SESSION scope (POOL + AGENT + SESSION).
     """
     try:
         result: dict[str, McpResource] = {}
         import asyncio
 
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
         from agentpool.capabilities.resource_protocols import ResourceAccess
 
-        caps = state.agent._all_capabilities
-        resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
+        agent = state.agent
+        host_ctx = agent.host_context
+        registry = host_ctx.extension_registry if host_ctx is not None else None
+        if registry is not None:
+            session_id = agent.session_id or ""
+            if session_id:
+                scope = Scope(
+                    level=ScopeLevel.SESSION,
+                    agent_name=agent.name,
+                    session_id=session_id,
+                )
+            else:
+                scope = Scope(level=ScopeLevel.AGENT, agent_name=agent.name)
+            resource_caps = registry.get_resource_access(scope)
+        else:
+            caps = agent._all_capabilities
+            resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
+
         if resource_caps:
             results = await asyncio.gather(
                 *(cap.list_resources() for cap in resource_caps),

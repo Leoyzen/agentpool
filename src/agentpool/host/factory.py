@@ -152,12 +152,13 @@ class AgentFactory:
             caps = self._compile_agent_capabilities(agent_name, cfg, host_context)
             self._capability_registry[agent_name] = caps
 
-            # Register capabilities with the pool-level ExtensionRegistry.
+            # Register capabilities at AGENT scope — these are compiled
+            # from the agent's config and are specific to this agent.
             from agentpool.capabilities.extension_registry import Scope, ScopeLevel
 
-            pool_scope = Scope(level=ScopeLevel.POOL)
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
             for cap in caps:
-                self._pool.extension_registry.register(cap, pool_scope)
+                self._pool.extension_registry.register(cap, agent_scope)
 
         return AgentRegistry()
 
@@ -451,6 +452,12 @@ class AgentFactory:
                     if not replaced:
                         new_caps.append(team_cap)
                     agent._extra_capabilities = new_caps
+
+                # Register the per-session TeamCommCapability at SESSION scope.
+                from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+                session_scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
+                self._pool.extension_registry.register(team_cap, session_scope)
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)

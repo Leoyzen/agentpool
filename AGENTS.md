@@ -151,7 +151,8 @@ The codebase is organized into focused packages under `src/`:
 
 - **`agentpool/`** - Core agent framework
   - `agents/` - Agent implementations (native, ACP)
-  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, ModalityFilterCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability, AgentContextDeps, DelegationService, ResourceSource, entry-point registry)
+  - `capabilities/` - Native pydantic-ai capability implementations (MCPCapability, FunctionToolsetCapability, CombinedToolsetCapability, SubagentCapability, CodeModeCapability, FilteredToolsetCapability, ModalityFilterCapability, DynamicContextPruningCapability, ToolOutputBudgetCapability, ResourceCapability, AgentContextDeps, DelegationService, ResourceSource, ExtensionRegistry, entry-point registry)
+  - `capabilities/extension_registry.py` - Unified capability registry with 4-level scope storage (POOL > AGENT > SESSION > TURN)
   - `capabilities/modality_utils.py` - Modality classification and description utilities for `ModalityFilterCapability`
   - `delegation/` - AgentPool orchestration, Team coordination, message routing
   - `lifecycle/` - RunLoop lifecycle dimensions (TriggerSource, Journal, SnapshotStore, CommChannel, EventTransport)
@@ -250,6 +251,55 @@ In M3, the old `ResourceProvider` hierarchy was replaced with native pydantic-ai
 - `ChangeEvent` (`capabilities/change_event.py`) — Frozen dataclass for capability change notifications (`on_change()` stream).
 - Entry-point registry (`capabilities/registry.py`) — Discovers custom capabilities via `agentpool.capabilities` entry-point group.
 - Resource Protocols (`capabilities/resource_protocols.py`) — Domain-specific `@runtime_checkable` Protocols for unified extension access: `ToolAccess`, `ResourceAccess`, `ResourceTemplateAccess`, `SkillResource`, `CommandResource`, `ChangeObservable`. The deprecated `McpResource` Protocol has been split into `ToolAccess` + `ResourceAccess` and emits `DeprecationWarning` on `isinstance()` checks. Note: `agentpool_server.opencode_server.models.mcp.McpResource` (Pydantic model) is unrelated and NOT affected.
+
+#### ExtensionRegistry and Scope Hierarchy
+
+**`ExtensionRegistry`** (`capabilities/extension_registry.py`) is the unified capability registry with 4-level scope storage. It replaces fragmented infrastructure (SkillURIResolver._providers, AggregatedResourceSource) with a single registry that supports pool, agent, session, and turn-level capability scoping.
+
+**Scope hierarchy (outer → inner):**
+
+```
+POOL → AGENT → SESSION → TURN
+```
+
+| Level | Visibility | Key |
+|---|---|---|
+| `POOL` | Visible to all agents and sessions | — (global list) |
+| `AGENT` | Visible to a specific named agent across all sessions | `agent_name` |
+| `SESSION` | Visible within a specific session (e.g. MCP connections) | `session_id` |
+| `TURN` | Visible for one turn (guarded by `asyncio.Lock`) | `session_id` + `agent_name` + `turn_id` |
+
+**`Scope`** is an immutable frozen dataclass identifying where a capability is visible:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Scope:
+    level: ScopeLevel
+    agent_name: str = ""    # required for AGENT/TURN
+    session_id: str = ""    # required for SESSION/TURN
+    turn_id: str = ""       # required for TURN
+```
+
+**Query semantics** (`get_visible_capabilities(scope)`): walks the hierarchy from outer to inner, collecting all capabilities at each level:
+
+| Query Scope | Visible Capabilities |
+|---|---|
+| `POOL` | POOL |
+| `AGENT` | POOL + AGENT |
+| `SESSION` | POOL + AGENT + SESSION |
+| `TURN` | POOL + AGENT + SESSION + TURN |
+
+**Session teardown:** `clear_session(session_id)` removes SESSION and TURN level entries for a given session. AGENT and POOL level caps are NOT affected (they outlive sessions). Called during `_close_session_unlocked()` as step 6b.
+
+### Migration: ScopeLevel Hierarchy Reorder
+
+The `ScopeLevel` enum has been reordered from `POOL > SESSION > AGENT > TURN` to `POOL > AGENT > SESSION > TURN`. This reflects the true lifecycle: agents outlive sessions.
+
+**Breaking changes for Scope construction:**
+- `Scope(level=ScopeLevel.AGENT, session_id=..., agent_name=...)` → `Scope(level=ScopeLevel.AGENT, agent_name=...)` (session_id no longer needed for AGENT scope)
+- `Scope` dataclass field order changed: `agent_name` is now the 2nd field (after `level`), `session_id` is 3rd
+- SESSION scope queries now include AGENT scope caps (POOL + AGENT + SESSION)
+- AGENT scope queries no longer include SESSION scope caps (POOL + AGENT only)
 
 #### Model Capabilities and Modality Filter
 
@@ -1411,6 +1461,7 @@ The project uses entry points for extensibility:
 - `src/agentpool/capabilities/delegation.py` - `DelegationService` Protocol
 - `src/agentpool/capabilities/resource_source.py` - `ResourceSource` Protocol + `AggregatedResourceSource`
 - `src/agentpool/capabilities/registry.py` - Entry-point capability discovery
+- `src/agentpool/capabilities/extension_registry.py` - `ExtensionRegistry` with 4-level scope storage (POOL > AGENT > SESSION > TURN), `Scope`/`ScopeLevel` types, URI resolution, change stream merging, composition cycle detection
 - `src/agentpool/capabilities/runloop_delegation.py` - `RunLoopDelegationService` (M3, task group 15)
 - `src/agentpool/agents/events/events.py` - All event type definitions
 - `src/agentpool/hooks/agent_hooks.py` - Hook lifecycle management

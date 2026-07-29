@@ -627,3 +627,17 @@ class NativeTurn(HookAwareTurn, Turn):
                 # producing one — pass it as-is.
                 duration_ms = (time.perf_counter() - turn_start) * 1000
                 await self._fire_post_turn_hooks(self._final_message, duration_ms=duration_ms)
+
+                # Clear TURN-scope capabilities from the ExtensionRegistry.
+                # This cleans up per-turn capabilities (e.g. populated
+                # ModalityFilterCapability) so they don't accumulate.
+                if self._agent.host_context is not None:
+                    registry = self._agent.host_context.extension_registry
+                    if registry is not None:
+                        turn_id = self._run_ctx.turn_id
+                        if turn_id is not None:
+                            registry.clear_turn(
+                                session_id=self._run_ctx.session_id,
+                                agent_name=self._agent.name,
+                                turn_id=turn_id,
+                            )

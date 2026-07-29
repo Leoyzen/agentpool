@@ -17,6 +17,7 @@ from agentpool.log import get_logger
 if TYPE_CHECKING:
     import anyio
 
+    from agentpool.delegation.pool import AgentPool
     from agentpool.orchestrator.event_bus import EventBus
     from agentpool.orchestrator.run import RunHandle
     from agentpool.orchestrator.session_controller import SessionState
@@ -41,6 +42,7 @@ class SessionControllerCloseMixin:
     """
 
     store: SessionPersistence | None
+    pool: AgentPool[Any]
     _sessions: dict[str, SessionState]
     _session_agents: dict[str, Any]
     _children: dict[str, list[str]]
@@ -70,6 +72,7 @@ class SessionControllerCloseMixin:
            — skipped when ``checkpointed=True`` (status already saved
            as ``"checkpointed"`` by ``_save_close_checkpoint``)
         6. EventBus unsubscription
+        6b. ExtensionRegistry session/turn cap cleanup
         7. Cascade close children (respecting lifecycle policies)
 
         Args:
@@ -181,6 +184,16 @@ class SessionControllerCloseMixin:
                     "Failed to unsubscribe from EventBus during close",
                     session_id=session_id,
                 )
+
+        # Step 6b: Clear SESSION and TURN level caps from the ExtensionRegistry.
+        # AGENT and POOL level caps are NOT affected (they outlive sessions).
+        try:
+            self.pool.extension_registry.clear_session(session_id)
+        except Exception:
+            logger.exception(
+                "Failed to clear ExtensionRegistry session caps",
+                session_id=session_id,
+            )
 
         # Step 7: Cascade close children (respecting lifecycle policies)
         children = self._children.pop(session_id, [])

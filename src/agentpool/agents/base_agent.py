@@ -560,9 +560,9 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     async def get_resource(self, name: str) -> Any:
         """Get a specific MCP resource by name or URI.
 
-        Uses the ``ResourceAccess`` protocol to list resources from all
-        capabilities that implement it (e.g., ``McpServerCap``,
-        ``VikingCapability``).
+        Uses the ``ExtensionRegistry`` to query ``ResourceAccess`` providers
+        at SESSION scope (POOL + AGENT + SESSION). Falls back to iterating
+        ``_all_capabilities`` when the registry is unavailable.
 
         Args:
             name: Name or URI of the resource to find
@@ -572,12 +572,29 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
         """
         import asyncio
 
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
         from agentpool.capabilities.resource_protocols import ResourceAccess
         from agentpool.tools.exceptions import ToolError
 
         all_resources: list[Any] = []
-        caps = self._all_capabilities
-        resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
+
+        host_ctx = self.host_context
+        registry = host_ctx.extension_registry if host_ctx is not None else None
+        if registry is not None:
+            session_id = self.session_id or ""
+            if session_id:
+                scope = Scope(
+                    level=ScopeLevel.SESSION,
+                    agent_name=self.name,
+                    session_id=session_id,
+                )
+            else:
+                scope = Scope(level=ScopeLevel.AGENT, agent_name=self.name)
+            resource_caps = registry.get_resource_access(scope)
+        else:
+            caps = self._all_capabilities
+            resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
+
         if resource_caps:
             results = await asyncio.gather(
                 *(cap.list_resources() for cap in resource_caps),
@@ -602,14 +619,36 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     async def list_prompts(self) -> list[Any]:
         """Get all prompts from external capabilities.
 
+        Queries the ``ExtensionRegistry`` at SESSION scope (falling back to
+        AGENT scope when no session is available) to find
+        ``FunctionToolsetCapability`` instances and collects their MCP prompts.
+
         Returns:
             List of prompt objects from capabilities that provide prompts
         """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
         from agentpool.capabilities.function_toolset import FunctionToolsetCapability
         from agentpool.prompts.prompts import MCPClientPrompt as MCPPrompt
 
         all_prompts: list[Any] = []
-        for provider in self._external_capabilities:
+
+        host_ctx = self.host_context
+        registry = host_ctx.extension_registry if host_ctx is not None else None
+        if registry is not None:
+            session_id = self.session_id or ""
+            if session_id:
+                scope = Scope(
+                    level=ScopeLevel.SESSION,
+                    agent_name=self.name,
+                    session_id=session_id,
+                )
+            else:
+                scope = Scope(level=ScopeLevel.AGENT, agent_name=self.name)
+            caps = registry.get_visible_capabilities(scope)
+        else:
+            caps = self._external_capabilities
+
+        for provider in caps:
             if isinstance(provider, FunctionToolsetCapability):
                 try:
                     prompts = await provider.get_prompts()
