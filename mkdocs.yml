@@ -1,9 +1,9 @@
 site_name: "AgentPool"
 site_description: "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
-repo_url: "https://github.com/phil65/agentpool/"
-site_url: https://phil65.github.io/agentpool/
-site_author: "Philipp Temminghoff"
-copyright: Copyright &copy; 2025 Philipp Temminghoff
+repo_url: "https://github.com/Leoyzen/agentpool/"
+site_url: https://leoyzen.github.io/agentpool/
+site_author: "Leoyzen"
+copyright: Copyright &copy; 2025 Leoyzen (forked from phil65/agentpool)
 edit_uri: edit/main/docs/
 
 theme:
@@ -11,6 +11,9 @@ theme:
   custom_dir: overrides
   icon:
     logo: material/robot-outline
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     # Palette toggle for automatic mode
     - media: "(prefers-color-scheme)"
@@ -21,7 +24,7 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: red
+      primary: indigo
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -29,7 +32,7 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: red
+      primary: indigo
       toggle:
         icon: material/brightness-4
         name: Switch to system preference
@@ -57,7 +60,6 @@ theme:
 
 extra_javascript: # for code blocks with { .interactive }
   - js/run_code_config.js
-  - "https://phil65.github.io/mkdocs-run-code/run_code.js"
 
 markdown_extensions:
   - abbr
@@ -129,6 +131,175 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/phil65
+      link: https://github.com/Leoyzen
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/agentpool/
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - Getting Started: tutorials/index.md
+      - Quickstart: tutorials/quickstart.md
+      - Basic Concepts: tutorials/basic-concepts.md
+      - Agent Usage: tutorials/agent-usage.md
+      - Dependencies: tutorials/dependencies.md
+      - Example Configurations: tutorials/example-configurations.md
+      - Examples: tutorials/examples/index.md
+  - Configuration:
+      - Overview: how-to/configuration/index.md
+      - Node Types:
+          - Overview: how-to/configuration/node-types/index.md
+          - Agent: how-to/configuration/node-types/agent.md
+          - ACP Agents: how-to/configuration/node-types/acp-agents.md
+          - AG-UI Agents: how-to/configuration/node-types/agui-agents.md
+          - Claude Code Agents: how-to/configuration/node-types/claude-code-agents.md
+          - Codex Agents: how-to/configuration/node-types/codex-agents.md
+          - Teams: how-to/configuration/node-types/team.md
+      - Toolsets:
+          - Overview: how-to/configuration/toolsets/index.md
+          - Code Mode: how-to/configuration/toolsets/code-mode.md
+          - Code: how-to/configuration/toolsets/code.md
+          - Composio: how-to/configuration/toolsets/composio.md
+          - Config Creation: how-to/configuration/toolsets/config-creation.md
+          - Custom: how-to/configuration/toolsets/custom.md
+          - Entry Points: how-to/configuration/toolsets/entry-points.md
+          - Execution Environment: how-to/configuration/toolsets/execution.md
+          - File Access: how-to/configuration/toolsets/file-access.md
+          - Import Tools: how-to/configuration/toolsets/import-tools.md
+          - Notifications: how-to/configuration/toolsets/notifications.md
+          - OpenAPI: how-to/configuration/toolsets/openapi.md
+          - Remote Code Mode: how-to/configuration/toolsets/remote-code-mode.md
+          - Search: how-to/configuration/toolsets/search.md
+          - Skills: how-to/configuration/toolsets/skills.md
+          - Subagent: how-to/configuration/toolsets/subagent.md
+          - User Interaction: how-to/configuration/toolsets/user-interaction.md
+          - VFS: how-to/configuration/toolsets/vfs.md
+          - Workers: how-to/configuration/toolsets/workers.md
+      - Models & Tools:
+          - AI Models: how-to/configuration/model.md
+          - Built-in Tools: how-to/configuration/builtin-tools.md
+      - Events & Hooks:
+          - Event Handlers: how-to/configuration/events.md
+          - Event Sources: how-to/configuration/event-sources.md
+          - Hooks: how-to/configuration/hooks.md
+      - Behavior:
+          - Commands: how-to/configuration/commands.md
+          - Conditions: how-to/configuration/conditions.md
+          - Tasks: how-to/configuration/tasks.md
+          - Sessions: how-to/configuration/session.md
+      - Data & Storage:
+          - Knowledge Sources: how-to/configuration/knowledge.md
+          - Storage: how-to/configuration/storage.md
+          - Observability: how-to/configuration/observability.md
+      - Integrations:
+          - MCP Servers: how-to/configuration/mcp.md
+          - Skills: how-to/configuration/skills.md
+          - Skill URI Usage: how-to/configuration/skill-uri-usage.md
+          - Resources: how-to/configuration/resources.md
+      - Prompts & Responses:
+          - Prompts: how-to/configuration/prompts.md
+          - Prompt Hubs: how-to/configuration/prompt-hubs.md
+          - Response Types: how-to/configuration/responses.md
+      - Structural:
+          - Connections: how-to/configuration/connections.md
+          - Inheritance: how-to/configuration/inheritance.md
+          - Path Resolution: how-to/configuration/path-resolution.md
+          - Execution Environments: how-to/configuration/execution-environments.md
+  - Core Concepts:
+      - Overview: reference/core-concepts/index.md
+      - Agent Pool: reference/core-concepts/agent-pool.md
+      - Basic Agent: reference/core-concepts/basic-agent.md
+      - Messages: reference/core-concepts/messages.md
+      - Events & Triggers: reference/core-concepts/events.md
+      - MCP Integration: reference/core-concepts/mcp.md
+      - Storage System: reference/core-concepts/storage.md
+      - Toolsets: reference/core-concepts/toolsets.md
+      - Knowledge System: reference/core-concepts/knowledge.md
+      - Message History: reference/core-concepts/message-history.md
+  - Guides:
+      - Servers:
+          - Overview: how-to/servers/index.md
+          - ACP Server: how-to/servers/acp-server.md
+          - OpenCode Server: how-to/servers/opencode-server.md
+          - AG-UI Server: how-to/servers/agui-server.md
+          - OpenAI API Server: how-to/servers/openai-api-server.md
+          - MCP Server: how-to/servers/mcp-server.md
+      - Advanced:
+          - Overview: how-to/advanced/index.md
+          - ACP Integration: how-to/advanced/acp-integration.md
+          - AG-UI Integration: how-to/advanced/agui-integration.md
+          - MCP Servers: how-to/advanced/mcp-servers.md
+          - Models: how-to/advanced/models.md
+          - Async: how-to/advanced/async.md
+          - DB: how-to/advanced/db.md
+          - Commands: how-to/advanced/commands.md
+          - Connections: how-to/advanced/connections.md
+          - Data Extraction: how-to/advanced/extraction.md
+          - Document Conversion: how-to/advanced/document-conversion.md
+          - Prompts: how-to/advanced/prompts.md
+          - System Prompts: how-to/advanced/system-prompts.md
+      - Programmatic Usage:
+          - Overview: how-to/programmatic-usage/index.md
+          - Creating Agents: how-to/programmatic-usage/creating-agents.md
+          - Tools: how-to/programmatic-usage/tools.md
+          - Team: how-to/programmatic-usage/team.md
+          - Talk: how-to/programmatic-usage/talk.md
+          - Multi-Agent Patterns: how-to/programmatic-usage/multi-agent-patterns.md
+      - Features:
+          - Skill Commands: how-to/features/skill-commands.md
+  - Reference:
+      - CLI:
+          - Overview: reference/cli/index.md
+          - run: reference/cli/run.md
+          - serve-acp: reference/cli/serve-acp.md
+          - serve-opencode: reference/cli/serve-opencode.md
+          - serve-agui: reference/cli/serve-agui.md
+          - serve-api: reference/cli/serve-api.md
+          - serve-mcp: reference/cli/serve-mcp.md
+          - watch: reference/cli/watch.md
+          - history: reference/cli/history.md
+          - list: reference/cli/list.md
+          - config: reference/cli/config.md
+          - set: reference/cli/set.md
+          - add: reference/cli/add.md
+          - task: reference/cli/task.md
+      - ACP Meta Fields: reference/acp-meta-field-reference.md
+      - API:
+          - AgentPool: reference/api/agentpool.md
+          - Agent: reference/api/agent.md
+          - MessageNode: reference/api/messagenode.md
+          - EventBus & SessionController: reference/api/eventbus.md
+      - Architecture:
+          - Module Structure: explanation/module-structure.md
+          - Graph Architecture: explanation/graph-architecture.md
+          - Session Orchestration: explanation/session-orchestration.md
+          - Lifecycle Dimensions: explanation/lifecycle-dimensions.md
+          - Hooks & Events: explanation/hooks-events.md
+          - Capabilities: explanation/capabilities.md
+          - Skills System: explanation/skills-system.md
+          - Key Architectural Patterns: explanation/architectural-patterns.md
+          - Agent Types: explanation/agent-types.md
+          - Storage & Observability: explanation/storage-observability.md
+          - Configuration System: explanation/configuration-system.md
+          - Telemetry: explanation/telemetry.md
+          - Python Features: explanation/python-features.md
+          - Import Patterns: explanation/import-patterns.md
+          - Extending AgentPool: explanation/extending-agentpool.md
+          - Common Patterns: explanation/common-patterns.md
+          - Special Considerations: explanation/special-considerations.md
+          - Usage Examples: explanation/usage-examples.md
+      - Decisions:
+          - ADR Template: adr/TEMPLATE.md
+          - EventBus Replay: adr/eventbus-replay.md
+          - Hook Audit: adr/hook_audit.md
+          - Lifecycle Analysis: adr/lifecycle-analysis.md
+          - MessageNode Adapter: adr/message_node_adapter.md
+          - Message History API: adr/message-history-api.md
+          - Permission Question API: adr/permission-question-api.md
+          - Signal Streaming Adapters: adr/signal_streaming_adapters.md
+          - Todos Endpoints: adr/todos-endpoints.md
+          - YAML Graph Syntax: adr/yaml_graph_syntax.md
+      - RFCs:
+          - Status Index: rfcs/STATUS.md
+      - Meta:
+          - Documentation Guide: meta/documentation-guide.md

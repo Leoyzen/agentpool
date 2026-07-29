@@ -193,6 +193,7 @@ docs = [
   "mkdocs-material",
   "mknodes",
   # Only add below (Copier)
+  "zensical>=0.0.51",
 ]
 lint = [
   "mypy[faster-cache]",

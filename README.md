@@ -4,11 +4,11 @@
 [![Package status](https://img.shields.io/pypi/status/agentpool.svg)](https://pypi.org/project/agentpool/)
 [![Monthly downloads](https://img.shields.io/pypi/dm/agentpool.svg)](https://pypi.org/project/agentpool/)
 [![Python version](https://img.shields.io/pypi/pyversions/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Github Stars](https://img.shields.io/github/stars/phil65/agentpool)](https://github.com/phil65/agentpool/stars)
+[![Github Stars](https://img.shields.io/github/stars/Leoyzen/agentpool)](https://github.com/Leoyzen/agentpool/stars)
 
 **A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
 
-[Documentation](https://phil65.github.io/agentpool/)
+[Documentation](https://leoyzen.github.io/agentpool/)
 
 ## The Problem
 
@@ -205,4 +205,4 @@ async with AgentPool("agents.yml") as pool:
 
 ## Documentation
 
-For complete documentation including advanced configuration, connection patterns, and API reference, visit [phil65.github.io/agentpool](https://phil65.github.io/agentpool/).
+For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/agentpool](https://leoyzen.github.io/agentpool/).
