@@ -394,6 +394,31 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             except Exception as e:
                 return f"viking_read error: {e}"
 
+        async def viking_expand(
+            ctx: RunContext[Any],
+            uri: str,
+        ) -> str:
+            """Expand a previously archived conversation from Viking.
+
+            Loads the full content of a conversation that was archived
+            during context compaction. Use this when you need to recall
+            details from an earlier part of the conversation that was
+            summarized and archived.
+
+            Args:
+                uri: The viking:// URI of the archived conversation
+                    (e.g. ``viking://user/alice/memories/compacted/abc.md``).
+
+            Returns:
+                The full archived conversation content as markdown.
+            """
+            try:
+                client = await cap._ensure_client()
+                content = await client.read(uri)
+                return str(content) if content else "No content found at URI."
+            except Exception as e:
+                return f"viking_expand error: {e}"
+
         retrieve_tools: list[Callable[..., Awaitable[str]]] = [
             viking_search,
             viking_find,
@@ -404,6 +429,8 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
         ]
         if cap.enable_memory:
             retrieve_tools.append(viking_recall)
+        if cap.compaction_expand_tool:
+            retrieve_tools.append(viking_expand)
         tools.extend(retrieve_tools)
 
     # ---- Write tools (6) ----
@@ -598,8 +625,9 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
             viking_edit,
             viking_mkdir,
             viking_add_resource,
-            viking_forget,
         ]
+        if cap.enable_forget:
+            write_tools.append(viking_forget)
         if cap.enable_memory:
             write_tools.append(viking_remember)
         tools.extend(write_tools)

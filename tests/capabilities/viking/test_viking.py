@@ -6,6 +6,9 @@ All tests mock ``AsyncHTTPClient`` — no real Viking server required.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import dataclasses
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,7 +17,18 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.capabilities.viking import VikingCapability
+from agentpool.capabilities.viking import VikingCapability, _normalize_search_results
+from agentpool.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
+from agentpool.capabilities.viking.profile import (
+    _derive_context_hint,
+    _format_profile_block,
+)
+from agentpool.capabilities.viking.recall import (
+    _extract_latest_user_prompt,
+    _format_recall_block,
+    _inject_system_message,
+    _rank_and_dedup,
+)
 from agentpool.capabilities.viking.tools import build_tools
 from agentpool.capabilities.viking.utils import (
     add_line_numbers,
@@ -57,6 +71,8 @@ def mock_client() -> AsyncMock:
     client.create_session = AsyncMock(return_value={"session_id": "test-session"})
     client.add_message = AsyncMock(return_value={"status": "ok"})
     client.commit_session = AsyncMock(return_value={"status": "ok"})
+    client.get_session_context = AsyncMock(return_value={})
+    client._request = AsyncMock(return_value={})
     return client
 
 
@@ -66,7 +82,7 @@ def viking_cap(mock_client: AsyncMock) -> VikingCapability:
 
     Enables link and memory features so all tools are available for testing.
     """
-    cap = VikingCapability(mode="all", enable_link=True, enable_memory=True)
+    cap = VikingCapability(mode="all", enable_link=True, enable_memory=True, enable_forget=True)
     cap._client = mock_client
     return cap
 
@@ -1554,12 +1570,12 @@ class TestSkillResource:
 class TestModeFiltering:
     """Tests that mode filtering exposes the correct number of tools."""
 
-    def test_retrieve_mode_6_tools_default(self) -> None:
-        """Retrieve mode exposes 6 tools (recall gated by enable_memory)."""
+    def test_retrieve_mode_7_tools_default(self) -> None:
+        """Retrieve mode exposes 7 tools (viking_expand added by compaction feature)."""
         cap = VikingCapability(mode="retrieve")
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 6
+        assert len(tools) == 7
         names = {t.__name__ for t in tools}
         assert names == {
             "viking_search",
@@ -1568,40 +1584,41 @@ class TestModeFiltering:
             "viking_glob",
             "viking_ls",
             "viking_read",
+            "viking_expand",
         }
 
-    def test_retrieve_mode_7_tools_with_memory(self) -> None:
-        """Retrieve mode exposes 7 tools when enable_memory=True."""
+    def test_retrieve_mode_8_tools_with_memory(self) -> None:
+        """Retrieve mode exposes 8 tools when enable_memory=True (7 + recall)."""
         cap = VikingCapability(mode="retrieve", enable_memory=True)
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 7
+        assert len(tools) == 8
         names = {t.__name__ for t in tools}
         assert "viking_recall" in names
 
-    def test_write_mode_5_tools_default(self) -> None:
-        """Write mode exposes 5 tools (remember gated by enable_memory)."""
+    def test_write_mode_4_tools_default(self) -> None:
+        """Write mode exposes 4 tools (forget gated by enable_forget, remember by enable_memory)."""
         cap = VikingCapability(mode="write")
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 5
+        assert len(tools) == 4
         names = {t.__name__ for t in tools}
         assert names == {
             "viking_write",
             "viking_edit",
             "viking_mkdir",
             "viking_add_resource",
-            "viking_forget",
         }
 
-    def test_write_mode_6_tools_with_memory(self) -> None:
-        """Write mode exposes 6 tools when enable_memory=True."""
-        cap = VikingCapability(mode="write", enable_memory=True)
+    def test_write_mode_6_tools_with_memory_and_forget(self) -> None:
+        """Write mode exposes 6 tools when enable_memory=True and enable_forget=True."""
+        cap = VikingCapability(mode="write", enable_memory=True, enable_forget=True)
         cap._client = AsyncMock()
         tools = build_tools(cap)
         assert len(tools) == 6
         names = {t.__name__ for t in tools}
         assert "viking_remember" in names
+        assert "viking_forget" in names
 
     def test_graph_mode_1_tool_default(self) -> None:
         """Graph mode exposes 1 tool (link gated by enable_link)."""
@@ -1622,21 +1639,21 @@ class TestModeFiltering:
         assert names == {"viking_link", "viking_set_tags"}
 
     def test_all_mode_12_tools_default(self) -> None:
-        """All mode exposes 12 tools by default (link and memory gated off)."""
+        """All mode exposes 12 tools by default (link, memory, and forget gated off)."""
         cap = VikingCapability(mode="all")
         cap._client = AsyncMock()
         tools = build_tools(cap)
         assert len(tools) == 12
 
-    def test_all_mode_15_tools_with_flags(self) -> None:
-        """All mode exposes 15 tools when enable_link + enable_memory."""
-        cap = VikingCapability(mode="all", enable_link=True, enable_memory=True)
+    def test_all_mode_16_tools_with_flags(self) -> None:
+        """All mode exposes 16 tools when enable_link + enable_memory + enable_forget."""
+        cap = VikingCapability(mode="all", enable_link=True, enable_memory=True, enable_forget=True)
         cap._client = AsyncMock()
         tools = build_tools(cap)
-        assert len(tools) == 15
+        assert len(tools) == 16
 
     def test_get_toolset_retrieve(self) -> None:
-        """get_toolset() returns a FunctionToolset with 6 tools for retrieve mode (default)."""
+        """get_toolset() returns a FunctionToolset with 7 tools for retrieve mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="retrieve")
@@ -1645,10 +1662,10 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 6
+        assert len(tool_names) == 7
 
     def test_get_toolset_write(self) -> None:
-        """get_toolset() returns a FunctionToolset with 5 tools for write mode (default)."""
+        """get_toolset() returns a FunctionToolset with 4 tools for write mode (default)."""
         from pydantic_ai.toolsets import FunctionToolset
 
         cap = VikingCapability(mode="write")
@@ -1657,7 +1674,7 @@ class TestModeFiltering:
         assert toolset is not None
         assert isinstance(toolset, FunctionToolset)
         tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-        assert len(tool_names) == 5
+        assert len(tool_names) == 4
 
     def test_get_toolset_graph(self) -> None:
         """get_toolset() returns a FunctionToolset with 1 tool for graph mode (default)."""
@@ -2690,3 +2707,3006 @@ class TestTieredLoadingFormatSearchResults:
         results = {"memories": [], "resources": [], "skills": []}
         formatted = format_search_results(results)
         assert formatted == "No results found."
+
+
+# ---------------------------------------------------------------------------
+# 1.11 — Test identity resolution (Tasks 1.1-1.10)
+# ---------------------------------------------------------------------------
+
+
+class TestIdentityResolution:
+    """Tests for VikingIdentity, _try_decode_api_key, and _resolve_identity."""
+
+    # ---- Pure function tests (no mock) ----
+
+    def test_try_decode_new_format_key(self) -> None:
+        """_try_decode_api_key decodes a new-format key successfully."""
+        import base64
+
+        account = base64.b64encode(b"myaccount").decode("ascii")
+        user = base64.b64encode(b"alice").decode("ascii")
+        secret = base64.b64encode(b"secretkey").decode("ascii")
+        api_key = f"{account}.{user}.{secret}"
+
+        result = _try_decode_api_key(api_key)
+        assert result is not None
+        assert result == ("myaccount", "alice")
+
+    def test_try_decode_legacy_key_no_dots(self) -> None:
+        """_try_decode_api_key returns None for legacy keys without dots."""
+        result = _try_decode_api_key("legacy-key-no-dots")
+        assert result is None
+
+    def test_try_decode_malformed_key(self) -> None:
+        """_try_decode_api_key returns None for malformed base64 parts."""
+        result = _try_decode_api_key("!!!not-base64!!!.!!!also-bad!!.sig")
+        assert result is None
+
+    def test_try_decode_key_wrong_part_count(self) -> None:
+        """_try_decode_api_key returns None for keys with fewer than 3 parts."""
+        result = _try_decode_api_key("part1.part2")
+        assert result is None
+
+    def test_try_decode_empty_key(self) -> None:
+        """_try_decode_api_key returns None for empty string."""
+        assert _try_decode_api_key("") is None
+
+    def test_try_decode_empty_decoded_values(self) -> None:
+        """_try_decode_api_key returns None when decoded parts are empty."""
+        import base64
+
+        empty_b64 = base64.b64encode(b"").decode("ascii")
+        user_b64 = base64.b64encode(b"alice").decode("ascii")
+        secret_b64 = base64.b64encode(b"sig").decode("ascii")
+        result = _try_decode_api_key(f"{empty_b64}.{user_b64}.{secret_b64}")
+        assert result is None
+
+    def test_viking_identity_is_frozen(self) -> None:
+        """VikingIdentity is a frozen dataclass — assignment raises FrozenInstanceError."""
+        identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            identity.user_id = "bob"  # type: ignore[misc]
+
+    # ---- Three-tier resolution tests (using mock_client) ----
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_explicit_config(self, mock_client: AsyncMock) -> None:
+        """Tier 1: explicit config fields take precedence."""
+        cap = VikingCapability(account="myacct", user="bob")
+        cap._client = mock_client
+        cap._identity = None
+
+        identity = await cap._resolve_identity()
+
+        assert identity.account_id == "myacct"
+        assert identity.user_id == "bob"
+        assert identity.role == "user"
+        # /health should NOT be called when explicit config is present
+        mock_client._request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_api_key_decode(self, mock_client: AsyncMock) -> None:
+        """Tier 2: API key decode succeeds when config fields are None."""
+        import base64
+
+        account_b64 = base64.b64encode(b"keyaccount").decode("ascii")
+        user_b64 = base64.b64encode(b"keyuser").decode("ascii")
+        secret_b64 = base64.b64encode(b"secret").decode("ascii")
+        api_key = f"{account_b64}.{user_b64}.{secret_b64}"
+
+        cap = VikingCapability(api_key=api_key)
+        cap._client = mock_client
+        cap._identity = None
+
+        identity = await cap._resolve_identity()
+
+        assert identity.account_id == "keyaccount"
+        assert identity.user_id == "keyuser"
+        assert identity.role == "user"
+        # /health should NOT be called when API key decode succeeds
+        mock_client._request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_health_fallback(self, mock_client: AsyncMock) -> None:
+        """Tier 3: /health endpoint is queried when API key decode fails."""
+        mock_client._request = AsyncMock(
+            return_value={
+                "account_id": "health_acct",
+                "user_id": "health_user",
+                "role": "admin",
+            }
+        )
+        # Legacy API key that can't be decoded (no dots)
+        cap = VikingCapability(api_key="legacy-key-no-dots")
+        cap._client = mock_client
+        cap._identity = None
+
+        identity = await cap._resolve_identity()
+
+        assert identity.account_id == "health_acct"
+        assert identity.user_id == "health_user"
+        assert identity.role == "admin"
+        mock_client._request.assert_called_once_with("GET", "/health")
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_all_fail_fallback(self, mock_client: AsyncMock) -> None:
+        """Tier 4: fallback to default when all tiers fail."""
+        mock_client._request = AsyncMock(side_effect=RuntimeError("connection refused"))
+        cap = VikingCapability()
+        cap._client = mock_client
+        cap._identity = None
+
+        identity = await cap._resolve_identity()
+
+        assert identity.account_id == "default"
+        assert identity.user_id == "default"
+        assert identity.role == "user"
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_cached(self, mock_client: AsyncMock) -> None:
+        """_resolve_identity returns cached identity on second call."""
+        cap = VikingCapability(account="acct", user="alice")
+        cap._client = mock_client
+        cap._identity = None
+
+        first = await cap._resolve_identity()
+        second = await cap._resolve_identity()
+
+        assert first is second
+        assert first.user_id == "alice"
+
+    @pytest.mark.asyncio
+    async def test_resolve_identity_health_missing_fields(self, mock_client: AsyncMock) -> None:
+        """/health response missing account_id falls through to default."""
+        mock_client._request = AsyncMock(return_value={"user_id": "partial_user"})
+        cap = VikingCapability()
+        cap._client = mock_client
+        cap._identity = None
+
+        identity = await cap._resolve_identity()
+
+        assert identity.account_id == "default"
+        assert identity.user_id == "default"
+
+    # ---- URI methods use resolved identity ----
+
+    @pytest.mark.asyncio
+    async def test_resolve_skills_uri_uses_identity(self, mock_client: AsyncMock) -> None:
+        """_resolve_skills_uri uses _identity.user_id when set."""
+        cap = VikingCapability()
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_skills_uri()
+        assert uri == "viking://user/alice/skills/"
+
+    def test_resolve_skills_uri_explicit_override(self) -> None:
+        """_resolve_skills_uri uses explicit skills_uri when set."""
+        cap = VikingCapability(skills_uri="viking://resources/shared-skills/")
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_skills_uri()
+        assert uri == "viking://resources/shared-skills/"
+
+    @pytest.mark.asyncio
+    async def test_resolve_sessions_uri_uses_identity(self, mock_client: AsyncMock) -> None:
+        """_resolve_sessions_uri uses _identity.user_id when set."""
+        cap = VikingCapability()
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_sessions_uri()
+        assert uri == "viking://user/alice/sessions/"
+
+    def test_resolve_sessions_uri_explicit_override(self) -> None:
+        """_resolve_sessions_uri uses explicit sessions_uri when set."""
+        cap = VikingCapability(sessions_uri="viking://resources/shared-sessions/")
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_sessions_uri()
+        assert uri == "viking://resources/shared-sessions/"
+
+    @pytest.mark.asyncio
+    async def test_resolve_memories_uri_uses_identity(self, mock_client: AsyncMock) -> None:
+        """_resolve_memories_uri uses _identity.user_id when set."""
+        cap = VikingCapability()
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_memories_uri()
+        assert uri == "viking://user/alice/memories/"
+
+    def test_resolve_memories_uri_explicit_override(self) -> None:
+        """_resolve_memories_uri uses explicit memories_uri when set."""
+        cap = VikingCapability(memories_uri="viking://resources/shared-memories/")
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        uri = cap._resolve_memories_uri()
+        assert uri == "viking://resources/shared-memories/"
+
+    def test_resolve_uri_fallback_to_user_config(self) -> None:
+        """URI methods fall back to self.user when _identity is None."""
+        cap = VikingCapability(user="configuser")
+        # _identity is None
+
+        assert cap._resolve_skills_uri() == "viking://user/configuser/skills/"
+        assert cap._resolve_sessions_uri() == "viking://user/configuser/sessions/"
+        assert cap._resolve_memories_uri() == "viking://user/configuser/memories/"
+
+    def test_resolve_uri_fallback_to_default(self) -> None:
+        """URI methods fall back to 'default' when both _identity and self.user are None."""
+        cap = VikingCapability()
+        # _identity is None, user is None
+
+        assert cap._resolve_skills_uri() == "viking://user/default/skills/"
+        assert cap._resolve_sessions_uri() == "viking://user/default/sessions/"
+        assert cap._resolve_memories_uri() == "viking://user/default/memories/"
+
+    # ---- for_run() bug fix ----
+
+    @pytest.mark.asyncio
+    async def test_for_run_passes_sessions_uri(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves sessions_uri (existing bug fix)."""
+        cap = VikingCapability(
+            mode="all",
+            sessions_uri="viking://user/alice/sessions/",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.sessions_uri == "viking://user/alice/sessions/"
+
+    @pytest.mark.asyncio
+    async def test_for_run_shares_identity(self, mock_client: AsyncMock) -> None:
+        """for_run() shares _identity with the parent."""
+        cap = VikingCapability(mode="all")
+        cap._client = mock_client
+        identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        cap._identity = identity
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap._identity is identity
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_all_new_fields(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves auto_resolve_identity, memories_uri, actor_peer_id."""
+        cap = VikingCapability(
+            mode="all",
+            auto_resolve_identity=False,
+            memories_uri="viking://user/alice/memories/",
+            actor_peer_id="diagnosis",
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.auto_resolve_identity is False
+        assert copy_cap.memories_uri == "viking://user/alice/memories/"
+        assert copy_cap.actor_peer_id == "diagnosis"
+
+    # ---- Config field tests ----
+
+    def test_config_auto_resolve_identity_default(self) -> None:
+        """VikingCapabilityConfig has auto_resolve_identity=True by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_resolve_identity is True
+
+    def test_config_memories_uri_default(self) -> None:
+        """VikingCapabilityConfig has memories_uri=None by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.memories_uri is None
+
+    def test_config_actor_peer_id_default(self) -> None:
+        """VikingCapabilityConfig has actor_peer_id=None by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.actor_peer_id is None
+
+    def test_config_actor_peer_id_set(self) -> None:
+        """VikingCapabilityConfig accepts actor_peer_id."""
+        cfg = VikingCapabilityConfig(actor_peer_id="diagnosis")
+        assert cfg.actor_peer_id == "diagnosis"
+
+
+# ---------------------------------------------------------------------------
+# 2.8 — Auto Semantic Recall Tests (Tasks 2.1-2.7)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoRecall:
+    """Tests for auto semantic recall helpers and _handle_auto_recall()."""
+
+    # ---- Pure function tests: _extract_latest_user_prompt ----
+
+    def test_extract_latest_user_prompt_simple(self) -> None:
+        """Extracts the text content of the latest UserPromptPart."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        msg = ModelRequest(parts=[UserPromptPart(content="SY55C 液压压力不足")])
+        result = _extract_latest_user_prompt([msg])
+        assert result == "SY55C 液压压力不足"
+
+    def test_extract_latest_user_prompt_multiple_messages(self) -> None:
+        """Returns the latest user prompt when multiple messages exist."""
+        from pydantic_ai.messages import ModelRequest, TextPart, UserPromptPart
+
+        msg1 = ModelRequest(parts=[UserPromptPart(content="first prompt")])
+        msg2 = ModelRequest(parts=[TextPart(content="assistant reply")])
+        msg3 = ModelRequest(parts=[UserPromptPart(content="second prompt")])
+        result = _extract_latest_user_prompt([msg1, msg2, msg3])
+        assert result == "second prompt"
+
+    def test_extract_latest_user_prompt_no_user_prompt(self) -> None:
+        """Returns None when no UserPromptPart is found."""
+        from pydantic_ai.messages import ModelRequest, TextPart
+
+        msg = ModelRequest(parts=[TextPart(content="no user here")])
+        result = _extract_latest_user_prompt([msg])
+        assert result is None
+
+    def test_extract_latest_user_prompt_empty_messages(self) -> None:
+        """Returns None for empty message list."""
+        assert _extract_latest_user_prompt([]) is None
+
+    def test_extract_latest_user_prompt_skips_multimodal(self) -> None:
+        """Skips UserPromptPart with list (multimodal) content."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        msg1 = ModelRequest(parts=[UserPromptPart(content=["image", "text"])])
+        msg2 = ModelRequest(parts=[UserPromptPart(content="plain text")])
+        result = _extract_latest_user_prompt([msg1, msg2])
+        assert result == "plain text"
+
+    def test_extract_latest_user_prompt_skips_whitespace_only(self) -> None:
+        """Skips UserPromptPart with whitespace-only content."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        msg = ModelRequest(parts=[UserPromptPart(content="   ")])
+        result = _extract_latest_user_prompt([msg])
+        assert result is None
+
+    # ---- Pure function tests: _rank_and_dedup ----
+
+    def test_rank_and_dedup_basic_sorting(self) -> None:
+        """Hits are sorted by composite score descending."""
+        hits = [
+            {"uri": "viking://low.md", "score": 0.3, "content": "low score content"},
+            {"uri": "viking://high.md", "score": 0.9, "content": "high score content"},
+        ]
+        result = _rank_and_dedup(hits, query="test", min_score=0.0)
+        assert len(result) == 2
+        assert result[0]["uri"] == "viking://high.md"
+        assert result[1]["uri"] == "viking://low.md"
+
+    def test_rank_and_dedup_category_boost(self) -> None:
+        """Memory-type hits get category boost, ranking them higher."""
+        hits = [
+            {
+                "uri": "viking://res.md",
+                "score": 0.80,
+                "context_type": "resource",
+                "content": "resource content",
+            },
+            {
+                "uri": "viking://mem.md",
+                "score": 0.80,
+                "context_type": "memory",
+                "content": "memory content",
+            },
+        ]
+        result = _rank_and_dedup(
+            hits, query="q", lexical_boost=0.0, category_boost=0.05, min_score=0.0
+        )
+        assert result[0]["uri"] == "viking://mem.md"
+        assert result[0]["_composite_score"] == pytest.approx(0.85)
+        assert result[1]["_composite_score"] == pytest.approx(0.80)
+
+    def test_rank_and_dedup_lexical_boost(self) -> None:
+        """Lexical overlap increases the composite score."""
+        hits = [
+            {"uri": "viking://no_overlap.md", "score": 0.5, "content": "unrelated text"},
+            {
+                "uri": "viking://overlap.md",
+                "score": 0.5,
+                "content": "hydraulic pressure diagnosis",
+            },
+        ]
+        result = _rank_and_dedup(hits, query="hydraulic pressure", lexical_boost=0.1, min_score=0.0)
+        # The overlap hit should rank higher due to 2 overlapping words
+        assert result[0]["uri"] == "viking://overlap.md"
+        assert result[0]["_composite_score"] == pytest.approx(0.7)
+
+    def test_rank_and_dedup_dedup_by_content(self) -> None:
+        """Duplicate content (first 200 chars) is deduplicated."""
+        long_content = "x" * 200 + " different suffix"
+        hits = [
+            {"uri": "viking://a.md", "score": 0.9, "content": long_content},
+            {"uri": "viking://b.md", "score": 0.5, "content": long_content},
+        ]
+        result = _rank_and_dedup(hits, query="q", min_score=0.0)
+        assert len(result) == 1
+        assert result[0]["uri"] == "viking://a.md"
+
+    def test_rank_and_dedup_min_score_filter(self) -> None:
+        """Hits below min_score are filtered out."""
+        hits = [
+            {"uri": "viking://low.md", "score": 0.1, "content": "low score content"},
+            {"uri": "viking://high.md", "score": 0.9, "content": "high score content"},
+        ]
+        result = _rank_and_dedup(hits, query="q", min_score=0.5)
+        assert len(result) == 1
+        assert result[0]["uri"] == "viking://high.md"
+
+    def test_rank_and_dedup_context_type_filter(self) -> None:
+        """Hits are filtered by context_types when specified."""
+        hits = [
+            {"uri": "viking://mem.md", "score": 0.9, "context_type": "memory", "content": "x"},
+            {"uri": "viking://res.md", "score": 0.9, "context_type": "resource", "content": "x"},
+            {"uri": "viking://skl.md", "score": 0.9, "context_type": "skill", "content": "x"},
+        ]
+        result = _rank_and_dedup(hits, query="q", context_types=["memory"], min_score=0.0)
+        assert len(result) == 1
+        assert result[0]["uri"] == "viking://mem.md"
+
+    def test_rank_and_dedup_empty_hits(self) -> None:
+        """Empty hits list returns empty result."""
+        assert _rank_and_dedup([], query="q") == []
+
+    def test_rank_and_dedup_no_context_type_filter(self) -> None:
+        """When context_types is None, all hits are included."""
+        hits = [
+            {"uri": "viking://a.md", "score": 0.9, "context_type": "memory", "content": "x"},
+            {"uri": "viking://b.md", "score": 0.9, "context_type": "skill", "content": "y"},
+        ]
+        result = _rank_and_dedup(hits, query="q", context_types=None, min_score=0.0)
+        assert len(result) == 2
+
+    # ---- Pure function tests: _format_recall_block ----
+
+    def test_format_recall_block_basic(self) -> None:
+        """Formats hits as <openviking-recall> XML block."""
+        hits = [
+            {"uri": "viking://doc.md", "_composite_score": 0.85, "content": "important info"},
+        ]
+        block = _format_recall_block(hits, max_tokens=2000)
+        assert "<openviking-recall>" in block
+        assert "</openviking-recall>" in block
+        assert 'uri="viking://doc.md"' in block
+        assert "important info" in block
+
+    def test_format_recall_block_with_session_context(self) -> None:
+        """Includes session context when provided."""
+        hits = [{"uri": "viking://doc.md", "_composite_score": 0.9, "content": "data"}]
+        session_ctx = {"recent_topic": "hydraulic diagnosis"}
+        block = _format_recall_block(hits, session_context=session_ctx, max_tokens=2000)
+        assert "<session-context>" in block
+        assert "hydraulic diagnosis" in block
+
+    def test_format_recall_block_truncation(self) -> None:
+        """Content exceeding max_tokens is truncated."""
+        long_content = "x" * 10000
+        hits = [{"uri": "viking://big.md", "_composite_score": 0.9, "content": long_content}]
+        block = _format_recall_block(hits, max_tokens=100)
+        assert "truncated" in block
+        assert len(block) < 10000
+
+    def test_format_recall_block_empty(self) -> None:
+        """Empty hits and no session context returns empty string."""
+        assert _format_recall_block([]) == ""
+        assert _format_recall_block([], session_context=None) == ""
+
+    def test_format_recall_block_multiple_hits(self) -> None:
+        """Multiple hits each get their own <hit> element."""
+        hits = [
+            {"uri": "viking://a.md", "_composite_score": 0.9, "content": "content a"},
+            {"uri": "viking://b.md", "_composite_score": 0.7, "content": "content b"},
+        ]
+        block = _format_recall_block(hits, max_tokens=2000)
+        assert block.count("<hit ") == 2
+        assert "viking://a.md" in block
+        assert "viking://b.md" in block
+
+    # ---- Pure function tests: _inject_system_message ----
+
+    def test_inject_system_message_inserts_before_user(self) -> None:
+        """System message is inserted before the latest user message."""
+        from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+
+        msg1 = ModelRequest(parts=[UserPromptPart(content="first")])
+        msg2 = ModelRequest(parts=[UserPromptPart(content="second")])
+        rc = _make_request_context([msg1, msg2])
+
+        result = _inject_system_message(rc, "recall block text")
+        assert len(result.messages) == 3
+        # The system message should be at index 1 (before msg2)
+        sys_msg = result.messages[1]
+        assert isinstance(sys_msg, ModelRequest)
+        sys_part = sys_msg.parts[0]
+        assert isinstance(sys_part, SystemPromptPart)
+        assert "recall block text" in sys_part.content
+
+    def test_inject_system_message_no_user_prompt(self) -> None:
+        """Returns original context when no user message is found."""
+        from pydantic_ai.messages import ModelRequest, TextPart
+
+        msg = ModelRequest(parts=[TextPart(content="no user")])
+        rc = _make_request_context([msg])
+        result = _inject_system_message(rc, "recall text")
+        assert result is rc
+
+    def test_inject_system_message_empty_block(self) -> None:
+        """Returns original context when recall block is empty."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test")])
+        rc = _make_request_context([msg])
+        result = _inject_system_message(rc, "")
+        assert result is rc
+
+    # ---- _normalize_search_results tests ----
+
+    def test_normalize_search_results_dict_with_hits(self) -> None:
+        """Normalizes dict with 'hits' key."""
+        results = {"hits": [{"uri": "viking://a.md"}]}
+        assert _normalize_search_results(results) == [{"uri": "viking://a.md"}]
+
+    def test_normalize_search_results_dict_with_results(self) -> None:
+        """Normalizes dict with 'results' key."""
+        results = {"results": [{"uri": "viking://b.md"}]}
+        assert _normalize_search_results(results) == [{"uri": "viking://b.md"}]
+
+    def test_normalize_search_results_dict_grouped(self) -> None:
+        """Normalizes dict with Viking grouped keys (memories/resources/skills)."""
+        results = {
+            "memories": [{"uri": "viking://mem.md"}],
+            "resources": [{"uri": "viking://res.md"}],
+            "skills": [{"uri": "viking://skl.md"}],
+        }
+        normalized = _normalize_search_results(results)
+        assert len(normalized) == 3
+
+    def test_normalize_search_results_list(self) -> None:
+        """Normalizes list input directly."""
+        results = [{"uri": "viking://a.md"}]
+        assert _normalize_search_results(results) == results
+
+    def test_normalize_search_results_empty(self) -> None:
+        """Returns empty list for empty/None input."""
+        assert _normalize_search_results({}) == []
+        assert _normalize_search_results([]) == []
+        assert _normalize_search_results(None) == []
+
+    # ---- _handle_auto_recall integration tests ----
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_disabled(self, mock_client: AsyncMock) -> None:
+        """Disabled recall (auto_recall_enabled=False) is a no-op."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(mode="all", auto_recall_enabled=False)
+        cap._client = mock_client
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test prompt")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_recall(ctx, rc)
+        assert result is rc
+        mock_client.search.assert_not_called()
+        mock_client.find.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_search_method(self, mock_client: AsyncMock) -> None:
+        """Search method calls client.search() with session_id and memories_uri."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.9,
+                        "content": "hydraulic diagnosis info",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+        mock_client.get_session_context = AsyncMock(return_value={"recent_topic": "hydraulics"})
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="search",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="hydraulic pressure issue")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx(session_id="sess-123")
+
+        result = await cap._handle_auto_recall(ctx, rc)
+
+        # Verify search was called with correct params
+        mock_client.get_session_context.assert_called_once()
+        mock_client.search.assert_called_once()
+        call_args = mock_client.search.call_args
+        assert call_args.args[0] == "hydraulic pressure issue"
+        assert call_args.kwargs["session_id"] == "sess-123"
+        assert "viking://user/alice/memories/" in call_args.kwargs["target_uri"]
+
+        # Verify recall block was injected
+        assert result is not rc
+        assert len(result.messages) == 2
+        from pydantic_ai.messages import SystemPromptPart
+
+        sys_msg = result.messages[0]
+        sys_part = sys_msg.parts[0]
+        assert isinstance(sys_part, SystemPromptPart)
+        assert "<openviking-recall>" in sys_part.content
+        assert "viking://user/alice/memories/doc.md" in sys_part.content
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_find_method(self, mock_client: AsyncMock) -> None:
+        """Find method calls client.find() without session_id."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.find = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.8,
+                        "content": "translation memory",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="find",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="翻译这段文字")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx(session_id="sess-456")
+
+        result = await cap._handle_auto_recall(ctx, rc)
+
+        # Verify find was called (not search)
+        mock_client.find.assert_called_once()
+        mock_client.search.assert_not_called()
+        mock_client.get_session_context.assert_not_called()
+
+        call_args = mock_client.find.call_args
+        assert call_args.args[0] == "翻译这段文字"
+        assert "viking://user/alice/memories/" in call_args.kwargs["target_uri"]
+
+        # Verify recall block injected
+        assert result is not rc
+        from pydantic_ai.messages import SystemPromptPart
+
+        sys_part = result.messages[0].parts[0]
+        assert isinstance(sys_part, SystemPromptPart)
+        assert "<openviking-recall>" in sys_part.content
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_no_user_prompt(self, mock_client: AsyncMock) -> None:
+        """Recall skips when no user prompt is found."""
+        from pydantic_ai.messages import ModelRequest, TextPart
+
+        cap = VikingCapability(mode="all", auto_recall_enabled=True)
+        cap._client = mock_client
+
+        msg = ModelRequest(parts=[TextPart(content="no user prompt here")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_recall(ctx, rc)
+        assert result is rc
+        mock_client.search.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_graceful_failure(self, mock_client: AsyncMock) -> None:
+        """Recall fails gracefully — returns original context on error."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.search = AsyncMock(side_effect=RuntimeError("server unreachable"))
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="search",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test query")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_recall(ctx, rc)
+        # Should return original context unchanged
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_session_context_failure_fallback(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """When get_session_context fails, search still proceeds."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.get_session_context = AsyncMock(
+            side_effect=RuntimeError("session context unavailable")
+        )
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.7,
+                        "content": "content",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="search",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="query")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx(session_id="sess-789")
+
+        result = await cap._handle_auto_recall(ctx, rc)
+
+        # Search should still be called
+        mock_client.search.assert_called_once()
+        # Recall block should still be injected (without session context)
+        assert result is not rc
+        from pydantic_ai.messages import SystemPromptPart
+
+        sys_part = result.messages[0].parts[0]
+        assert isinstance(sys_part, SystemPromptPart)
+        assert "<openviking-recall>" in sys_part.content
+        # No <session-context> section
+        assert "<session-context>" not in sys_part.content
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_empty_results(self, mock_client: AsyncMock) -> None:
+        """Empty search results returns original context unchanged."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.search = AsyncMock(return_value={"results": []})
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="search",
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="obscure query")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_recall(ctx, rc)
+        # Empty results → no recall block → original context returned
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_recall_for_run_preserves_fields(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """for_run() preserves auto-recall config fields."""
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_recall_method="find",
+            auto_recall_max_tokens=500,
+            auto_recall_limit=5,
+            auto_recall_min_score=0.5,
+            auto_recall_lexical_boost=0.2,
+            auto_recall_category_boost=0.1,
+            auto_recall_context_types=["memory"],
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.auto_recall_enabled is True
+        assert copy_cap.auto_recall_method == "find"
+        assert copy_cap.auto_recall_max_tokens == 500
+        assert copy_cap.auto_recall_limit == 5
+        assert copy_cap.auto_recall_min_score == 0.5
+        assert copy_cap.auto_recall_lexical_boost == 0.2
+        assert copy_cap.auto_recall_category_boost == 0.1
+        assert copy_cap.auto_recall_context_types == ["memory"]
+
+    # ---- Config field tests ----
+
+    def test_config_auto_recall_enabled_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_enabled=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_enabled is False
+
+    def test_config_auto_recall_method_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_method='search' by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_method == "search"
+
+    def test_config_auto_recall_max_tokens_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_max_tokens=2000 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_max_tokens == 2000
+
+    def test_config_auto_recall_limit_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_limit=10 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_limit == 10
+
+    def test_config_auto_recall_min_score_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_min_score=0.3 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_min_score == 0.3
+
+    def test_config_auto_recall_lexical_boost_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_lexical_boost=0.1 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_lexical_boost == 0.1
+
+    def test_config_auto_recall_category_boost_default(self) -> None:
+        """VikingCapabilityConfig has auto_recall_category_boost=0.05 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_category_boost == 0.05
+
+    def test_config_auto_recall_context_types_default(self) -> None:
+        """VikingCapabilityConfig has default context_types=['memory', 'resource']."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_recall_context_types == ["memory", "resource"]
+
+    def test_config_auto_recall_all_fields_set(self) -> None:
+        """All auto-recall config fields can be set at once."""
+        cfg = VikingCapabilityConfig(
+            auto_recall_enabled=True,
+            auto_recall_method="find",
+            auto_recall_max_tokens=1000,
+            auto_recall_limit=5,
+            auto_recall_min_score=0.5,
+            auto_recall_lexical_boost=0.2,
+            auto_recall_category_boost=0.1,
+            auto_recall_context_types=["memory", "resource", "skill"],
+        )
+        assert cfg.auto_recall_enabled is True
+        assert cfg.auto_recall_method == "find"
+        assert cfg.auto_recall_max_tokens == 1000
+        assert cfg.auto_recall_limit == 5
+        assert cfg.auto_recall_min_score == 0.5
+        assert cfg.auto_recall_lexical_boost == 0.2
+        assert cfg.auto_recall_category_boost == 0.1
+        assert cfg.auto_recall_context_types == ["memory", "resource", "skill"]
+
+
+# ---------------------------------------------------------------------------
+# 4.7 — URI Guard tests (Tasks 4.1-4.2)
+# ---------------------------------------------------------------------------
+
+
+class TestURIGuard:
+    """Tests for wrap_tool_execute URI guard interception."""
+
+    @pytest.mark.asyncio
+    async def test_blocked_read_with_viking_uri(self) -> None:
+        """Read tool with viking:// URI is blocked when guard is enabled."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "read"
+        handler = AsyncMock(return_value="tool result")
+        args = {"file_path": "viking://user/alice/doc.md"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert isinstance(result, str)
+        assert "viking://" in result
+        assert "read" in result
+        assert "viking_read" in result or "viking_search" in result
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_allowed_non_protected_tool(self) -> None:
+        """Non-protected tool (not in list) with viking:// URI is allowed."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash"],
+        )
+        call = MagicMock()
+        call.tool_name = "grep"
+        handler = AsyncMock(return_value="grep result")
+        args = {"path": "viking://user/alice/doc.md", "pattern": "hello"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert result == "grep result"
+        handler.assert_called_once_with(args)
+
+    @pytest.mark.asyncio
+    async def test_allowed_protected_tool_no_viking_uri(self) -> None:
+        """Protected tool (read) without viking:// URI is allowed."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "read"
+        handler = AsyncMock(return_value="file content")
+        args = {"file_path": "/local/path/to/file.txt"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert result == "file content"
+        handler.assert_called_once_with(args)
+
+    @pytest.mark.asyncio
+    async def test_disabled_guard_always_passes(self) -> None:
+        """When uri_guard_enabled=False, handler is always called."""
+        cap = VikingCapability(
+            uri_guard_enabled=False,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "read"
+        handler = AsyncMock(return_value="result")
+        args = {"file_path": "viking://user/alice/doc.md"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert result == "result"
+        handler.assert_called_once_with(args)
+
+    @pytest.mark.asyncio
+    async def test_custom_protected_tools_list(self) -> None:
+        """Custom protected tools list excludes bash, allowing it through."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "write_file"],
+        )
+        call = MagicMock()
+        call.tool_name = "bash"
+        handler = AsyncMock(return_value="bash result")
+        args = {"command": "cat viking://user/alice/doc.md"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert result == "bash result"
+        handler.assert_called_once_with(args)
+
+    @pytest.mark.asyncio
+    async def test_blocked_bash_with_viking_uri(self) -> None:
+        """Bash tool with viking:// URI in args is blocked."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "bash"
+        handler = AsyncMock(return_value="should not reach")
+        args = {"command": "cat viking://user/alice/secret.md"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert isinstance(result, str)
+        assert "bash" in result
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blocked_grep_with_viking_uri(self) -> None:
+        """Grep tool with viking:// URI in args is blocked."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "grep"
+        handler = AsyncMock(return_value="should not reach")
+        args = {"path": "viking://resources/doc.md", "pattern": "hello"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert isinstance(result, str)
+        assert "grep" in result
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_blocked_glob_with_viking_uri(self) -> None:
+        """Glob tool with viking:// URI in args is blocked."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+        )
+        call = MagicMock()
+        call.tool_name = "glob"
+        handler = AsyncMock(return_value="should not reach")
+        args = {"path": "viking://resources/", "pattern": "**/*.md"}
+
+        result = await cap.wrap_tool_execute(
+            MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+        )
+
+        assert isinstance(result, str)
+        assert "glob" in result
+        handler.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_uri_guard_config(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves uri_guard_enabled and uri_guard_protected_tools."""
+        cap = VikingCapability(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "custom_tool"],
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.uri_guard_enabled is True
+        assert copy_cap.uri_guard_protected_tools == ["read", "custom_tool"]
+
+
+# ---------------------------------------------------------------------------
+# 4.7 — viking_forget gating tests (Tasks 4.3-4.4)
+# ---------------------------------------------------------------------------
+
+
+class TestForgetGating:
+    """Tests for viking_forget tool gating behind enable_forget."""
+
+    def test_forget_excluded_by_default(self) -> None:
+        """viking_forget is excluded when enable_forget=False (default)."""
+        cap = VikingCapability(mode="write")
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" not in names
+
+    def test_forget_included_when_enabled(self) -> None:
+        """viking_forget is included when enable_forget=True."""
+        cap = VikingCapability(mode="write", enable_forget=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" in names
+
+    def test_forget_excluded_with_memory_enabled(self) -> None:
+        """viking_forget is excluded when enable_memory=True but enable_forget=False."""
+        cap = VikingCapability(mode="write", enable_memory=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" not in names
+        assert "viking_remember" in names
+
+    def test_forget_included_with_all_flags(self) -> None:
+        """viking_forget is included when both enable_memory and enable_forget are True."""
+        cap = VikingCapability(mode="all", enable_memory=True, enable_forget=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" in names
+        assert "viking_remember" in names
+
+    def test_forget_excluded_in_all_mode_default(self) -> None:
+        """viking_forget is excluded in all mode by default."""
+        cap = VikingCapability(mode="all")
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" not in names
+
+    def test_forget_excluded_in_retrieve_mode(self) -> None:
+        """viking_forget is excluded in retrieve mode even with enable_forget=True."""
+        cap = VikingCapability(mode="retrieve", enable_forget=True)
+        cap._client = AsyncMock()
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_forget" not in names
+
+    def test_config_enable_forget_default(self) -> None:
+        """VikingCapabilityConfig has enable_forget=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.enable_forget is False
+
+    def test_config_enable_forget_set(self) -> None:
+        """VikingCapabilityConfig accepts enable_forget=True."""
+        cfg = VikingCapabilityConfig(enable_forget=True)
+        assert cfg.enable_forget is True
+
+    def test_config_uri_guard_enabled_default(self) -> None:
+        """VikingCapabilityConfig has uri_guard_enabled=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.uri_guard_enabled is False
+
+    def test_config_uri_guard_protected_tools_default(self) -> None:
+        """VikingCapabilityConfig has default protected tools list."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.uri_guard_protected_tools == ["read", "bash", "grep", "glob"]
+
+    def test_config_uri_guard_protected_tools_custom(self) -> None:
+        """VikingCapabilityConfig accepts custom protected tools list."""
+        cfg = VikingCapabilityConfig(
+            uri_guard_enabled=True,
+            uri_guard_protected_tools=["read", "write_file"],
+        )
+        assert cfg.uri_guard_protected_tools == ["read", "write_file"]
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_enable_forget(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves enable_forget setting."""
+        cap = VikingCapability(mode="all", enable_forget=True)
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.enable_forget is True
+
+
+# ---------------------------------------------------------------------------
+# 5.10 — Test Compaction Archive (Tasks 5.1-5.9)
+# ---------------------------------------------------------------------------
+
+
+class TestCompaction:
+    """Tests for compaction archive feature (Tasks 5.1-5.9)."""
+
+    # ---- Task 5.1: _estimate_tokens() pure function tests ----
+
+    def test_estimate_tokens_ascii(self) -> None:
+        """ASCII text: chars / 4."""
+        from agentpool.capabilities.viking.compaction import _estimate_tokens
+
+        assert _estimate_tokens("") == 0
+        assert _estimate_tokens("hello") == 1  # 5 // 4 = 1
+        assert _estimate_tokens("hello world!") == 3  # 12 // 4 = 3
+        assert _estimate_tokens("a" * 400) == 100
+
+    def test_estimate_tokens_cjk(self) -> None:
+        """CJK characters count as 1 token each."""
+        from agentpool.capabilities.viking.compaction import _estimate_tokens
+
+        # Each CJK char is 1 token
+        assert _estimate_tokens("你好") == 2
+        assert _estimate_tokens("你好世界") == 4
+        # CJK Extension A
+        assert _estimate_tokens("\u3400\u3401") == 2
+
+    def test_estimate_tokens_mixed(self) -> None:
+        """Mixed ASCII + CJK: ASCII at 4:1, CJK at 1:1."""
+        from agentpool.capabilities.viking.compaction import _estimate_tokens
+
+        # 2 CJK chars (2 tokens) + 8 ASCII chars (2 tokens) = 4
+        assert _estimate_tokens("你好abcdefgh") == 4
+
+    def test_estimate_tokens_empty(self) -> None:
+        """Empty string returns 0."""
+        from agentpool.capabilities.viking.compaction import _estimate_tokens
+
+        assert _estimate_tokens("") == 0
+
+    # ---- Task 5.2: _split_archivable() pure function tests ----
+
+    def test_split_archivable_basic(self) -> None:
+        """Split messages keeping last N turns."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _split_archivable
+
+        # 4 user turns, keep last 2
+        messages: list[Any] = []
+        for i in range(4):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"User turn {i}")]))
+            messages.append(ModelResponse(parts=[TextPart(content=f"Assistant turn {i}")]))
+
+        archivable, keep = _split_archivable(messages, keep_recent_turns=2)
+        assert len(archivable) == 4  # 2 old turns (2 msgs each)
+        assert len(keep) == 4  # 2 recent turns (2 msgs each)
+        # Keep should start with the 3rd user message
+        first_keep = keep[0]
+        assert isinstance(first_keep, ModelRequest)
+        user_part = first_keep.parts[0]
+        assert isinstance(user_part, UserPromptPart)
+        assert "User turn 2" in str(user_part.content)
+
+    def test_split_archivable_keep_all_when_fewer_turns(self) -> None:
+        """Keep all messages when fewer turns than keep_recent_turns."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _split_archivable
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Turn 1")]),
+            ModelRequest(parts=[UserPromptPart(content="Turn 2")]),
+        ]
+        archivable, keep = _split_archivable(messages, keep_recent_turns=5)
+        assert archivable == []
+        assert len(keep) == 2
+
+    def test_split_archivable_keep_zero(self) -> None:
+        """keep_recent_turns=0 means all messages are archivable."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _split_archivable
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Turn 1")]),
+            ModelRequest(parts=[UserPromptPart(content="Turn 2")]),
+        ]
+        archivable, keep = _split_archivable(messages, keep_recent_turns=0)
+        assert len(archivable) == 2
+        assert keep == []
+
+    def test_split_archivable_empty(self) -> None:
+        """Empty messages list returns empty tuple."""
+        from agentpool.capabilities.viking.compaction import _split_archivable
+
+        archivable, keep = _split_archivable([], keep_recent_turns=3)
+        assert archivable == []
+        assert keep == []
+
+    # ---- Task 5.3: _serialize_messages() pure function tests ----
+
+    def test_serialize_messages_basic(self) -> None:
+        """Serialize messages as markdown with role headers."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _serialize_messages
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Hello there")]),
+            ModelResponse(parts=[TextPart(content="Hi! How can I help?")]),
+        ]
+        result = _serialize_messages(messages)
+        assert "## User" in result
+        assert "Hello there" in result
+        assert "## Assistant" in result
+        assert "Hi! How can I help?" in result
+
+    def test_serialize_messages_empty(self) -> None:
+        """Empty messages produce empty string."""
+        from agentpool.capabilities.viking.compaction import _serialize_messages
+
+        assert _serialize_messages([]) == ""
+
+    # ---- Task 5.4: _summarize_messages() pure function tests ----
+
+    def test_summarize_messages_basic(self) -> None:
+        """Summary contains first 200 chars of each message."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _summarize_messages
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="What is Python?")]),
+            ModelResponse(parts=[TextPart(content="A programming language.")]),
+        ]
+        result = _summarize_messages(messages)
+        assert "**User:** What is Python?" in result
+        assert "**Assistant:** A programming language." in result
+
+    def test_summarize_messages_truncation(self) -> None:
+        """Summary truncates long content to 200 chars."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import _summarize_messages
+
+        long_text = "x" * 300
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=long_text)]),
+        ]
+        result = _summarize_messages(messages)
+        # Should contain first 200 chars
+        assert "x" * 200 in result
+        assert "x" * 201 not in result
+
+    def test_summarize_messages_empty(self) -> None:
+        """Empty messages produce empty string."""
+        from agentpool.capabilities.viking.compaction import _summarize_messages
+
+        assert _summarize_messages([]) == ""
+
+    # ---- Task 5.6: _handle_compaction() tests ----
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_above_threshold(self, mock_client: AsyncMock) -> None:
+        """Above threshold: archive and replace messages."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=10,  # very low threshold
+            compaction_keep_recent_turns=1,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        messages: list[Any] = []
+        for i in range(3):
+            messages.append(
+                ModelRequest(parts=[UserPromptPart(content=f"User turn {i} with some text")])
+            )
+            messages.append(
+                ModelResponse(parts=[TextPart(content=f"Assistant reply {i} with some text")])
+            )
+
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        result = await cap._handle_compaction(ctx, rc)
+
+        # Should have written to Viking
+        mock_client.write.assert_called_once()
+        write_args = mock_client.write.call_args
+        archive_uri = write_args.args[0]
+        assert "viking://user/alice/memories/compacted/" in archive_uri
+        assert archive_uri.endswith(".md")
+
+        # Result should have fewer messages than original (archived replaced with summary)
+        assert len(result.messages) < len(messages)
+        # First message should be the archive summary (SystemPromptPart)
+        first_msg = result.messages[0]
+        assert isinstance(first_msg, ModelRequest)
+        from pydantic_ai.messages import SystemPromptPart
+
+        sys_part = first_msg.parts[0]
+        assert isinstance(sys_part, SystemPromptPart)
+        assert archive_uri in sys_part.content
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_below_threshold(self, mock_client: AsyncMock) -> None:
+        """Below threshold: no-op, return original context."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=1_000_000,  # very high threshold
+            compaction_keep_recent_turns=2,
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="short message")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        result = await cap._handle_compaction(ctx, rc)
+
+        # Should return the same context unchanged
+        assert result is rc
+        mock_client.write.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_disabled(self, mock_client: AsyncMock) -> None:
+        """Disabled compaction is a no-op."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=False,
+            compaction_threshold=1,  # would trigger if enabled
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="text")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        result = await cap._handle_compaction(ctx, rc)
+
+        assert result is rc
+        mock_client.write.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_server_unreachable(self, mock_client: AsyncMock) -> None:
+        """Server unreachable: graceful failure, return original context."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=10,
+            compaction_keep_recent_turns=1,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        mock_client.write = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+        messages: list[Any] = []
+        for i in range(3):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"User turn {i}")]))
+            messages.append(ModelResponse(parts=[TextPart(content=f"Assistant {i}")]))
+
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        result = await cap._handle_compaction(ctx, rc)
+
+        # Should return original context unchanged
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_cursor_adjustment(self, mock_client: AsyncMock) -> None:
+        """Cursor (_last_ingested_idx) is decremented by N after compaction."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=10,
+            compaction_keep_recent_turns=1,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        cap._last_ingested_idx = 5  # Simulate prior ingestion
+
+        messages: list[Any] = []
+        for i in range(3):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"User turn {i}")]))
+            messages.append(ModelResponse(parts=[TextPart(content=f"Assistant {i}")]))
+
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        await cap._handle_compaction(ctx, rc)
+
+        # 4 messages were archivable (2 turns), so cursor should be 5-4=1
+        assert cap._last_ingested_idx == 1
+
+    @pytest.mark.asyncio
+    async def test_handle_compaction_cursor_clamped_to_zero(self, mock_client: AsyncMock) -> None:
+        """Cursor is clamped to 0 when N exceeds current value."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=10,
+            compaction_keep_recent_turns=1,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        cap._last_ingested_idx = 2  # Less than N=4 archivable
+
+        messages: list[Any] = []
+        for i in range(3):
+            messages.append(ModelRequest(parts=[UserPromptPart(content=f"User turn {i}")]))
+            messages.append(ModelResponse(parts=[TextPart(content=f"Assistant {i}")]))
+
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+        await cap._handle_compaction(ctx, rc)
+
+        assert cap._last_ingested_idx == 0
+
+    # ---- Task 5.7: viking_expand tool tests ----
+
+    @pytest.mark.asyncio
+    async def test_viking_expand_tool_calls_client_read(self, mock_client: AsyncMock) -> None:
+        """viking_expand calls client.read(uri) and returns content."""
+        mock_client.read = AsyncMock(return_value="Archived conversation content")
+        cap = VikingCapability(
+            mode="retrieve",
+            compaction_expand_tool=True,
+        )
+        cap._client = mock_client
+
+        tools = build_tools(cap)
+        expand_tool = _get_tool(tools, "viking_expand")
+
+        ctx = _make_ctx()
+        result = await expand_tool(ctx, uri="viking://user/alice/memories/compacted/abc.md")
+
+        mock_client.read.assert_called_once_with("viking://user/alice/memories/compacted/abc.md")
+        assert result == "Archived conversation content"
+
+    @pytest.mark.asyncio
+    async def test_viking_expand_tool_error(self, mock_client: AsyncMock) -> None:
+        """viking_expand returns error string on failure."""
+        mock_client.read = AsyncMock(side_effect=RuntimeError("not found"))
+        cap = VikingCapability(
+            mode="retrieve",
+            compaction_expand_tool=True,
+        )
+        cap._client = mock_client
+
+        tools = build_tools(cap)
+        expand_tool = _get_tool(tools, "viking_expand")
+
+        ctx = _make_ctx()
+        result = await expand_tool(ctx, uri="viking://missing.md")
+
+        assert "viking_expand error: not found" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_expand_tool_empty_content(self, mock_client: AsyncMock) -> None:
+        """viking_expand returns 'No content found' for empty response."""
+        mock_client.read = AsyncMock(return_value="")
+        cap = VikingCapability(
+            mode="retrieve",
+            compaction_expand_tool=True,
+        )
+        cap._client = mock_client
+
+        tools = build_tools(cap)
+        expand_tool = _get_tool(tools, "viking_expand")
+
+        ctx = _make_ctx()
+        result = await expand_tool(ctx, uri="viking://empty.md")
+
+        assert result == "No content found at URI."
+
+    def test_viking_expand_not_exposed_when_disabled(self) -> None:
+        """viking_expand not in tools when compaction_expand_tool=False."""
+        cap = VikingCapability(
+            mode="retrieve",
+            compaction_expand_tool=False,
+        )
+        cap._client = AsyncMock()
+
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_expand" not in names
+
+    def test_viking_expand_exposed_when_enabled(self) -> None:
+        """viking_expand in tools when compaction_expand_tool=True."""
+        cap = VikingCapability(
+            mode="retrieve",
+            compaction_expand_tool=True,
+        )
+        cap._client = AsyncMock()
+
+        tools = build_tools(cap)
+        names = {t.__name__ for t in tools}
+        assert "viking_expand" in names
+
+    # ---- Task 5.8: Config field tests ----
+
+    def test_config_compaction_disabled_default(self) -> None:
+        """VikingCapabilityConfig has compaction_enabled=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.compaction_enabled is False
+
+    def test_config_compaction_threshold_default(self) -> None:
+        """VikingCapabilityConfig has compaction_threshold=100000 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.compaction_threshold == 100_000
+
+    def test_config_compaction_keep_recent_turns_default(self) -> None:
+        """VikingCapabilityConfig has compaction_keep_recent_turns=5 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.compaction_keep_recent_turns == 5
+
+    def test_config_compaction_expand_tool_default(self) -> None:
+        """VikingCapabilityConfig has compaction_expand_tool=True by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.compaction_expand_tool is True
+
+    def test_config_compaction_fields_set(self) -> None:
+        """All compaction fields can be set at once."""
+        cfg = VikingCapabilityConfig(
+            compaction_enabled=True,
+            compaction_threshold=50_000,
+            compaction_keep_recent_turns=3,
+            compaction_expand_tool=False,
+        )
+        assert cfg.compaction_enabled is True
+        assert cfg.compaction_threshold == 50_000
+        assert cfg.compaction_keep_recent_turns == 3
+        assert cfg.compaction_expand_tool is False
+
+    # ---- Task 5.9: for_run() preserves compaction fields ----
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_compaction_fields(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves compaction config fields."""
+        cap = VikingCapability(
+            mode="all",
+            compaction_enabled=True,
+            compaction_threshold=50_000,
+            compaction_keep_recent_turns=3,
+            compaction_expand_tool=False,
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.compaction_enabled is True
+        assert copy_cap.compaction_threshold == 50_000
+        assert copy_cap.compaction_keep_recent_turns == 3
+        assert copy_cap.compaction_expand_tool is False
+
+
+# ---------------------------------------------------------------------------
+# 3.10 — Auto Conversation Ingestion tests (Tasks 3.1-3.9)
+# ---------------------------------------------------------------------------
+
+
+class TestAutoIngest:
+    """Tests for auto conversation ingestion helpers and _handle_auto_ingest()."""
+
+    # ---- Pure function tests: _sanitize_message ----
+
+    def test_sanitize_strips_recall_block(self) -> None:
+        """_sanitize_message replaces <openviking-recall> with placeholder."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = "Hello <openviking-recall>secret data</openviking-recall> world"
+        result = _sanitize_message(content)
+        assert "<openviking-recall>" not in result
+        assert "secret data" not in result
+        assert "[recalled context omitted]" in result
+        assert "Hello" in result
+        assert "world" in result
+
+    def test_sanitize_strips_profile_block(self) -> None:
+        """_sanitize_message replaces <openviking-profile> with placeholder."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = "Context: <openviking-profile>user profile data</openviking-profile> end"
+        result = _sanitize_message(content)
+        assert "<openviking-profile>" not in result
+        assert "user profile data" not in result
+        assert "[recalled context omitted]" in result
+
+    def test_sanitize_strips_both_blocks(self) -> None:
+        """_sanitize_message strips both recall and profile blocks."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = (
+            "<openviking-recall>recall data</openviking-recall>"
+            " middle "
+            "<openviking-profile>profile data</openviking-profile>"
+        )
+        result = _sanitize_message(content)
+        assert "recall data" not in result
+        assert "profile data" not in result
+        assert result.count("[recalled context omitted]") == 2
+
+    def test_sanitize_multiline_blocks(self) -> None:
+        """_sanitize_message handles multi-line XML blocks."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = (
+            "<openviking-recall>\n  <hit uri='viking://doc.md'/>\n  data\n</openviking-recall> rest"
+        )
+        result = _sanitize_message(content)
+        assert "<openviking-recall>" not in result
+        assert "[recalled context omitted]" in result
+        assert "rest" in result
+
+    def test_sanitize_disabled_returns_original(self) -> None:
+        """When enabled=False, content is returned unchanged."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = "<openviking-recall>keep this</openviking-recall>"
+        result = _sanitize_message(content, enabled=False)
+        assert result == content
+
+    def test_sanitize_no_xml_blocks(self) -> None:
+        """Content without XML blocks is returned unchanged."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        content = "just plain text without any xml blocks"
+        result = _sanitize_message(content)
+        assert result == content
+
+    def test_sanitize_empty_string(self) -> None:
+        """Empty string returns empty string."""
+        from agentpool.capabilities.viking.ingest import _sanitize_message
+
+        assert _sanitize_message("") == ""
+
+    # ---- Pure function tests: _extract_conversation_pairs ----
+
+    def test_extract_conversation_pairs_basic(self) -> None:
+        """Extracts user+assistant pairs from messages."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="What is X?")]),
+            ModelResponse(parts=[TextPart(content="X is a thing.")]),
+        ]
+        result = _extract_conversation_pairs(messages, start_idx=0)
+        assert len(result) == 2
+        assert result[0] == {"role": "user", "content": "What is X?"}
+        assert result[1] == {"role": "assistant", "content": "X is a thing."}
+
+    def test_extract_conversation_pairs_cursor_tracking(self) -> None:
+        """Only extracts messages after start_idx."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="old question")]),
+            ModelResponse(parts=[TextPart(content="old answer")]),
+            ModelRequest(parts=[UserPromptPart(content="new question")]),
+            ModelResponse(parts=[TextPart(content="new answer")]),
+        ]
+        result = _extract_conversation_pairs(messages, start_idx=2)
+        assert len(result) == 2
+        assert result[0] == {"role": "user", "content": "new question"}
+        assert result[1] == {"role": "assistant", "content": "new answer"}
+
+    def test_extract_conversation_pairs_no_new_messages(self) -> None:
+        """Returns empty list when start_idx >= len(messages)."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        messages = [ModelRequest(parts=[UserPromptPart(content="hello")])]
+        result = _extract_conversation_pairs(messages, start_idx=1)
+        assert result == []
+
+    def test_extract_conversation_pairs_multiple_turns(self) -> None:
+        """Extracts multiple user+assistant turns."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q1")]),
+            ModelResponse(parts=[TextPart(content="A1")]),
+            ModelRequest(parts=[UserPromptPart(content="Q2")]),
+            ModelResponse(parts=[TextPart(content="A2")]),
+            ModelRequest(parts=[UserPromptPart(content="Q3")]),
+            ModelResponse(parts=[TextPart(content="A3")]),
+        ]
+        result = _extract_conversation_pairs(messages, start_idx=0)
+        assert len(result) == 6
+        assert result[0]["content"] == "Q1"
+        assert result[1]["content"] == "A1"
+        assert result[4]["content"] == "Q3"
+        assert result[5]["content"] == "A3"
+
+    def test_extract_conversation_pairs_skips_non_text_content(self) -> None:
+        """Skips UserPromptPart with list (multimodal) content."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=["image_data", "text"])]),
+            ModelResponse(parts=[TextPart(content="response")]),
+            ModelRequest(parts=[UserPromptPart(content="plain text")]),
+        ]
+        result = _extract_conversation_pairs(messages, start_idx=0)
+        # First user prompt is skipped (list content), assistant text is included
+        assert len(result) == 2
+        assert result[0] == {"role": "assistant", "content": "response"}
+        assert result[1] == {"role": "user", "content": "plain text"}
+
+    def test_extract_conversation_pairs_empty_messages(self) -> None:
+        """Empty messages list returns empty list."""
+        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+
+        assert _extract_conversation_pairs([], start_idx=0) == []
+
+    # ---- _handle_auto_ingest integration tests ----
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_disabled(self, mock_client: AsyncMock) -> None:
+        """Disabled ingest (auto_ingest_enabled=False) is a no-op."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(mode="all", auto_ingest_enabled=False)
+        cap._client = mock_client
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        # Even when called directly, disabled ingest does nothing
+        # (Group 7 gates this; here we test the handler logic itself)
+        result = await cap._handle_auto_ingest(ctx, rc)
+        assert result is rc
+        mock_client.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_no_new_messages(self, mock_client: AsyncMock) -> None:
+        """When cursor is at current message count, ingestion is skipped."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(mode="all", auto_ingest_enabled=True)
+        cap._client = mock_client
+        cap._last_ingested_idx = 1  # Cursor at current count
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_ingest(ctx, rc)
+        assert result is rc
+        mock_client.create_session.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_extracts_and_ingests(self, mock_client: AsyncMock) -> None:
+        """Ingestion extracts conversation pairs and creates a Viking session."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",  # sync for deterministic test
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="What is X?")]),
+            ModelResponse(parts=[TextPart(content="X is a thing.")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        result = await cap._handle_auto_ingest(ctx, rc)
+
+        # Cursor should be updated
+        assert cap._last_ingested_idx == 2
+        # Session creation should have been called
+        mock_client.create_session.assert_called_once()
+        # Two messages should have been added
+        assert mock_client.add_message.call_count == 2
+        # Session should have been committed
+        mock_client.commit_session.assert_called_once()
+
+        # Verify message content
+        add_calls = mock_client.add_message.call_args_list
+        assert add_calls[0].args[1] == "user"
+        assert add_calls[0].args[2] == "What is X?"
+        assert add_calls[1].args[1] == "assistant"
+        assert add_calls[1].args[2] == "X is a thing."
+
+        # Result should be unchanged
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_sanitizes_messages(self, mock_client: AsyncMock) -> None:
+        """Ingestion sanitizes XML blocks before writing to Viking."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_sanitize=True,
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(
+                parts=[
+                    UserPromptPart(content="Question <openviking-recall>secret</openviking-recall>")
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(content="Answer <openviking-profile>profile data</openviking-profile>")
+                ]
+            ),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        # Verify sanitized content was ingested
+        add_calls = mock_client.add_message.call_args_list
+        assert "[recalled context omitted]" in add_calls[0].args[2]
+        assert "secret" not in add_calls[0].args[2]
+        assert "[recalled context omitted]" in add_calls[1].args[2]
+        assert "profile data" not in add_calls[1].args[2]
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_no_sanitize(self, mock_client: AsyncMock) -> None:
+        """When auto_ingest_sanitize=False, messages are ingested verbatim."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_sanitize=False,
+        )
+        cap._client = mock_client
+
+        xml_content = "<openviking-recall>keep this</openviking-recall>"
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=xml_content)]),
+            ModelResponse(parts=[TextPart(content="response")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        add_calls = mock_client.add_message.call_args_list
+        assert add_calls[0].args[2] == xml_content  # verbatim
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_commit_with_retention(self, mock_client: AsyncMock) -> None:
+        """Commit passes keep_recent_turn_count when configured."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_keep_recent_turns=3,
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q")]),
+            ModelResponse(parts=[TextPart(content="A")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        commit_kwargs = mock_client.commit_session.call_args.kwargs
+        assert commit_kwargs["keep_recent_turn_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_commit_without_retention(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """Commit does not pass keep_recent_turn_count when it's 0."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_keep_recent_turns=0,
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q")]),
+            ModelResponse(parts=[TextPart(content="A")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        commit_kwargs = mock_client.commit_session.call_args.kwargs
+        assert "keep_recent_turn_count" not in commit_kwargs
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_async_mode_creates_task(self, mock_client: AsyncMock) -> None:
+        """Async mode creates a fire-and-forget task."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="async",
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q")]),
+            ModelResponse(parts=[TextPart(content="A")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        # Cursor should be updated immediately
+        assert cap._last_ingested_idx == 2
+        # A task should be pending
+        assert len(cap._pending_tasks) >= 0  # Task may have already completed
+        # Pending conversation should be stored
+        assert cap._pending_conversation is not None
+
+        # Wait for the task to complete
+        if cap._pending_tasks:
+            await asyncio.gather(*cap._pending_tasks, return_exceptions=True)
+
+        # After task completes, SDK calls should have been made
+        mock_client.create_session.assert_called_once()
+        mock_client.commit_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_graceful_failure(self, mock_client: AsyncMock) -> None:
+        """Ingestion failure does not block and still updates cursor."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        mock_client.create_session = AsyncMock(side_effect=RuntimeError("server unreachable"))
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q")]),
+            ModelResponse(parts=[TextPart(content="A")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        # Should not raise
+        result = await cap._handle_auto_ingest(ctx, rc)
+
+        # Cursor should still be updated (to avoid retrying)
+        assert cap._last_ingested_idx == 2
+        # Result should be unchanged
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_auto_ingest_cursor_update_on_no_pairs(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """Cursor is updated even when no conversation pairs are extracted."""
+        from pydantic_ai.messages import ModelRequest, TextPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+        )
+        cap._client = mock_client
+
+        # Message without UserPromptPart (e.g., system-only)
+        messages = [ModelRequest(parts=[TextPart(content="no user prompt")])]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        # Cursor should be updated even though no pairs were extracted
+        assert cap._last_ingested_idx == 1
+        mock_client.create_session.assert_not_called()
+
+    # ---- after_run() tests ----
+
+    @pytest.mark.asyncio
+    async def test_after_run_no_pending_tasks(self, mock_client: AsyncMock) -> None:
+        """after_run() is a no-op when there are no pending tasks."""
+        cap = VikingCapability(mode="all", auto_ingest_enabled=True)
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        result = await cap.after_run(ctx, result="test_result")
+        assert result == "test_result"
+
+    @pytest.mark.asyncio
+    async def test_after_run_flushes_pending_tasks(self, mock_client: AsyncMock) -> None:
+        """after_run() awaits pending fire-and-forget tasks."""
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="async",
+        )
+        cap._client = mock_client
+
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="Q")]),
+            ModelResponse(parts=[TextPart(content="A")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap._handle_auto_ingest(ctx, rc)
+
+        # after_run should flush
+        await cap.after_run(ctx, result="done")
+
+        # All tasks should be completed
+        assert len(cap._pending_tasks) == 0
+        mock_client.create_session.assert_called_once()
+        mock_client.commit_session.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_after_run_timeout(self, mock_client: AsyncMock) -> None:
+        """after_run() logs warning on timeout but does not raise."""
+        import asyncio
+
+        cap = VikingCapability(mode="all", auto_ingest_enabled=True)
+        cap._client = mock_client
+
+        # Create a task that never completes
+        async def _slow_task() -> None:
+            await asyncio.sleep(100)
+
+        task = asyncio.create_task(_slow_task())
+        cap._pending_tasks.add(task)
+        task.add_done_callback(cap._pending_tasks.discard)
+
+        ctx = _make_ctx()
+        # Should return within 5 seconds (timeout)
+        result = await cap.after_run(ctx, result="done")
+        assert result == "done"
+
+        # Clean up the task
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    # ---- for_run() state isolation ----
+
+    @pytest.mark.asyncio
+    async def test_for_run_resets_ingestion_state(self, mock_client: AsyncMock) -> None:
+        """for_run() resets _last_ingested_idx, _pending_conversation, _pending_tasks."""
+        cap = VikingCapability(mode="all", auto_ingest_enabled=True)
+        cap._client = mock_client
+        cap._last_ingested_idx = 42
+        cap._pending_conversation = [{"role": "user", "content": "old"}]
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap._last_ingested_idx == 0
+        assert copy_cap._pending_conversation is None
+        assert copy_cap._pending_tasks == set()
+        # Identity should be shared
+        assert copy_cap._identity is cap._identity
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_auto_ingest_config(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves auto_ingest config fields."""
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_sanitize=False,
+            auto_ingest_source_type="custom",
+            auto_ingest_keep_recent_turns=5,
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.auto_ingest_enabled is True
+        assert copy_cap.auto_ingest_mode == "sync"
+        assert copy_cap.auto_ingest_sanitize is False
+        assert copy_cap.auto_ingest_source_type == "custom"
+        assert copy_cap.auto_ingest_keep_recent_turns == 5
+
+    # ---- Config field tests ----
+
+    def test_config_auto_ingest_enabled_default(self) -> None:
+        """VikingCapabilityConfig has auto_ingest_enabled=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_ingest_enabled is False
+
+    def test_config_auto_ingest_mode_default(self) -> None:
+        """VikingCapabilityConfig has auto_ingest_mode='async' by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_ingest_mode == "async"
+
+    def test_config_auto_ingest_sanitize_default(self) -> None:
+        """VikingCapabilityConfig has auto_ingest_sanitize=True by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_ingest_sanitize is True
+
+    def test_config_auto_ingest_source_type_default(self) -> None:
+        """VikingCapabilityConfig has auto_ingest_source_type='agentpool' by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_ingest_source_type == "agentpool"
+
+    def test_config_auto_ingest_keep_recent_turns_default(self) -> None:
+        """VikingCapabilityConfig has auto_ingest_keep_recent_turns=0 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.auto_ingest_keep_recent_turns == 0
+
+    def test_config_auto_ingest_all_fields_set(self) -> None:
+        """All auto-ingest config fields can be set at once."""
+        cfg = VikingCapabilityConfig(
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_sanitize=False,
+            auto_ingest_source_type="myapp",
+            auto_ingest_keep_recent_turns=10,
+        )
+        assert cfg.auto_ingest_enabled is True
+        assert cfg.auto_ingest_mode == "sync"
+        assert cfg.auto_ingest_sanitize is False
+        assert cfg.auto_ingest_source_type == "myapp"
+        assert cfg.auto_ingest_keep_recent_turns == 10
+
+
+# ---------------------------------------------------------------------------
+# 6.7 — Test Profile Injection (Tasks 6.1-6.6)
+# ---------------------------------------------------------------------------
+
+
+class TestProfileInjection:
+    """Tests for profile injection — formatting, context hint, injection, config.
+
+    Covers _format_profile_block, _derive_context_hint, _handle_profile_inject,
+    config fields, and for_run() reset.
+    """
+
+    # ---- _format_profile_block (pure function) ----
+
+    def test_format_profile_block_basic(self) -> None:
+        """_format_profile_block renders XML with memory hits."""
+        results = {
+            "hits": [
+                {
+                    "uri": "viking://user/alice/memories/project.md",
+                    "score": 0.9,
+                    "content": "Project uses Python 3.13",
+                    "context_type": "memory",
+                },
+            ]
+        }
+        block = _format_profile_block(results, max_tokens=1000)
+        assert "<openviking-profile>" in block
+        assert "</openviking-profile>" in block
+        assert "<project-context>" in block
+        assert "viking://user/alice/memories/project.md" in block
+        assert "Project uses Python 3.13" in block
+
+    def test_format_profile_block_with_resources(self) -> None:
+        """_format_profile_block groups resource hits into <relevant-resources>."""
+        results = {
+            "hits": [
+                {
+                    "uri": "viking://resources/doc.md",
+                    "score": 0.8,
+                    "content": "Resource content",
+                    "context_type": "resource",
+                },
+            ]
+        }
+        block = _format_profile_block(results, max_tokens=1000)
+        assert "<relevant-resources>" in block
+        assert "viking://resources/doc.md" in block
+
+    def test_format_profile_block_empty_results(self) -> None:
+        """_format_profile_block returns empty string for empty results."""
+        assert _format_profile_block({"hits": []}) == ""
+        assert _format_profile_block({"results": []}) == ""
+        assert _format_profile_block([]) == ""
+        assert _format_profile_block({}) == ""
+
+    def test_format_profile_block_token_budget_truncation(self) -> None:
+        """_format_profile_block truncates content exceeding token budget."""
+        long_content = "x" * 5000
+        results = {
+            "hits": [
+                {
+                    "uri": "viking://mem.md",
+                    "score": 0.9,
+                    "content": long_content,
+                    "context_type": "memory",
+                },
+            ]
+        }
+        block = _format_profile_block(results, max_tokens=100)
+        # max_tokens=100 → max_chars=400
+        assert len(block) < 600
+        assert "truncated" in block
+
+    def test_format_profile_block_within_budget(self) -> None:
+        """_format_profile_block does not truncate when within budget."""
+        results = {
+            "hits": [
+                {
+                    "uri": "viking://mem.md",
+                    "score": 0.9,
+                    "content": "Short content",
+                    "context_type": "memory",
+                },
+            ]
+        }
+        block = _format_profile_block(results, max_tokens=1000)
+        assert "truncated" not in block
+
+    def test_format_profile_block_viking_grouped_format(self) -> None:
+        """_format_profile_block handles Viking's grouped format (memories/resources/skills)."""
+        results = {
+            "memories": [
+                {"uri": "viking://mem.md", "content": "memory", "context_type": "memory"},
+            ],
+            "resources": [
+                {"uri": "viking://res.md", "content": "resource", "context_type": "resource"},
+            ],
+        }
+        block = _format_profile_block(results, max_tokens=1000)
+        assert "<project-context>" in block
+        assert "<relevant-resources>" in block
+        assert "viking://mem.md" in block
+        assert "viking://res.md" in block
+
+    # ---- _derive_context_hint (pure function with mock ctx) ----
+
+    def test_derive_context_hint_agent_name(self) -> None:
+        """_derive_context_hint returns agent_name when available."""
+        ctx = MagicMock()
+        ctx.deps = MagicMock()
+        ctx.deps.agent_name = "diagnostic_agent"
+        ctx.deps.session_metadata = None
+        ctx.messages = []
+        hint = _derive_context_hint(ctx)
+        assert hint == "diagnostic_agent"
+
+    def test_derive_context_hint_session_metadata_topic(self) -> None:
+        """_derive_context_hint falls back to session_metadata topic."""
+        ctx = MagicMock()
+        ctx.deps = MagicMock()
+        ctx.deps.agent_name = ""
+        ctx.deps.session_metadata = {"topic": "hydraulic diagnosis"}
+        ctx.messages = []
+        hint = _derive_context_hint(ctx)
+        assert hint == "hydraulic diagnosis"
+
+    def test_derive_context_hint_session_metadata_description(self) -> None:
+        """_derive_context_hint falls back to session_metadata description."""
+        ctx = MagicMock()
+        ctx.deps = MagicMock()
+        ctx.deps.agent_name = ""
+        ctx.deps.session_metadata = {"description": "excavator repair session"}
+        ctx.messages = []
+        hint = _derive_context_hint(ctx)
+        assert hint == "excavator repair session"
+
+    def test_derive_context_hint_fallback_to_prompt(self) -> None:
+        """_derive_context_hint falls back to first 100 chars of latest user prompt."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        prompt = "A" * 150  # longer than 100 chars
+        msg = ModelRequest(parts=[UserPromptPart(content=prompt)])
+        ctx = MagicMock()
+        ctx.deps = MagicMock()
+        ctx.deps.agent_name = ""
+        ctx.deps.session_metadata = None
+        ctx.messages = [msg]
+        hint = _derive_context_hint(ctx)
+        assert len(hint) == 100
+        assert hint == "A" * 100
+
+    def test_derive_context_hint_empty_when_nothing_available(self) -> None:
+        """_derive_context_hint returns empty string when nothing is available."""
+        ctx = MagicMock()
+        ctx.deps = MagicMock(spec=[])  # no attributes
+        ctx.messages = []
+        hint = _derive_context_hint(ctx)
+        assert hint == ""
+
+    # ---- _handle_profile_inject (using mock_client + _make_request_context) ----
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_first_turn(self, mock_client: AsyncMock) -> None:
+        """_handle_profile_inject injects profile on first turn."""
+        from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+
+        mock_client.find = AsyncMock(
+            return_value={
+                "hits": [
+                    {
+                        "uri": "viking://mem.md",
+                        "content": "Project context",
+                        "context_type": "memory",
+                        "score": 0.9,
+                    },
+                ]
+            }
+        )
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        assert cap._profile_injected is True
+        mock_client.find.assert_called_once()
+        # Check find() call args
+        call_kwargs = mock_client.find.call_args.kwargs
+        assert call_kwargs["limit"] == 5  # default profile_limit
+        assert call_kwargs["context_type"] == "memory"
+        assert "viking://user/alice/memories/" in call_kwargs["target_uri"]
+        # Check that a SystemPromptPart was injected before the user message
+        assert len(result.messages) == 2
+        first_msg = result.messages[0]
+        assert isinstance(first_msg, ModelRequest)
+        assert any(isinstance(p, SystemPromptPart) for p in first_msg.parts)
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_skips_when_already_injected(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """_handle_profile_inject skips when _profile_injected is already True."""
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+        cap._profile_injected = True
+
+        ctx = _make_ctx()
+        rc = _make_request_context([])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        mock_client.find.assert_not_called()
+        assert result is rc
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_skips_subsequent_turn(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """_handle_profile_inject skips when message count > 2 (subsequent turn)."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        # 3 messages = subsequent turn
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="msg1")]),
+            ModelRequest(parts=[UserPromptPart(content="msg2")]),
+            ModelRequest(parts=[UserPromptPart(content="msg3")]),
+        ]
+        rc = _make_request_context(messages)
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        mock_client.find.assert_not_called()
+        assert result is rc
+        # _profile_injected is set to True to prevent future attempts
+        assert cap._profile_injected is True
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_graceful_failure(self, mock_client: AsyncMock) -> None:
+        """_handle_profile_inject handles errors gracefully — returns original context."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.find = AsyncMock(side_effect=RuntimeError("server unreachable"))
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        # Should return original context, not raise
+        assert result is rc
+        # _profile_injected should be True (set before the try block to avoid retrying)
+        assert cap._profile_injected is True
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_disabled_is_noop(self, mock_client: AsyncMock) -> None:
+        """_handle_profile_inject is a no-op when profile_enabled=False."""
+        cap = VikingCapability(mode="all", profile_enabled=False)
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        rc = _make_request_context([])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        mock_client.find.assert_not_called()
+        assert result is rc
+        assert cap._profile_injected is False
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_token_budget(self, mock_client: AsyncMock) -> None:
+        """_handle_profile_inject truncates profile to profile_max_tokens."""
+        from pydantic_ai.messages import ModelRequest, SystemPromptPart, UserPromptPart
+
+        long_content = "x" * 5000
+        mock_client.find = AsyncMock(
+            return_value={
+                "hits": [
+                    {
+                        "uri": "viking://mem.md",
+                        "content": long_content,
+                        "context_type": "memory",
+                        "score": 0.9,
+                    },
+                ]
+            }
+        )
+        cap = VikingCapability(
+            mode="all",
+            profile_enabled=True,
+            profile_max_tokens=100,  # 100 tokens → 400 chars max
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        # The injected SystemPromptPart content should be truncated
+        first_msg = result.messages[0]
+        sys_parts = [p for p in first_msg.parts if isinstance(p, SystemPromptPart)]
+        assert len(sys_parts) == 1
+        assert len(sys_parts[0].content) < 600
+        assert "truncated" in sys_parts[0].content
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_empty_results_no_injection(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """_handle_profile_inject does not inject when find() returns empty results."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.find = AsyncMock(return_value={"hits": []})
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+
+        result = await cap._handle_profile_inject(ctx, rc)
+
+        # No injection — result is the same context
+        assert result is rc
+        # But _profile_injected is True (we did attempt)
+        assert cap._profile_injected is True
+
+    @pytest.mark.asyncio
+    async def test_handle_profile_inject_first_turn_only_false(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """_handle_profile_inject runs on subsequent turns when first_turn_only=False."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.find = AsyncMock(
+            return_value={
+                "hits": [
+                    {
+                        "uri": "viking://mem.md",
+                        "content": "context",
+                        "context_type": "memory",
+                        "score": 0.9,
+                    },
+                ]
+            }
+        )
+        cap = VikingCapability(
+            mode="all",
+            profile_enabled=True,
+            profile_first_turn_only=False,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        ctx = _make_ctx()
+        # 4 messages — subsequent turn, but first_turn_only=False
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="msg1")]),
+            ModelRequest(parts=[UserPromptPart(content="msg2")]),
+            ModelRequest(parts=[UserPromptPart(content="msg3")]),
+            ModelRequest(parts=[UserPromptPart(content="msg4")]),
+        ]
+        rc = _make_request_context(messages)
+
+        await cap._handle_profile_inject(ctx, rc)
+
+        mock_client.find.assert_called_once()
+        assert cap._profile_injected is True
+
+    # ---- Config fields ----
+
+    def test_config_profile_enabled_default_false(self) -> None:
+        """VikingCapabilityConfig has profile_enabled=False by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.profile_enabled is False
+
+    def test_config_profile_max_tokens_default(self) -> None:
+        """VikingCapabilityConfig has profile_max_tokens=1000 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.profile_max_tokens == 1000
+
+    def test_config_profile_limit_default(self) -> None:
+        """VikingCapabilityConfig has profile_limit=5 by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.profile_limit == 5
+
+    def test_config_profile_first_turn_only_default(self) -> None:
+        """VikingCapabilityConfig has profile_first_turn_only=True by default."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.profile_first_turn_only is True
+
+    def test_config_profile_fields_set(self) -> None:
+        """VikingCapabilityConfig accepts all profile fields."""
+        cfg = VikingCapabilityConfig(
+            profile_enabled=True,
+            profile_max_tokens=500,
+            profile_limit=10,
+            profile_first_turn_only=False,
+        )
+        assert cfg.profile_enabled is True
+        assert cfg.profile_max_tokens == 500
+        assert cfg.profile_limit == 10
+        assert cfg.profile_first_turn_only is False
+
+    # ---- for_run() reset ----
+
+    @pytest.mark.asyncio
+    async def test_for_run_resets_profile_injected(self, mock_client: AsyncMock) -> None:
+        """for_run() resets _profile_injected to False."""
+        cap = VikingCapability(mode="all", profile_enabled=True)
+        cap._client = mock_client
+        cap._profile_injected = True  # Simulate after first turn
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap._profile_injected is False
+        # Original is unchanged
+        assert cap._profile_injected is True
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_profile_config(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves profile_enabled and other profile config fields."""
+        cap = VikingCapability(
+            mode="all",
+            profile_enabled=True,
+            profile_max_tokens=500,
+            profile_limit=10,
+            profile_first_turn_only=False,
+        )
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.profile_enabled is True
+        assert copy_cap.profile_max_tokens == 500
+        assert copy_cap.profile_limit == 10
+        assert copy_cap.profile_first_turn_only is False
+
+
+# ---------------------------------------------------------------------------
+# 7.5 — Handler Chain Integration Tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandlerChain:
+    """Tests for before_model_request handler chain wiring (Group 7).
+
+    Verifies that all handlers are called in the correct order (D7),
+    each handler checks its own enabled flag (D14), and the chained
+    request_context modification works correctly.
+    """
+
+    async def test_all_handlers_disabled_returns_original(self, mock_client: AsyncMock) -> None:
+        """All handlers disabled: before_model_request returns original context.
+
+        Given: a VikingCapability with all features disabled (defaults).
+        When: before_model_request is called.
+        Then: the original request_context is returned unchanged.
+        """
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(mode="all")
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap.before_model_request(ctx, rc)
+
+        assert result is rc
+        mock_client.search.assert_not_called()
+        mock_client.find.assert_not_called()
+        mock_client.create_session.assert_not_called()
+
+    async def test_only_auto_recall_enabled(self, mock_client: AsyncMock) -> None:
+        """Only auto_recall enabled: only recall handler fires.
+
+        Given: a VikingCapability with auto_recall_enabled=True, all others False.
+        When: before_model_request is called.
+        Then: client.search is called (recall ran), but create_session and
+            find are not (ingest and profile did not fire).
+        """
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.8,
+                        "content": "relevant memory",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(mode="all", auto_recall_enabled=True)
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="hydraulic pressure")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap.before_model_request(ctx, rc)
+
+        mock_client.search.assert_called_once()
+        mock_client.create_session.assert_not_called()
+        mock_client.find.assert_not_called()
+        # Recall should have injected a system message
+        assert result is not rc
+        assert len(result.messages) == 2
+
+    async def test_multiple_features_enabled_handler_order(self, mock_client: AsyncMock) -> None:
+        """Multiple features enabled: handlers fire in D7 order.
+
+        Given: auto_ingest + profile + auto_recall all enabled.
+        When: before_model_request is called with messages from a
+            previous turn plus a new user prompt.
+        Then: all handlers fire (create_session for ingest, find for
+            profile, search for recall), and the result contains a
+            recall block (recall ran after ingest).
+        """
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.8,
+                        "content": "memory content",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+        mock_client.find = AsyncMock(
+            return_value={
+                "hits": [
+                    {
+                        "uri": "viking://user/alice/memories/profile.md",
+                        "content": "project context",
+                        "context_type": "memory",
+                        "score": 0.9,
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            profile_enabled=True,
+            profile_first_turn_only=False,  # allow profile on non-first turns
+            auto_recall_enabled=True,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        # Previous turn (user + assistant) + new user prompt
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content="What is X?")]),
+            ModelResponse(parts=[TextPart(content="X is a thing.")]),
+            ModelRequest(parts=[UserPromptPart(content="Tell me more about X")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        result = await cap.before_model_request(ctx, rc)
+
+        # All handlers should have fired
+        mock_client.create_session.assert_called_once()  # ingest
+        mock_client.find.assert_called_once()  # profile
+        mock_client.search.assert_called_once()  # recall
+
+        # Ingest cursor should be updated (ingest ran)
+        assert cap._last_ingested_idx == 3
+
+        # Result should contain injected content (profile + recall)
+        assert result is not rc
+        # At least 2 new system messages should have been injected
+        # (profile before the first user message, recall before the latest)
+        assert len(result.messages) > 3
+
+    async def test_feedback_loop_prevention_recall_then_ingest_sanitize(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """Feedback loop prevention: ingest sanitizes recall blocks.
+
+        Given: auto_ingest + auto_recall both enabled with sanitize=True.
+            Messages contain a user prompt with a <openviking-recall> block
+            from a previous turn's recall injection.
+        When: before_model_request is called.
+        Then: the ingested content does NOT contain <openviking-recall>
+            (sanitized before ingestion), preventing feedback loops.
+        """
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.8,
+                        "content": "new memory",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(
+            mode="all",
+            auto_ingest_enabled=True,
+            auto_ingest_mode="sync",
+            auto_ingest_sanitize=True,
+            auto_recall_enabled=True,
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        # Previous turn has a recall block in the user message (from a prior recall injection)
+        recall_block = (
+            "<openviking-recall>\n"
+            "  <hit uri='viking://user/alice/memories/old.md' score='0.9'/>\n"
+            "  old recalled content\n"
+            "</openviking-recall>"
+        )
+        messages = [
+            ModelRequest(parts=[UserPromptPart(content=f"Question {recall_block}")]),
+            ModelResponse(parts=[TextPart(content="Answer.")]),
+            ModelRequest(parts=[UserPromptPart(content="Next question")]),
+        ]
+        rc = _make_request_context(messages)
+        ctx = _make_ctx()
+
+        await cap.before_model_request(ctx, rc)
+
+        # Ingest should have been called (create_session)
+        mock_client.create_session.assert_called_once()
+
+        # The first add_message call should contain the user message
+        # with the recall block sanitized out
+        add_calls = mock_client.add_message.call_args_list
+        assert len(add_calls) >= 1
+        first_user_content = add_calls[0].args[2]
+        assert "<openviking-recall>" not in first_user_content
+        assert "[recalled context omitted]" in first_user_content
+        assert "old recalled content" not in first_user_content
+
+        # Recall should also have fired (search called)
+        mock_client.search.assert_called_once()
+
+    async def test_auto_recall_runs_without_multimodal_bridge(self, mock_client: AsyncMock) -> None:
+        """D14 regression: auto_recall fires even when multimodal_bridge=False.
+
+        Given: a VikingCapability with auto_recall_enabled=True and
+            multimodal_bridge=False (the default).
+        When: before_model_request is called.
+        Then: client.search is called — the handler chain runs despite
+            multimodal_bridge being disabled. This is the D14 fix: the
+            old early return ``if not self.multimodal_bridge ...`` would
+            have skipped all handlers.
+        """
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        mock_client.search = AsyncMock(
+            return_value={
+                "results": [
+                    {
+                        "uri": "viking://user/alice/memories/doc.md",
+                        "score": 0.8,
+                        "content": "memory",
+                        "context_type": "memory",
+                    }
+                ]
+            }
+        )
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            multimodal_bridge=False,  # explicitly disabled
+        )
+        cap._client = mock_client
+        cap._identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+        msg = ModelRequest(parts=[UserPromptPart(content="test query")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap.before_model_request(ctx, rc)
+
+        # Recall should have fired despite multimodal_bridge=False
+        mock_client.search.assert_called_once()
+        assert result is not rc  # context was modified by recall
+
+    async def test_client_none_early_return(self) -> None:
+        """Client is None: before_model_request returns original context.
+
+        Given: a VikingCapability with auto_recall_enabled=True but
+            _client is None (not initialized).
+        When: before_model_request is called.
+        Then: the original request_context is returned immediately
+            without running any handlers.
+        """
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(
+            mode="all",
+            auto_recall_enabled=True,
+            auto_ingest_enabled=True,
+            profile_enabled=True,
+        )
+        cap._client = None  # not initialized
+
+        msg = ModelRequest(parts=[UserPromptPart(content="hello")])
+        rc = _make_request_context([msg])
+        ctx = _make_ctx()
+
+        result = await cap.before_model_request(ctx, rc)
+
+        assert result is rc

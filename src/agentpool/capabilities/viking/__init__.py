@@ -17,13 +17,16 @@ Configuration is via ``VikingCapabilityConfig`` in
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+import logfire
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
+from agentpool.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
 from agentpool.log import get_logger
 
 logger = get_logger(__name__)
@@ -117,60 +120,201 @@ class VikingCapability(AbstractCapability[Any]):
     model_capabilities: ModelCapabilities | None = None
     """Resolved model capabilities for multimodal bridge. Set by the
     agent factory after capability construction."""
+    auto_resolve_identity: bool = True
+    """When ``True`` (default), resolve ``account_id`` and ``user_id``
+    automatically from the API key or ``/health`` endpoint after client
+    initialization. Set to ``False`` to disable dynamic resolution."""
+    memories_uri: str | None = None
+    """Override for memories URI. Default: ``viking://user/{user_id}/memories/``."""
+    actor_peer_id: str | None = None
+    """Explicit actor peer ID for multi-agent isolation. When ``None``
+    (default), the Viking server uses ``user_id`` for isolation. When set,
+    passed to the SDK client for all requests."""
+    auto_recall_enabled: bool = False
+    """When ``True``, perform semantic recall before each model request.
+    Results are injected as an ``<openviking-recall>`` XML block."""
+    auto_recall_method: Literal["search", "find"] = "search"
+    """Recall method: ``"search"`` (session-aware) or ``"find"`` (faster)."""
+    auto_recall_max_tokens: int = 2000
+    """Maximum token budget for injected recall block content."""
+    auto_recall_limit: int = 10
+    """Maximum number of results per recall request."""
+    auto_recall_min_score: float = 0.3
+    """Minimum composite score for including a recall hit."""
+    auto_recall_lexical_boost: float = 0.1
+    """Score boost per overlapping word between query and content."""
+    auto_recall_category_boost: float = 0.05
+    """Score boost for hits with ``context_type="memory"``."""
+    auto_recall_context_types: list[str] = field(default_factory=lambda: ["memory", "resource"])
+    """Context types to include in recall results."""
+    enable_forget: bool = False
+    """Enable the ``viking_forget`` tool. This is a destructive operation
+    that removes documents from the Viking knowledge graph. Disabled by
+    default — independent from ``enable_memory``."""
+    uri_guard_enabled: bool = False
+    """When ``True``, block file-access tools (``read``, ``bash``, ``grep``,
+    ``glob``) from accessing ``viking://`` URIs in their arguments."""
+    uri_guard_protected_tools: list[str] = field(
+        default_factory=lambda: ["read", "bash", "grep", "glob"]
+    )
+    """Tool names protected by the URI guard. When ``uri_guard_enabled`` is
+    ``True``, these tools are blocked from accessing ``viking://`` URIs."""
+    profile_enabled: bool = False
+    """Enable first-turn profile injection from Viking memories. When True,
+    the capability queries Viking for memory search results on the first
+    turn and injects them as an ``<openviking-profile>`` XML block."""
+    profile_max_tokens: int = 1000
+    """Maximum token budget for the injected profile block. Content is
+    truncated if it exceeds this budget (chars-to-tokens 4:1 heuristic)."""
+    profile_limit: int = 5
+    """Maximum number of memory hits to retrieve for the profile block."""
+    profile_first_turn_only: bool = True
+    """When True (default), profile injection runs only on the first turn
+    of a session. When False, injection runs on every ``before_model_request``
+    call (not recommended — expensive and static)."""
+    compaction_enabled: bool = False
+    """When True, archive old conversation messages to Viking before
+    context overflow. Disabled by default."""
+    compaction_threshold: int = 100_000
+    """Estimated token count above which compaction is triggered."""
+    compaction_keep_recent_turns: int = 5
+    """Number of recent turns to keep when compacting."""
+    compaction_expand_tool: bool = True
+    """When True (and compaction_enabled), expose ``viking_expand`` tool."""
+    auto_ingest_enabled: bool = False
+    """Enable automatic conversation ingestion. When ``True``, the
+    capability ingests the previous turn's conversation at the start
+    of the next ``before_model_request`` call."""
+    auto_ingest_mode: Literal["async", "sync"] = "async"
+    """Ingestion mode — ``"async"`` (fire-and-forget) or ``"sync"``."""
+    auto_ingest_sanitize: bool = True
+    """Strip injected Viking XML blocks from messages before ingestion."""
+    auto_ingest_source_type: str = "agentpool"
+    """Source type metadata for ingested sessions."""
+    auto_ingest_keep_recent_turns: int = 0
+    """Number of recent turns to retain after commit. 0 = no retention."""
     _client: Any = field(default=None, repr=False)
     _owns_client: bool = field(default=True, repr=False)
+    _identity: VikingIdentity | None = field(default=None, repr=False)
+    """Cached resolved identity. Set by ``_resolve_identity()`` after
+    client initialization. Shared across per-run copies via ``for_run()``."""
+    _profile_injected: bool = field(default=False, repr=False)
+    """Flag tracking whether profile injection has already run for this
+    session. Reset to ``False`` in ``for_run()`` so each run starts fresh."""
+    _last_ingested_idx: int = field(default=0, repr=False)
+    """Cursor tracking the last message index ingested to Viking.
+    Reset to 0 on each per-run copy via ``for_run()``."""
+    _pending_conversation: list[dict[str, str]] | None = field(default=None, repr=False)
+    """Pending conversation pairs not yet ingested (for last-turn flush)."""
+    _pending_tasks: set[asyncio.Task[None]] = field(default_factory=set, repr=False)
+    """References to fire-and-forget ingestion tasks. Prevents GC and
+    enables ``after_run()`` to await them before client teardown."""
 
     @property
     def has_wrap_node_run(self) -> bool:
         """Return ``False`` — Viking does not wrap node execution."""
         return False
 
-    def _resolve_identity_from_apikey(self) -> None:
-        """Extract account and user from the API key if not already set.
+    async def wrap_tool_execute(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: Any,
+        tool_def: Any,
+        args: Any,
+        handler: Any,
+    ) -> Any:
+        """Intercept tool execution to block viking:// URIs in protected tools.
 
-        Viking API keys follow the format
-        ``base64(account).base64(user).base64(signature)``. The SDK's
-        ``resolve_client_config`` does not parse the key to populate
-        ``user`` / ``account``, so they remain ``None`` when only an
-        API key is configured (the common case via ``ovcli.conf``).
+        When ``uri_guard_enabled`` is ``True`` and the tool name is in
+        ``uri_guard_protected_tools`` and any argument contains
+        ``viking://``, return an error string without calling ``handler``.
+        Otherwise, pass through to ``handler(args)``.
 
-        This method decodes the first two dot-separated parts as
-        base64 and fills in ``self.account`` / ``self.user`` when they
-        are ``None``. This ensures URI-building methods
-        (``_resolve_skills_uri``, ``_resolve_sessions_uri``,
-        ``_upload_binary``) use the correct user instead of falling
-        back to ``"default"``.
+        Args:
+            ctx: The pydantic-ai run context.
+            call: The ``ToolCallPart`` containing the tool name.
+            tool_def: The ``ToolDefinition`` for the tool being called.
+            args: The validated tool arguments.
+            handler: The next executor callable.
+
+        Returns:
+            The tool result from ``handler(args)``, or an error string when
+            the URI guard blocks the call.
         """
+        if self.uri_guard_enabled:
+            tool_name: str = call.tool_name
+            if tool_name in self.uri_guard_protected_tools:
+                args_str = str(args)
+                if "viking://" in args_str:
+                    return (
+                        f"viking:// URIs cannot be accessed with '{tool_name}'. "
+                        "Use viking_read or viking_search to access Viking resources."
+                    )
+        return await handler(args)
+
+    async def _resolve_identity(self) -> VikingIdentity:
+        """Resolve Viking identity using a three-tier fallback chain.
+
+        Resolution order:
+        1. Explicit config fields (``self.user`` and ``self.account`` both set)
+        2. API key decode (``_try_decode_api_key()``)
+        3. ``/health`` endpoint query
+        4. Fallback to ``VikingIdentity("default", "default", "user")``
+
+        Returns:
+            The resolved ``VikingIdentity``, cached in ``self._identity``.
+        """
+        if self._identity is not None:
+            return self._identity
+
+        # Tier 1: explicit config fields
         if self.account is not None and self.user is not None:
-            return
+            self._identity = VikingIdentity(
+                account_id=self.account,
+                user_id=self.user,
+                role="user",
+            )
+            return self._identity
 
-        import base64
+        # Tier 2: API key decode
+        if self.api_key is not None:
+            decoded = _try_decode_api_key(self.api_key)
+            if decoded is not None:
+                account_id, user_id = decoded
+                self._identity = VikingIdentity(
+                    account_id=account_id,
+                    user_id=user_id,
+                    role="user",
+                )
+                return self._identity
 
-        api_key: str | None = None
+        # Tier 3: /health endpoint
         if self._client is not None:
-            api_key = getattr(self._client, "_api_key", None)
-        if api_key is None:
-            api_key = self.api_key
-        if not api_key or "." not in api_key:
-            return
+            try:
+                resp = await self._client._request("GET", "/health")
+                if isinstance(resp, dict):
+                    account_id = str(resp.get("account_id") or "")
+                    user_id = str(resp.get("user_id") or "")
+                    role = str(resp.get("role") or "user")
+                    if account_id and user_id:
+                        self._identity = VikingIdentity(
+                            account_id=account_id,
+                            user_id=user_id,
+                            role=role,
+                        )
+                        return self._identity
+            except Exception:
+                logger.debug("Failed to resolve identity from /health", exc_info=True)
 
-        parts = api_key.split(".")
-        # API key format: base64(account).base64(user).base64(signature)
-        # Need at least account and user parts to extract identity.
-        if len(parts) < 3:  # noqa: PLR2004
-            return
-
-        try:
-            if self.account is None:
-                decoded_account = base64.b64decode(parts[0] + "==").decode("utf-8")
-                if decoded_account:
-                    self.account = decoded_account
-            if self.user is None:
-                decoded_user = base64.b64decode(parts[1] + "==").decode("utf-8")
-                if decoded_user:
-                    self.user = decoded_user
-        except Exception:
-            logger.debug("Failed to decode identity from API key", exc_info=True)
+        # Tier 4: fallback
+        logger.warning("All identity resolution tiers failed — falling back to default")
+        self._identity = VikingIdentity(
+            account_id="default",
+            user_id="default",
+            role="user",
+        )
+        return self._identity
 
     async def _ensure_client(self) -> Any:
         """Return the SDK client, lazily initializing if needed.
@@ -178,7 +322,8 @@ class VikingCapability(AbstractCapability[Any]):
         Follows the same pattern as ``McpServerCap._ensure_client()``:
         if the client is already set (e.g. from ``__aenter__`` or a
         ``for_run`` copy), return it directly. Otherwise, lazily import
-        and initialize the SDK client.
+        and initialize the SDK client. After initialization, triggers
+        identity resolution when ``auto_resolve_identity`` is enabled.
 
         Returns:
             The ``AsyncHTTPClient`` instance.
@@ -188,26 +333,35 @@ class VikingCapability(AbstractCapability[Any]):
 
         from openviking_sdk import AsyncHTTPClient
 
-        self._client = AsyncHTTPClient(
-            url=self.url,
-            api_key=self.api_key,
-            account=self.account,
-            user=self.user,
-            timeout=self.timeout if self.timeout is not None else 60.0,
-        )
+        kwargs: dict[str, Any] = {
+            "url": self.url,
+            "api_key": self.api_key,
+            "account": self.account,
+            "user": self.user,
+            "timeout": self.timeout if self.timeout is not None else 60.0,
+        }
+        if self.actor_peer_id is not None:
+            kwargs["actor_peer_id"] = self.actor_peer_id
+
+        self._client = AsyncHTTPClient(**kwargs)
         await self._client.initialize()
-        self._resolve_identity_from_apikey()
+        if self.auto_resolve_identity:
+            self._identity = await self._resolve_identity()
         return self._client
 
     def _resolve_skills_uri(self) -> str:
         """Return the skills URI, using override or default convention.
+
+        Uses the resolved identity's ``user_id`` when available,
+        falling back to ``self.user`` then ``"default"``.
 
         Returns:
             The skills URI string (e.g. ``viking://user/alice/skills/``).
         """
         if self.skills_uri is not None:
             return self.skills_uri
-        return f"viking://user/{self.user or 'default'}/skills/"
+        user_id = self._identity.user_id if self._identity is not None else (self.user or "default")
+        return f"viking://user/{user_id}/skills/"
 
     async def __aenter__(self) -> Self:
         """Initialize the Viking SDK client.
@@ -215,7 +369,8 @@ class VikingCapability(AbstractCapability[Any]):
         Lazily imports ``AsyncHTTPClient`` from ``openviking_sdk`` and
         creates a client with the configured fields. If the client is
         already set (e.g. a ``for_run`` copy sharing the parent's client),
-        this is a no-op.
+        this is a no-op. After initialization, triggers identity
+        resolution when ``auto_resolve_identity`` is enabled.
 
         Returns:
             ``self`` with the client initialized.
@@ -225,15 +380,20 @@ class VikingCapability(AbstractCapability[Any]):
 
         from openviking_sdk import AsyncHTTPClient
 
-        self._client = AsyncHTTPClient(
-            url=self.url,
-            api_key=self.api_key,
-            account=self.account,
-            user=self.user,
-            timeout=self.timeout if self.timeout is not None else 60.0,
-        )
+        kwargs: dict[str, Any] = {
+            "url": self.url,
+            "api_key": self.api_key,
+            "account": self.account,
+            "user": self.user,
+            "timeout": self.timeout if self.timeout is not None else 60.0,
+        }
+        if self.actor_peer_id is not None:
+            kwargs["actor_peer_id"] = self.actor_peer_id
+
+        self._client = AsyncHTTPClient(**kwargs)
         await self._client.initialize()
-        self._resolve_identity_from_apikey()
+        if self.auto_resolve_identity:
+            self._identity = await self._resolve_identity()
         return self
 
     async def __aexit__(
@@ -254,35 +414,27 @@ class VikingCapability(AbstractCapability[Any]):
     async def for_run(self, ctx: RunContext[Any]) -> VikingCapability:
         """Create a per-run copy that shares the parent's client.
 
-        The returned copy has ``_owns_client=False`` so it will not
-        close the shared client on ``__aexit__``.
+        Uses ``dataclasses.replace()`` to copy all fields, then resets
+        per-run state to defaults. The returned copy shares the parent's
+        ``_client`` and ``_identity`` (inherited) but has
+        ``_owns_client=False`` so it will not close the shared client
+        on ``__aexit__``.
 
         Args:
             ctx: The pydantic-ai run context (unused but required by
                 the ``AbstractCapability`` interface).
 
         Returns:
-            A new ``VikingCapability`` sharing the same client.
+            A new ``VikingCapability`` sharing the same client and identity.
         """
-        return VikingCapability(
-            mode=self.mode,
-            url=self.url,
-            api_key=self.api_key,
-            account=self.account,
-            user=self.user,
-            timeout=self.timeout,
-            skills_uri=self.skills_uri,
-            resources_uri=self.resources_uri,
-            multimodal_bridge=self.multimodal_bridge,
-            uploads_uri=self.uploads_uri,
-            public_download_base_url=self.public_download_base_url,
-            enable_link=self.enable_link,
-            enable_memory=self.enable_memory,
-            resource_file_extensions=self.resource_file_extensions,
-            resource_read_level=self.resource_read_level,
-            model_capabilities=self.model_capabilities,
-            _client=self._client,
+        return dataclasses.replace(
+            self,
             _owns_client=False,
+            _identity=self._identity,
+            _profile_injected=False,
+            _last_ingested_idx=0,
+            _pending_conversation=None,
+            _pending_tasks=set(),
         )
 
     def get_instructions(self) -> str | None:
@@ -436,13 +588,140 @@ class VikingCapability(AbstractCapability[Any]):
     def _resolve_sessions_uri(self) -> str:
         """Return the sessions URI, using override or default convention.
 
+        Uses the resolved identity's ``user_id`` when available,
+        falling back to ``self.user`` then ``"default"``.
+
         Returns:
             The sessions URI string (e.g.
-            ``viking://user/{user}/sessions/``).
+            ``viking://user/{user_id}/sessions/``).
         """
         if self.sessions_uri is not None:
             return self.sessions_uri
-        return f"viking://user/{self.user or 'default'}/sessions/"
+        user_id = self._identity.user_id if self._identity is not None else (self.user or "default")
+        return f"viking://user/{user_id}/sessions/"
+
+    def _resolve_memories_uri(self) -> str:
+        """Return the memories URI, using override or default convention.
+
+        Uses the resolved identity's ``user_id`` when available,
+        falling back to ``self.user`` then ``"default"``.
+
+        Returns:
+            The memories URI string (e.g.
+            ``viking://user/{user_id}/memories/``).
+        """
+        if self.memories_uri is not None:
+            return self.memories_uri
+        user_id = self._identity.user_id if self._identity is not None else (self.user or "default")
+        return f"viking://user/{user_id}/memories/"
+
+    async def _handle_compaction(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Archive old conversation messages when token count exceeds threshold.
+
+        Estimates total tokens from ``request_context.messages``. If the
+        count exceeds ``compaction_threshold``, splits messages into
+        archivable (old) and keep (recent) lists, writes the archivable
+        portion to ``viking://user/{user_id}/memories/compacted/{uuid}.md``,
+        and replaces them with a summary + URI reference.
+
+        After removing N messages from the front of the list, decrements
+        ``_last_ingested_idx`` by N (clamped to 0) to prevent a stale
+        ingestion cursor.
+
+        On any error, logs a warning and returns the original
+        ``request_context`` unchanged.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            request_context: The model request context containing messages.
+
+        Returns:
+            The (possibly modified) model request context.
+        """
+        if not self.compaction_enabled:
+            return request_context
+
+        from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
+
+        from agentpool.capabilities.viking.compaction import (
+            _estimate_tokens,
+            _replace_old_messages,
+            _serialize_messages,
+            _split_archivable,
+            _summarize_messages,
+        )
+
+        # Estimate total tokens across all messages.
+        total_tokens = 0
+        for msg in request_context.messages:
+            if isinstance(msg, ModelRequest | ModelResponse):
+                for part in msg.parts:
+                    if isinstance(part, UserPromptPart):
+                        content = part.content
+                        if isinstance(content, str):
+                            total_tokens += _estimate_tokens(content)
+                        elif isinstance(content, list):
+                            for item in content:
+                                if isinstance(item, str):
+                                    total_tokens += _estimate_tokens(item)
+                                elif isinstance(item, TextPart):
+                                    total_tokens += _estimate_tokens(item.content)
+                    elif isinstance(part, TextPart):
+                        total_tokens += _estimate_tokens(part.content)
+
+        if total_tokens <= self.compaction_threshold:
+            return request_context
+
+        try:
+            client = await self._ensure_client()
+
+            archivable, keep = _split_archivable(
+                request_context.messages,
+                self.compaction_keep_recent_turns,
+            )
+
+            if not archivable:
+                return request_context
+
+            # Serialize and summarize.
+            serialized = _serialize_messages(archivable)
+            summary = _summarize_messages(archivable)
+
+            # Write archive to Viking.
+            user_id = (
+                self._identity.user_id if self._identity is not None else (self.user or "default")
+            )
+            archive_uri = f"viking://user/{user_id}/memories/compacted/{uuid.uuid4().hex[:12]}.md"
+            await client.write(archive_uri, serialized, mode="create")
+
+            # Replace old messages with summary + URI reference.
+            new_context = _replace_old_messages(
+                request_context,
+                archivable,
+                keep,
+                archive_uri,
+                summary,
+            )
+
+            # Adjust ingestion cursor: N messages removed from front.
+            n_removed = len(archivable)
+            self._last_ingested_idx = max(0, self._last_ingested_idx - n_removed)
+
+            logger.info(
+                "Compaction archived %d messages to %s (tokens: %d -> est. %d)",
+                n_removed,
+                archive_uri,
+                total_tokens,
+                total_tokens // 2,  # rough estimate after compaction
+            )
+            return new_context
+        except Exception:
+            logger.warning("Compaction failed — returning original context", exc_info=True)
+            return request_context
 
     async def _list_resource_entries_from_uri(self, client: Any, uri: str) -> list[ResourceEntry]:
         """Recursively list files under a single Viking URI.
@@ -633,20 +912,34 @@ class VikingCapability(AbstractCapability[Any]):
             logger.warning("resource_exists failed", uri=uri, exc_info=True)
             return False
 
-    # ---- Multimodal Bridge (Phase 6) ----
+    # ---- Profile Injection (Feature 5) ----
 
-    async def before_model_request(
+    _FIRST_TURN_MAX_MESSAGES = 2
+
+    async def _handle_profile_inject(
         self,
         ctx: RunContext[Any],
         request_context: ModelRequestContext,
     ) -> ModelRequestContext:
-        """Intercept binary content before sending to the model.
+        """Inject a profile block from Viking memories on the first turn.
 
-        Uploads binary content to Viking, then replaces it based on
-        model capabilities:
-        - Text-only model → text reference with ``viking://`` URI
-        - Multimodal + ``public_download_base_url`` → HTTP URL
-        - Multimodal + no URL → keep original (but persisted in Viking)
+        When ``profile_enabled`` is ``True`` and this is the first
+        ``before_model_request`` call for the session (``_profile_injected``
+        is ``False`` and message count is <= 2), the method:
+
+        1. Derives a context hint from ``ctx.deps``.
+        2. Queries Viking memories via ``client.find()``.
+        3. Formats results as an ``<openviking-profile>`` XML block.
+        4. Injects it as a ``SystemPromptPart`` before the latest user
+           message using ``dataclasses.replace()``.
+        5. Sets ``_profile_injected = True``.
+
+        On any error, logs a warning, sets ``_profile_injected = True``
+        (to avoid retrying), and returns the original ``request_context``.
+
+        When ``profile_first_turn_only`` is ``False``, the first-turn
+        message count check is skipped — injection runs whenever
+        ``_profile_injected`` is ``False``.
 
         Args:
             ctx: The pydantic-ai run context.
@@ -655,7 +948,133 @@ class VikingCapability(AbstractCapability[Any]):
         Returns:
             The (possibly modified) model request context.
         """
-        if not self.multimodal_bridge or self._client is None:
+        if not self.profile_enabled or self._profile_injected:
+            return request_context
+
+        if (
+            self.profile_first_turn_only
+            and len(request_context.messages) > self._FIRST_TURN_MAX_MESSAGES
+        ):
+            self._profile_injected = True
+            return request_context
+
+        self._profile_injected = True
+
+        try:
+            client = await self._ensure_client()
+            from agentpool.capabilities.viking.profile import (
+                _derive_context_hint,
+                _format_profile_block,
+            )
+
+            hint = _derive_context_hint(ctx)
+            memories_uri = self._resolve_memories_uri()
+            results = await client.find(
+                query=hint,
+                target_uri=memories_uri,
+                limit=self.profile_limit,
+                context_type="memory",
+            )
+            profile_block = _format_profile_block(
+                results,
+                max_tokens=self.profile_max_tokens,
+            )
+            if not profile_block.strip():
+                return request_context
+
+            from dataclasses import replace
+
+            from pydantic_ai.messages import (
+                ModelRequest,
+                SystemPromptPart,
+                UserPromptPart,
+            )
+
+            messages = list(request_context.messages)
+            insert_idx: int | None = None
+            for i in range(len(messages) - 1, -1, -1):
+                msg = messages[i]
+                if isinstance(msg, ModelRequest) and any(
+                    isinstance(p, UserPromptPart) for p in msg.parts
+                ):
+                    insert_idx = i
+                    break
+
+            if insert_idx is None:
+                return request_context
+
+            system_msg = ModelRequest(parts=[SystemPromptPart(content=profile_block)])
+            new_messages = [*messages[:insert_idx], system_msg, *messages[insert_idx:]]
+            return replace(request_context, messages=new_messages)
+        except Exception:
+            logger.warning("Profile injection failed", exc_info=True)
+            return request_context
+
+    # ---- Multimodal Bridge (Phase 6) ----
+
+    async def before_model_request(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Run the pre-model handler chain.
+
+        Executes all enabled handlers in order (D7):
+
+        1. Auto-ingest (process previous turn, fire-and-forget)
+        2. Profile injection (add static profile, first turn only)
+        3. Auto-recall (add dynamic recalled memories)
+        4. Compaction archive (reduce context if too large)
+        5. Multimodal bridge (handle binary content)
+
+        Each handler checks its own enabled flag and returns early if
+        disabled (D14). Handlers receive the output of the previous
+        handler (chained ``request_context`` modification).
+
+        When ``self._client`` is ``None``, returns the original
+        ``request_context`` unchanged — all handlers require a client.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            request_context: The model request context containing messages.
+
+        Returns:
+            The (possibly modified) model request context.
+        """
+        if self._client is None:
+            return request_context
+
+        with logfire.span("viking.before_model_request"):
+            request_context = await self._handle_auto_ingest(ctx, request_context)
+            request_context = await self._handle_profile_inject(ctx, request_context)
+            request_context = await self._handle_auto_recall(ctx, request_context)
+            request_context = await self._handle_compaction(ctx, request_context)
+            return await self._handle_multimodal_bridge(ctx, request_context)
+
+    async def _handle_multimodal_bridge(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Upload binary content to Viking and replace based on model capabilities.
+
+        When ``multimodal_bridge`` is disabled, returns the original
+        ``request_context`` unchanged.
+
+        For each ``BinaryContent`` found in ``UserPromptPart`` content:
+
+        - Text-only model → text reference with ``viking://`` URI
+        - Multimodal + ``public_download_base_url`` → HTTP URL
+        - Multimodal + no URL → keep original (but persisted in Viking)
+
+        Args:
+            ctx: The pydantic-ai run context (unused).
+            request_context: The model request context containing messages.
+
+        Returns:
+            The (possibly modified) model request context.
+        """
+        if not self.multimodal_bridge:
             return request_context
 
         from dataclasses import replace
@@ -772,9 +1191,10 @@ class VikingCapability(AbstractCapability[Any]):
         """
         try:
             client = await self._ensure_client()
-            uploads_uri = self.uploads_uri or (
-                f"viking://user/{self.user or 'default'}/memories/uploads/"
+            user_id = (
+                self._identity.user_id if self._identity is not None else (self.user or "default")
             )
+            uploads_uri = self.uploads_uri or (f"viking://user/{user_id}/memories/uploads/")
             # Viking server only allows .md files; store binary as base64
             # text inside a .md container.
             uri = f"{uploads_uri}{uuid.uuid4().hex[:12]}.md"
@@ -788,6 +1208,278 @@ class VikingCapability(AbstractCapability[Any]):
         except Exception:
             logger.warning("_upload_binary failed", exc_info=True)
             return None
+
+    # ---- Auto Semantic Recall ----
+
+    async def _handle_auto_recall(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Perform semantic recall and inject results before the model request.
+
+        Extracts the latest user prompt, queries the Viking knowledge graph
+        using ``client.search()`` (session-aware) or ``client.find()``
+        (deduplicated), ranks/deduplicates results, formats them as an
+        ``<openviking-recall>`` XML block, and injects a system message
+        before the latest user message.
+
+        When ``auto_recall_method`` is ``"search"``, first calls
+        ``client.get_session_context()`` to retrieve existing session context
+        for inclusion in the recall block.
+
+        On any error, logs a warning and returns the original
+        ``request_context`` unchanged.
+
+        Args:
+            ctx: The pydantic-ai run context (unused — session_id is
+                extracted from ``ctx.deps``).
+            request_context: The model request context containing messages.
+
+        Returns:
+            A new ``ModelRequestContext`` with the recall block injected,
+            or the original context if recall is disabled, no user prompt
+            is found, or an error occurs.
+        """
+        from agentpool.capabilities.viking.recall import (
+            _extract_latest_user_prompt,
+            _format_recall_block,
+            _inject_system_message,
+            _rank_and_dedup,
+        )
+
+        if not self.auto_recall_enabled:
+            return request_context
+
+        # Extract the latest user prompt
+        prompt = _extract_latest_user_prompt(request_context.messages)
+        if prompt is None:
+            return request_context
+
+        try:
+            client = await self._ensure_client()
+        except Exception:
+            logger.warning("auto_recall: failed to ensure client", exc_info=True)
+            return request_context
+
+        memories_uri = self._resolve_memories_uri()
+
+        # Extract session_id from ctx.deps if available
+        from agentpool.capabilities.viking.tools import _get_session_id
+
+        session_id = _get_session_id(ctx)
+
+        try:
+            session_context: dict[str, Any] | None = None
+
+            if self.auto_recall_method == "search":
+                # Pre-fetch session context
+                if session_id is not None:
+                    try:
+                        session_context = await client.get_session_context(
+                            session_id, token_budget=self.auto_recall_max_tokens
+                        )
+                    except Exception:
+                        logger.debug(
+                            "auto_recall: get_session_context failed, proceeding with search only",
+                            exc_info=True,
+                        )
+                        session_context = None
+
+                raw_results = await client.search(
+                    prompt,
+                    target_uri=memories_uri,
+                    limit=self.auto_recall_limit,
+                    session_id=session_id,
+                )
+            else:
+                raw_results = await client.find(
+                    prompt,
+                    target_uri=memories_uri,
+                    limit=self.auto_recall_limit,
+                )
+
+            # Normalize results to a list of hit dicts
+            hits: list[dict[str, Any]] = _normalize_search_results(raw_results)
+
+            # Rank and deduplicate
+            ranked = _rank_and_dedup(
+                hits,
+                query=prompt,
+                lexical_boost=self.auto_recall_lexical_boost,
+                category_boost=self.auto_recall_category_boost,
+                context_types=self.auto_recall_context_types,
+                min_score=self.auto_recall_min_score,
+            )
+
+            # Format and inject
+            recall_block = _format_recall_block(
+                ranked,
+                session_context=session_context,
+                max_tokens=self.auto_recall_max_tokens,
+            )
+
+            if not recall_block.strip():
+                return request_context
+
+            return _inject_system_message(request_context, recall_block)
+
+        except Exception:
+            logger.warning("auto_recall: recall failed", exc_info=True)
+            return request_context
+
+    # ---- Auto Conversation Ingestion ----
+
+    async def _handle_auto_ingest(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Ingest the previous turn's conversation to Viking.
+
+        Called from ``before_model_request`` (wired in Group 7). Extracts
+        new messages since ``_last_ingested_idx``, sanitizes them, and
+        fires-and-forget an ``asyncio.create_task`` to write them to a
+        new Viking session. Updates the ingestion cursor regardless of
+        success or failure (to avoid retrying on every subsequent turn).
+
+        When ``auto_ingest_mode`` is ``"sync"``, awaits the ingestion
+        directly instead of spawning a background task.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            request_context: The model request context containing messages.
+
+        Returns:
+            The original ``request_context`` unchanged (ingestion does
+            not modify the request context).
+        """
+        if not self.auto_ingest_enabled:
+            return request_context
+
+        from agentpool.capabilities.viking.ingest import (
+            _extract_conversation_pairs,
+            _ingest_conversation,
+            _sanitize_message,
+        )
+
+        messages = request_context.messages
+        current_count = len(messages)
+
+        # No new messages since last ingestion
+        if current_count <= self._last_ingested_idx:
+            return request_context
+
+        # Extract conversation pairs since the cursor
+        pairs = _extract_conversation_pairs(messages, self._last_ingested_idx)
+        if not pairs:
+            # Still advance the cursor to avoid re-scanning
+            self._last_ingested_idx = current_count
+            return request_context
+
+        # Sanitize messages if enabled
+        if self.auto_ingest_sanitize:
+            pairs = [{"role": p["role"], "content": _sanitize_message(p["content"])} for p in pairs]
+
+        # Store pending conversation for last-turn flush
+        self._pending_conversation = pairs
+
+        # Update cursor BEFORE ingestion to prevent retries on failure
+        self._last_ingested_idx = current_count
+
+        try:
+            client = await self._ensure_client()
+        except Exception:
+            logger.warning("auto_ingest: failed to ensure client", exc_info=True)
+            return request_context
+
+        # Generate a unique session ID for this ingestion
+        session_id = f"ingest-{uuid.uuid4().hex[:12]}"
+
+        async def _do_ingest() -> None:
+            try:
+                await _ingest_conversation(
+                    client,
+                    pairs,
+                    session_id=session_id,
+                    source_type=self.auto_ingest_source_type,
+                    keep_recent_turns=self.auto_ingest_keep_recent_turns,
+                )
+            except Exception:
+                logger.warning("auto_ingest: ingestion failed", exc_info=True)
+
+        if self.auto_ingest_mode == "sync":
+            await _do_ingest()
+        else:
+            task = asyncio.create_task(_do_ingest())
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._pending_tasks.discard)
+
+        return request_context
+
+    async def after_run(
+        self,
+        ctx: RunContext[Any],
+        *,
+        result: Any,
+    ) -> Any:
+        """Flush pending ingestion tasks before the run completes.
+
+        Awaits all fire-and-forget ingestion tasks with a 5-second
+        timeout. This fires while the client is still alive (unlike
+        ``__aexit__`` which runs after the parent may have closed the
+        client). Logs a warning if the flush times out or fails.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            result: The agent run result (passed through unchanged).
+
+        Returns:
+            The unchanged ``result``.
+        """
+        if not self._pending_tasks:
+            return result
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*self._pending_tasks, return_exceptions=True),
+                timeout=5.0,
+            )
+        except TimeoutError:
+            logger.warning(
+                "auto_ingest: flush timed out after 5s — %d tasks pending", len(self._pending_tasks)
+            )
+        except Exception:
+            logger.warning("auto_ingest: flush failed", exc_info=True)
+        return result
+
+
+def _normalize_search_results(results: Any) -> list[dict[str, Any]]:
+    """Normalize SDK search/find results into a flat list of hit dicts.
+
+    Handles both dict responses (with ``hits``, ``results``, or Viking's
+    grouped keys like ``memories``/``resources``/``skills``) and list
+    responses.
+
+    Args:
+        results: Raw response from ``client.search()`` or ``client.find()``.
+
+    Returns:
+        A flat list of hit dicts.
+    """
+    if isinstance(results, dict):
+        hits: list[dict[str, Any]] = (
+            results.get("hits")
+            or results.get("results")
+            or (
+                results.get("memories", [])
+                + results.get("resources", [])
+                + results.get("skills", [])
+            )
+        )
+        return hits
+    if isinstance(results, list):
+        return results
+    return []
 
 
 def _guess_extension(media_type: str) -> str:

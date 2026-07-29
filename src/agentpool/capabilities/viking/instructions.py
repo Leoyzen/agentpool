@@ -125,4 +125,64 @@ Viking processes all content into three tiers:
 When listing resources, the description field contains the L0 abstract for each resource.
 
 When using @ mention to reference a resource, the system returns L1 overview by default (configurable via `resource_read_level`). Use `viking_read(uri, level="read")` to access the full content if needed.
+
+### Auto-Recall (Automatic Memory Injection)
+
+When `auto_recall_enabled` is set to `true` in the Viking capability
+config, relevant memories are automatically retrieved from the Viking
+knowledge graph and injected as an `<openviking-recall>` XML block
+before each model call. The recall uses the latest user prompt as the
+query.
+
+- You do **not** need to call `viking_recall` manually for general
+  context — it is already injected. However, you can still call
+  `viking_recall` for targeted queries when you need different search
+  parameters or a specific context type.
+- The injected block appears as a system message before your latest
+  user message. It is not visible to the end user.
+- If the recall block is empty, no relevant memories were found —
+  proceed normally.
+
+### Profile Injection (First-Turn Context)
+
+When `profile_enabled` is set to `true`, a profile of relevant
+memories is automatically injected on the first turn of a session as
+an `<openviking-profile>` XML block. This provides static context
+such as project history, prior decisions, and relevant resources.
+
+- The profile is injected once per session (when
+  `profile_first_turn_only` is `true`, the default).
+- You do not need to call any tool to trigger profile injection — it
+  happens automatically.
+- The profile block appears as a system message before your first
+  user message.
+
+### Compaction and `viking_expand`
+
+When `compaction_enabled` is set to `true`, old conversation messages
+are automatically archived to the Viking knowledge graph when the
+estimated token count exceeds `compaction_threshold`. Archived
+messages are replaced with a brief summary and a `viking://` URI
+reference.
+
+- Use `viking_expand(uri)` to retrieve the full content of an
+  archived conversation when you need details that were compacted
+  away.
+- The `viking_expand` tool is only available when both
+  `compaction_enabled` and `compaction_expand_tool` are `true`.
+- Compaction is automatic — you do not need to trigger it manually.
+
+### `viking_forget` Gating
+
+The `viking_forget` tool is a **destructive** operation that
+permanently removes documents from the Viking knowledge graph. It is
+**not available by default**.
+
+- `viking_forget` requires explicit `enable_forget: true` in the
+  Viking capability config. Without this flag, the tool is not
+  exposed to the agent.
+- This is independent from `enable_memory` — enabling memory tools
+  (`viking_remember`, `viking_recall`) does not enable `viking_forget`.
+- Even when enabled, always confirm with the user before deleting
+  content. Deletion is irreversible.
 """

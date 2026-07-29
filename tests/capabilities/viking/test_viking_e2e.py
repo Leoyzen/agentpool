@@ -571,3 +571,197 @@ async def test_multimodal_bridge(
     assert len(uploaded_content) > 0
     with suppress(Exception):
         await client.rm(uploaded_uri)
+
+
+# ---------------------------------------------------------------------------
+# Auto-Recall E2E test
+# ---------------------------------------------------------------------------
+
+
+async def test_auto_recall_e2e(
+    viking_cap: VikingCapability,
+    test_dir: str,
+) -> None:
+    """Test auto-recall injects <openviking-recall> block into model context.
+
+    Writes a document to Viking, then creates a VikingCapability with
+    ``auto_recall_enabled=True`` and calls ``before_model_request()``.
+    Verifies the returned context contains an ``<openviking-recall>`` block.
+    """
+    from unittest.mock import MagicMock
+
+    from pydantic_ai.messages import ModelRequest, SystemPromptPart, TextPart, UserPromptPart
+    from pydantic_ai.models import ModelRequestContext
+    from pydantic_ai.models.test import TestModel
+
+    client = viking_cap._client
+    assert client is not None
+
+    # Write a document so there is something to recall
+    unique_marker = f"recalltest_{_random_name()}"
+    doc_content = (
+        f"# {unique_marker}\n\n"
+        "This document discusses machine learning model optimization "
+        "techniques including quantization and pruning.\n"
+    )
+    await client.write(f"{test_dir}recall_doc.md", doc_content, mode="create")
+
+    # Wait for indexing
+    with suppress(Exception):
+        await client.wait_processed(timeout=15)
+
+    # Create a capability with auto_recall enabled, sharing the existing client
+    cap = VikingCapability(
+        mode="all",
+        auto_recall_enabled=True,
+        auto_recall_method="find",
+        auto_recall_min_score=0.0,
+        memories_uri=test_dir,
+        _client=client,
+        _owns_client=False,
+    )
+
+    # Build a request context with a user prompt
+    user_msg = ModelRequest(parts=[UserPromptPart(content="What is model optimization?")])
+    request_context = ModelRequestContext(
+        model=TestModel(),
+        messages=[user_msg],
+        model_settings=None,
+        model_request_parameters=None,  # type: ignore[arg-type]
+    )
+
+    ctx = MagicMock()
+    ctx.deps = MagicMock()
+    ctx.deps.session_id = "e2e-recall-test"
+
+    modified_context = await cap.before_model_request(ctx, request_context)
+
+    # Check that <openviking-recall> was injected into the messages
+    all_text = ""
+    for msg in modified_context.messages:
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, TextPart | SystemPromptPart):
+                    all_text += str(part.content)
+
+    assert "<openviking-recall>" in all_text, (
+        f"Expected <openviking-recall> block in messages, got: {all_text[:500]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auto-Ingest E2E test
+# ---------------------------------------------------------------------------
+
+
+async def test_auto_ingest_e2e(
+    viking_cap: VikingCapability,
+) -> None:
+    """Test auto-ingest triggers conversation ingestion on second turn.
+
+    Creates a VikingCapability with ``auto_ingest_enabled=True``,
+    simulates a completed turn (user + assistant messages), then calls
+    ``before_model_request()`` with a new user prompt. Verifies that
+    ingestion was triggered (``create_session`` called on the client).
+    """
+    from unittest.mock import MagicMock
+
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+    from pydantic_ai.models import ModelRequestContext
+    from pydantic_ai.models.test import TestModel
+
+    client = viking_cap._client
+    assert client is not None
+
+    # Create a capability with auto_ingest enabled, using sync mode for
+    # deterministic testing (no fire-and-forget timing issues)
+    cap = VikingCapability(
+        mode="all",
+        auto_ingest_enabled=True,
+        auto_ingest_mode="sync",
+        _client=client,
+        _owns_client=False,
+    )
+
+    # Simulate a completed first turn: user prompt + assistant response
+    first_user = ModelRequest(
+        parts=[UserPromptPart(content=f"Hello from ingest test {_random_name()}")],
+    )
+    first_assistant = ModelResponse(parts=[TextPart(content="Hi! I received your message.")])
+    second_user = ModelRequest(parts=[UserPromptPart(content="What did I just say?")])
+
+    request_context = ModelRequestContext(
+        model=TestModel(),
+        messages=[first_user, first_assistant, second_user],
+        model_settings=None,
+        model_request_parameters=None,  # type: ignore[arg-type]
+    )
+
+    ctx = MagicMock()
+    ctx.deps = MagicMock()
+    ctx.deps.session_id = "e2e-ingest-test"
+
+    # Call before_model_request — this should trigger ingestion of the
+    # first turn's conversation (messages since _last_ingested_idx=0)
+    await cap.before_model_request(ctx, request_context)
+
+    # Verify ingestion cursor advanced
+    assert cap._last_ingested_idx == 3, (
+        f"Expected _last_ingested_idx=3, got {cap._last_ingested_idx}"
+    )
+
+    # Verify pending conversation was stored
+    assert cap._pending_conversation is not None
+    assert len(cap._pending_conversation) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Identity Resolution E2E test
+# ---------------------------------------------------------------------------
+
+
+async def test_identity_resolution_e2e(
+    viking_cap: VikingCapability,
+) -> None:
+    """Test dynamic identity resolution with API key only (no explicit user/account).
+
+    Creates a VikingCapability with NO explicit ``user`` or ``account``
+    (only the API key from the connected client), then verifies:
+    1. ``_resolve_identity()`` returns a non-None identity
+    2. ``list_resources()`` uses the resolved identity in URIs
+    """
+    client = viking_cap._client
+    assert client is not None
+
+    # Create a capability with no explicit user/account, sharing the
+    # existing client and identity from the already-connected viking_cap
+    cap = VikingCapability(
+        mode="all",
+        user=None,
+        account=None,
+        _client=client,
+        _owns_client=False,
+    )
+
+    # Force identity resolution by calling _resolve_identity
+    identity = await cap._resolve_identity()
+    assert identity is not None
+    assert identity.user_id
+    assert identity.account_id
+
+    # Verify list_resources works with the resolved identity
+    resources = await cap.list_resources()
+    assert isinstance(resources, list)
+
+    # Verify sessions URI uses the resolved identity
+    sessions_uri = cap._resolve_sessions_uri()
+    assert identity.user_id in sessions_uri
+
+    # Verify memories URI uses the resolved identity
+    memories_uri = cap._resolve_memories_uri()
+    assert identity.user_id in memories_uri

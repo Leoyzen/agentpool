@@ -1,23 +1,109 @@
 """Integration tests for VikingCapability.
 
-Covers tasks 9.1-9.4 from openspec/changes/viking-capability/tasks.md.
+Covers tasks 8.1-8.8 and 9.1-9.5 from openspec/changes/viking-capability-lifecycle/tasks.md.
 Tests YAML config loading, config fallback, mode-based tool exposure,
-and error handling — all with mocked AsyncHTTPClient.
+error handling, and L2 lifecycle integration (auto-recall, auto-ingest,
+URI guard, for_run isolation, compaction, profile injection, after_run flush)
+— all with mocked AsyncHTTPClient.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+import asyncio
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    UserPromptPart,
+)
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.models.test import TestModel
 import pytest
 import yamling
 
 from agentpool.capabilities.viking import VikingCapability
+from agentpool.capabilities.viking.identity import VikingIdentity
 from agentpool.capabilities.viking.tools import build_tools
 from agentpool_config.capabilities import VikingCapabilityConfig, build_capability
 
 
 pytestmark = pytest.mark.integration
+
+
+# ---------------------------------------------------------------------------
+# L2 Integration Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_client() -> AsyncMock:
+    """Create a fully populated mock AsyncHTTPClient for L2 integration tests."""
+    client = AsyncMock()
+    client.initialize = AsyncMock()
+    client.close = AsyncMock()
+    client.search = AsyncMock(return_value={"results": []})
+    client.find = AsyncMock(return_value={"results": []})
+    client.grep = AsyncMock(return_value={"matches": []})
+    client.glob = AsyncMock(return_value={"matches": []})
+    client.ls = AsyncMock(return_value=[])
+    client.read = AsyncMock(return_value="file content")
+    client.abstract = AsyncMock(return_value="abstract summary")
+    client.overview = AsyncMock(return_value="overview content")
+    client.write = AsyncMock(return_value={"status": "ok"})
+    client.mkdir = AsyncMock(return_value=None)
+    client.rm = AsyncMock(return_value=None)
+    client.link = AsyncMock(return_value=None)
+    client.set_tags = AsyncMock(return_value={"status": "ok"})
+    client.add_resource = AsyncMock(return_value={"status": "ok"})
+    client.create_session = AsyncMock(return_value={"session_id": "test-session"})
+    client.add_message = AsyncMock(return_value={"status": "ok"})
+    client.commit_session = AsyncMock(return_value={"status": "ok"})
+    client.get_session_context = AsyncMock(return_value={})
+    client._request = AsyncMock(return_value={})
+    return client
+
+
+def _make_request_context(messages: list[Any]) -> ModelRequestContext:
+    """Build a minimal ModelRequestContext with a real TestModel."""
+    return ModelRequestContext(
+        model=TestModel(),
+        messages=messages,
+        model_settings=None,
+        model_request_parameters=ModelRequestParameters(
+            function_tools=[],
+            native_tools=[],
+        ),
+    )
+
+
+def _make_run_context(session_id: str = "test-session") -> MagicMock:
+    """Create a mock RunContext with session_id on deps."""
+    ctx = MagicMock()
+    ctx.deps = MagicMock()
+    ctx.deps.session_id = session_id
+    return ctx
+
+
+def _build_cap_from_config(
+    config: VikingCapabilityConfig,
+    client: AsyncMock,
+    identity: VikingIdentity | None = None,
+) -> VikingCapability:
+    """Build a VikingCapability from config, inject mock client and identity.
+
+    This exercises the real ``build_capability()`` factory wiring,
+    then injects the mock client (bypassing SDK import) and optionally
+    sets the resolved identity.
+    """
+    cap = build_capability(config)
+    assert isinstance(cap, VikingCapability)
+    cap._client = client
+    if identity is not None:
+        cap._identity = identity
+    return cap
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +279,7 @@ async def test_mode_tool_exposure_retrieve() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 6  # 6 retrieve tools (recall gated by enable_memory)
+    assert len(tool_names) == 7  # 7 retrieve tools (recall gated by enable_memory, expand always)
 
 
 @pytest.mark.asyncio
@@ -209,7 +295,8 @@ async def test_mode_tool_exposure_write() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 5  # 5 write tools (remember gated by enable_memory)
+    # 4 write tools (remember gated by enable_memory, forget by enable_forget)
+    assert len(tool_names) == 4
 
 
 @pytest.mark.asyncio
@@ -241,7 +328,7 @@ async def test_mode_tool_exposure_all() -> None:
     toolset = cap.get_toolset()
     assert toolset is not None
     tool_names = list(toolset.tools.keys())  # type: ignore[attr-defined]
-    assert len(tool_names) == 12  # 6+5+1 (link and memory gated by default flags)
+    assert len(tool_names) == 12  # 7 retrieve + 4 write + 1 graph (expand included in retrieve)
 
 
 @pytest.mark.asyncio
@@ -467,3 +554,405 @@ async def test_resource_read_level_propagates_to_capability() -> None:
     ctx.deps = MagicMock()
     copy_cap = await cap.for_run(ctx)
     assert copy_cap.resource_read_level == "abstract"
+
+
+# ---------------------------------------------------------------------------
+# 8.1-8.2 — L2: Auto-recall through real before_model_request chain
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_auto_recall_before_model_request_fires() -> None:
+    """L2: auto_recall fires, client.search() called, recall block injected.
+
+    Given: a VikingCapability built from VikingCapabilityConfig with
+        auto_recall_enabled=True, injected with a mock client returning
+        a search hit.
+    When: before_model_request is called with a real ModelRequestContext
+        containing a user prompt.
+    Then: client.search() is called, and the result contains a
+        <openviking-recall> system message injected before the user prompt.
+    """
+    client = _make_mock_client()
+    client.search = AsyncMock(
+        return_value={
+            "results": [
+                {
+                    "uri": "viking://user/alice/memories/doc.md",
+                    "score": 0.9,
+                    "content": "hydraulic diagnosis info",
+                    "context_type": "memory",
+                }
+            ]
+        }
+    )
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        auto_recall_enabled=True,
+        auto_recall_method="search",
+    )
+    cap = _build_cap_from_config(cfg, client, identity)
+
+    msg = ModelRequest(parts=[UserPromptPart(content="hydraulic pressure issue")])
+    rc = _make_request_context([msg])
+    ctx = _make_run_context(session_id="sess-123")
+
+    result = await cap.before_model_request(ctx, rc)
+
+    # Verify search was called with the user prompt and memories URI
+    client.search.assert_called_once()
+    call_args = client.search.call_args
+    assert call_args.args[0] == "hydraulic pressure issue"
+    assert "viking://user/alice/memories/" in call_args.kwargs["target_uri"]
+
+    # Verify recall block was injected as a system message
+    assert result is not rc
+    assert len(result.messages) == 2
+    sys_msg = result.messages[0]
+    assert isinstance(sys_msg, ModelRequest)
+    sys_part = sys_msg.parts[0]
+    assert isinstance(sys_part, SystemPromptPart)
+    assert "<openviking-recall>" in sys_part.content
+    assert "viking://user/alice/memories/doc.md" in sys_part.content
+
+
+# ---------------------------------------------------------------------------
+# 8.3 — L2: Auto-ingest fires on second turn
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_auto_ingest_second_turn_triggers_ingestion() -> None:
+    """L2: auto_ingest_enabled=True → second turn triggers create_session + commit_session.
+
+    Given: a VikingCapability built from config with auto_ingest_enabled=True
+        and auto_ingest_mode="sync".
+    When: before_model_request is called with messages from a previous
+        turn (user + assistant) plus a new user prompt.
+    Then: client.create_session() and client.commit_session() are called,
+        and the ingestion cursor is advanced.
+    """
+    client = _make_mock_client()
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        auto_ingest_enabled=True,
+        auto_ingest_mode="sync",
+    )
+    cap = _build_cap_from_config(cfg, client, identity)
+
+    # Previous turn (user + assistant) + new user prompt
+    messages = [
+        ModelRequest(parts=[UserPromptPart(content="What is X?")]),
+        ModelResponse(parts=[TextPart(content="X is a thing.")]),
+        ModelRequest(parts=[UserPromptPart(content="Tell me more about X")]),
+    ]
+    rc = _make_request_context(messages)
+    ctx = _make_run_context()
+
+    await cap.before_model_request(ctx, rc)
+
+    # Ingest should have created a session and committed it
+    client.create_session.assert_called_once()
+    client.commit_session.assert_called_once()
+    # At least 2 add_message calls (user + assistant from previous turn)
+    assert client.add_message.call_count >= 2
+
+    # Cursor should be advanced to the current message count
+    assert cap._last_ingested_idx == 3
+
+
+# ---------------------------------------------------------------------------
+# 8.4 — L2: URI guard blocks viking:// URIs in protected tools
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_uri_guard_blocks_viking_uri_in_read_tool() -> None:
+    """L2: uri_guard_enabled=True → read tool with viking:// URI returns error string.
+
+    Given: a VikingCapability built from config with uri_guard_enabled=True.
+    When: wrap_tool_execute is called for the "read" tool with args
+        containing a viking:// URI.
+    Then: the handler is NOT called, and an error string is returned
+        directing the user to viking_read or viking_search.
+    """
+    client = _make_mock_client()
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        uri_guard_enabled=True,
+        uri_guard_protected_tools=["read", "bash", "grep", "glob"],
+    )
+    cap = _build_cap_from_config(cfg, client)
+
+    call = MagicMock()
+    call.tool_name = "read"
+    handler = AsyncMock(return_value="should not reach")
+    args = {"file_path": "viking://user/alice/doc.md"}
+
+    result = await cap.wrap_tool_execute(
+        MagicMock(), call=call, tool_def=MagicMock(), args=args, handler=handler
+    )
+
+    assert isinstance(result, str)
+    assert "viking://" in result
+    assert "read" in result
+    assert "viking_read" in result or "viking_search" in result
+    handler.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 8.5 — L2: for_run() state isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_for_run_state_isolation() -> None:
+    """L2: for_run() produces independent per-run state, shared identity, passed sessions_uri.
+
+    Given: a parent VikingCapability with identity set, sessions_uri configured,
+        _last_ingested_idx and _profile_injected modified.
+    When: two per-run copies are created via for_run().
+    Then: each copy has _last_ingested_idx=0 and _profile_injected=False
+        (reset), _identity is shared (same object), sessions_uri is passed
+        through, and modifying one copy's state does not affect the other.
+    """
+    client = _make_mock_client()
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        sessions_uri="viking://user/alice/sessions/",
+        auto_ingest_enabled=True,
+        profile_enabled=True,
+    )
+    cap = build_capability(cfg)
+    assert isinstance(cap, VikingCapability)
+    cap._client = client
+    cap._identity = identity
+    # Simulate state from a previous run
+    cap._last_ingested_idx = 5
+    cap._profile_injected = True
+
+    ctx = _make_run_context()
+    copy1 = await cap.for_run(ctx)
+    copy2 = await cap.for_run(ctx)
+
+    # Per-run state is reset
+    assert copy1._last_ingested_idx == 0
+    assert copy1._profile_injected is False
+    assert copy2._last_ingested_idx == 0
+    assert copy2._profile_injected is False
+
+    # Identity is shared (same object reference)
+    assert copy1._identity is identity
+    assert copy2._identity is identity
+
+    # sessions_uri is passed through (bug fix verification)
+    assert copy1.sessions_uri == "viking://user/alice/sessions/"
+    assert copy2.sessions_uri == "viking://user/alice/sessions/"
+
+    # Modifying copy1 does not affect copy2
+    copy1._last_ingested_idx = 10
+    copy1._profile_injected = True
+    assert copy2._last_ingested_idx == 0
+    assert copy2._profile_injected is False
+
+    # Parent state is unchanged
+    assert cap._last_ingested_idx == 5
+    assert cap._profile_injected is True
+
+
+# ---------------------------------------------------------------------------
+# 8.6 — L2: Compaction archives large context
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_compaction_archives_large_context() -> None:
+    """L2: compaction fires on large context, client.write() archives old messages.
+
+    Given: a VikingCapability built from config with compaction_enabled=True
+        and a very low threshold (to trigger compaction with test messages).
+    When: before_model_request is called with messages exceeding the threshold.
+    Then: client.write() is called to archive old messages, and the result
+        context has fewer messages (replaced with summary + URI reference).
+    """
+    client = _make_mock_client()
+    client.write = AsyncMock(return_value={"status": "ok"})
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        compaction_enabled=True,
+        compaction_threshold=100,  # Very low threshold to trigger with test data
+        compaction_keep_recent_turns=2,
+    )
+    cap = _build_cap_from_config(cfg, client, identity)
+
+    # Build enough messages to exceed the threshold (100 tokens ≈ 400 chars)
+    long_text = "x" * 500  # ~125 tokens per message
+    messages: list[Any] = []
+    for i in range(10):
+        messages.append(ModelRequest(parts=[UserPromptPart(content=f"Q{i}: {long_text}")]))
+        messages.append(ModelResponse(parts=[TextPart(content=f"A{i}: {long_text}")]))
+    # Final user prompt
+    messages.append(ModelRequest(parts=[UserPromptPart(content="final question")]))
+
+    rc = _make_request_context(messages)
+    ctx = _make_run_context()
+
+    result = await cap.before_model_request(ctx, rc)
+
+    # Compaction should have called client.write() to archive
+    client.write.assert_called_once()
+    write_args = client.write.call_args.args
+    write_kwargs = client.write.call_args.kwargs
+    assert "viking://user/alice/memories/compacted/" in write_args[0]
+    assert write_kwargs["mode"] == "create"
+
+    # Result should have fewer messages (old ones archived, replaced with summary)
+    assert len(result.messages) < len(messages)
+    assert result is not rc
+
+
+# ---------------------------------------------------------------------------
+# 8.7 — L2: Profile injection fires on first turn, skips on second
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_profile_injection_first_turn_fires_second_skips() -> None:
+    """L2: profile_enabled=True → first turn calls client.find(), second turn does not.
+
+    Given: a VikingCapability built from config with profile_enabled=True.
+    When: before_model_request is called twice (simulating two turns).
+    Then: the first call triggers client.find() for profile lookup,
+        and the second call does NOT call find() (profile already injected).
+    """
+    client = _make_mock_client()
+    client.find = AsyncMock(
+        return_value={
+            "hits": [
+                {
+                    "uri": "viking://user/alice/memories/profile.md",
+                    "content": "project context data",
+                    "context_type": "memory",
+                    "score": 0.9,
+                }
+            ]
+        }
+    )
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        profile_enabled=True,
+        profile_first_turn_only=True,
+    )
+    cap = _build_cap_from_config(cfg, client, identity)
+
+    # First turn: single user message
+    msg1 = ModelRequest(parts=[UserPromptPart(content="Hello, help me with diagnosis")])
+    rc1 = _make_request_context([msg1])
+    ctx = _make_run_context()
+
+    result1 = await cap.before_model_request(ctx, rc1)
+
+    # First turn should call find() for profile
+    client.find.assert_called_once()
+
+    # Result should contain the profile block
+    assert result1 is not rc1
+    sys_msgs = [
+        m
+        for m in result1.messages
+        if isinstance(m, ModelRequest) and any(isinstance(p, SystemPromptPart) for p in m.parts)
+    ]
+    assert len(sys_msgs) >= 1
+    profile_content = next(
+        p.content for m in sys_msgs for p in m.parts if isinstance(p, SystemPromptPart)
+    )
+    assert "<openviking-profile>" in profile_content
+
+    # Second turn: previous turn + new user message
+    client.find.reset_mock()
+    messages2 = [
+        msg1,
+        ModelResponse(parts=[TextPart(content="Sure, I can help.")]),
+        ModelRequest(parts=[UserPromptPart(content="Tell me more")]),
+    ]
+    rc2 = _make_request_context(messages2)
+
+    await cap.before_model_request(ctx, rc2)
+
+    # Second turn should NOT call find() (profile already injected)
+    client.find.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 8.8 — L2: after_run() flushes pending fire-and-forget tasks
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_l2_after_run_flushes_pending_tasks() -> None:
+    """L2: after_run() flushes pending fire-and-forget ingestion tasks before client close.
+
+    Given: a VikingCapability with auto_ingest_enabled=True and
+        auto_ingest_mode="async", and a pending ingestion task in
+        _pending_tasks.
+    When: after_run() is called.
+    Then: the pending task is awaited (asyncio.gather is effectively called),
+        and _pending_tasks is emptied after the flush.
+    """
+    client = _make_mock_client()
+    identity = VikingIdentity(account_id="acct", user_id="alice", role="user")
+
+    cfg = VikingCapabilityConfig(
+        mode="all",
+        auto_ingest_enabled=True,
+        auto_ingest_mode="async",
+    )
+    cap = _build_cap_from_config(cfg, client, identity)
+
+    # Simulate a fire-and-forget ingestion by creating a pending task
+    ingestion_called = asyncio.Event()
+
+    async def _mock_ingest() -> None:
+        ingestion_called.set()
+
+    task = asyncio.create_task(_mock_ingest())
+    cap._pending_tasks.add(task)
+    task.add_done_callback(cap._pending_tasks.discard)
+
+    ctx = _make_run_context()
+    await cap.after_run(ctx, result="agent result")
+
+    # The task should have been awaited and completed
+    assert ingestion_called.is_set()
+    # _pending_tasks should be empty (task completed and callback removed it)
+    assert len(cap._pending_tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_l2_after_run_no_pending_tasks_is_noop() -> None:
+    """L2: after_run() with no pending tasks is a no-op, returns result unchanged.
+
+    Given: a VikingCapability with no pending tasks.
+    When: after_run() is called with a result.
+    Then: the result is returned unchanged.
+    """
+    client = _make_mock_client()
+    cfg = VikingCapabilityConfig(mode="all")
+    cap = _build_cap_from_config(cfg, client)
+
+    ctx = _make_run_context()
+    result = await cap.after_run(ctx, result="test result")
+
+    assert result == "test result"
+    assert len(cap._pending_tasks) == 0

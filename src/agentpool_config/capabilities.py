@@ -208,6 +208,92 @@ class VikingCapabilityConfig(BaseModel):
     resource_read_level: Literal["abstract", "overview", "read"] = "overview"
     """Default content level for read_resource() (ResourceAccess Protocol).
     "abstract" (L0), "overview" (L1, default), or "read" (L2, full)."""
+    auto_resolve_identity: bool = True
+    """When True (default), resolve account_id and user_id automatically
+    from the API key or /health endpoint after client initialization."""
+    memories_uri: str | None = None
+    """Override for memories URI. Default: viking://user/{user_id}/memories/"""
+    actor_peer_id: str | None = None
+    """Explicit actor peer ID for multi-agent isolation. When None (default),
+    the Viking server uses user_id for isolation. When set, passed to the
+    SDK client for all requests."""
+    auto_ingest_enabled: bool = False
+    """Enable automatic conversation ingestion. When True, the capability
+    ingests the previous turn's conversation at the start of the next
+    ``before_model_request`` call (lazy ingestion)."""
+    auto_ingest_mode: Literal["async", "sync"] = "async"
+    """Ingestion mode — ``"async"`` (fire-and-forget background task) or
+    ``"sync"`` (block until ingestion completes). Default is ``"async"``."""
+    auto_ingest_sanitize: bool = True
+    """Strip ``<openviking-recall>`` and ``<openviking-profile>`` XML blocks
+    from messages before ingestion to prevent feedback loops."""
+    auto_ingest_source_type: str = "agentpool"
+    """Source type metadata for ingested sessions."""
+    auto_ingest_keep_recent_turns: int = 0
+    """Number of recent turns to retain in the session after commit.
+    When 0 (default), no retention parameter is passed to commit_session."""
+    auto_recall_enabled: bool = False
+    """When True, perform semantic recall before each model request using the
+    latest user prompt as the query. Results are injected as an
+    <openviking-recall> XML block into the system prompt."""
+    auto_recall_method: Literal["search", "find"] = "search"
+    """Recall retrieval method: "search" (default, session-aware, calls
+    client.search() with session_id) or "find" (faster, deduplicated, calls
+    client.find() without session context)."""
+    auto_recall_max_tokens: int = 2000
+    """Maximum token budget for the injected recall block. Content exceeding
+    this budget is truncated with a [... truncated] indicator."""
+    auto_recall_limit: int = 10
+    """Maximum number of results to request from the Viking server per recall."""
+    auto_recall_min_score: float = 0.3
+    """Minimum composite score for a recall hit to be included in the result."""
+    auto_recall_lexical_boost: float = 0.1
+    """Score boost per overlapping word between the query and hit content."""
+    auto_recall_category_boost: float = 0.05
+    """Score boost applied to hits with context_type="memory"."""
+    auto_recall_context_types: list[str] = Field(default_factory=lambda: ["memory", "resource"])
+    """Context types to include in recall results. Hits with context_type not
+    in this list are filtered out before ranking."""
+    enable_forget: bool = False
+    """Enable the viking_forget tool. This is a destructive operation that
+    removes documents from the Viking knowledge graph. Disabled by default —
+    an agent deleting memories without user confirmation is dangerous.
+    Independent from enable_memory."""
+    uri_guard_enabled: bool = False
+    """When True, block file-access tools (read, bash, grep, glob) from
+    accessing viking:// URIs in their arguments. Forces the agent to use
+    dedicated Viking tools (viking_read, viking_search) instead."""
+    uri_guard_protected_tools: list[str] = Field(
+        default_factory=lambda: ["read", "bash", "grep", "glob"]
+    )
+    """Tool names protected by the URI guard. When uri_guard_enabled is True,
+    these tools are blocked from accessing viking:// URIs. Customize to add
+    or remove tools from the protected list."""
+    compaction_enabled: bool = False
+    """When True, archive old conversation messages to Viking before context
+    overflow. Disabled by default."""
+    compaction_threshold: int = 100_000
+    """Estimated token count above which compaction is triggered. Only
+    checked when compaction_enabled is True."""
+    compaction_keep_recent_turns: int = 5
+    """Number of recent turns to keep when compacting. Older messages are
+    archived to viking://user/{user_id}/memories/compacted/."""
+    compaction_expand_tool: bool = True
+    """When True (and compaction_enabled is True), expose a viking_expand
+    tool that loads the full content of a previously archived conversation."""
+    profile_enabled: bool = False
+    """Enable first-turn profile injection from Viking memories. When True,
+    the capability queries Viking for memory search results on the first
+    turn and injects them as an <openviking-profile> XML block."""
+    profile_max_tokens: int = 1000
+    """Maximum token budget for the injected profile block. Content exceeding
+    this budget is truncated with a [... truncated] indicator."""
+    profile_limit: int = 5
+    """Maximum number of memory hits to retrieve for the profile block."""
+    profile_first_turn_only: bool = True
+    """When True (default), profile injection runs only on the first turn
+    of a session (message count <= 2). When False, injection runs on every
+    before_model_request call where _profile_injected is False."""
 
 
 # ---------------------------------------------------------------------------
