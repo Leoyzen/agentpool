@@ -16,7 +16,6 @@ routing to all consumers.
 
 from __future__ import annotations
 
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 from agentpool.agents.events.events import CustomEvent
@@ -50,25 +49,18 @@ class OpenCodeEventBridge:
         self._event_bus = event_bus
 
     async def publish(self, event: Event) -> None:
-        """Publish an event to SSE subscribers and the EventBus.
+        """Publish an event to the EventBus.
 
-        Steps:
-        1. Push to SSE subscribers for backward compatibility.
-        2. Extract ``session_id`` from the event properties.
-        3. If a session_id is found, wrap the event in a
-           :class:`CustomEvent` and publish it to the EventBus.
+        Extracts ``session_id`` from the event properties. If a session_id
+        is present, the event is wrapped in a :class:`CustomEvent` and
+        published to the EventBus for that session. EventBus subscribers
+        (SSE clients, status bridges, protocol adapters) receive the
+        wrapped event.
 
         Args:
             event: An OpenCode protocol event (e.g. ``SessionStatusEvent``,
                 ``PartUpdatedEvent``, ``MessageUpdatedEvent``).
         """
-        # Step 0: Push to SSE subscribers (backward compatibility)
-        import asyncio
-
-        for subscriber in self._state.event_subscribers:
-            with contextlib.suppress(asyncio.QueueFull):
-                subscriber.put_nowait(event)
-
         # Step 1: extract session_id
         session_id = self._extract_session_id(event)
         if session_id is None:
