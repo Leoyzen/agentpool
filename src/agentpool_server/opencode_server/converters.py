@@ -20,7 +20,6 @@ from pydantic_ai import (
 from agentpool import log
 from agentpool.messaging.messages import ChatMessage
 from agentpool.sessions.models import SessionData
-from agentpool.tools.exceptions import ToolError
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_content_or_path_ref
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
@@ -130,21 +129,27 @@ def _get_input_from_state(state: ToolState, *, convert_params: bool = False) -> 
     return _convert_params_for_ui(state.input) if convert_params else state.input
 
 
-async def _resolve_mcp_resource(source: ResourceSource, agent: BaseAgent[Any, Any]) -> str | None:
-    """Resolve an MCP resource and return its content as text (or None if cant be read)."""
-    try:
-        resource = await agent.get_resource(source.uri)
-    except ToolError:
-        logger.warning("MCP resource not found", client_name=source.client_name, uri=source.uri)
-        return None
-    try:
-        contents = await resource.read()
-        return "\n".join(contents) if contents else None
-    except Exception:
-        logger.exception(
-            "Failed to read MCP resource", client_name=source.client_name, uri=source.uri
-        )
-        return None
+async def _resolve_resource(
+    source: ResourceSource, agent: BaseAgent[Any, Any]
+) -> list[UserContent] | None:
+    """Resolve a resource and return its content as a list of UserContent items.
+
+    Returns None if the resource is not found.
+    """
+    from agentpool.capabilities.resource_protocols import ResourceAccess, SkillResource
+    from agentpool.capabilities.resource_resolver import resolve_resource_content
+
+    resource_caps: list[ResourceAccess] = [
+        cap for cap in agent._all_capabilities if isinstance(cap, ResourceAccess)
+    ]
+    skill_caps: list[SkillResource] = [
+        cap for cap in agent._all_capabilities if isinstance(cap, SkillResource)
+    ]
+
+    content = await resolve_resource_content(source.uri, resource_caps, skill_caps)
+    if content is None:
+        logger.warning("Resource not found", client_name=source.client_name, uri=source.uri)
+    return content
 
 
 async def extract_user_prompt_from_parts(
@@ -178,9 +183,9 @@ async def extract_user_prompt_from_parts(
             case TextPartInput(text=text):
                 result.append(text)
             case FilePartInput(source=ResourceSource() as resource) if agent is not None:
-                content = await _resolve_mcp_resource(resource, agent)
+                content = await _resolve_resource(resource, agent)
                 if content is not None:
-                    result.append(content)
+                    result.extend(content)
             case FilePartInput(mime=mime, url=url, filename=filename):
                 file_content = to_user_content_or_path_ref(mime, url, filename, fs=fs)
                 result.append(file_content)
