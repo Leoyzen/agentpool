@@ -2,7 +2,7 @@
 description: "Code review specialist for type safety, testing, and regressions"
 mode: subagent
 hidden: true
-model: anthropic/claude-sonnet-4-20250514
+model: deepseek/deepseek-chat
 temperature: 0.1
 permissions:
   - action: edit

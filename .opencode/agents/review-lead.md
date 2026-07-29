@@ -1,7 +1,7 @@
 ---
 description: "PR review coordinator — delegates to code and docs specialists"
 mode: primary
-model: anthropic/claude-sonnet-4-20250514
+model: deepseek/deepseek-chat
 temperature: 0.2
 permissions:
   - action: edit
