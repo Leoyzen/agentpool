@@ -1,6 +1,7 @@
 ---
 title: watch
 description: Watch for triggers and react
+icon: material/eye
 ---
 
 # watch

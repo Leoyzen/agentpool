@@ -1,6 +1,7 @@
 ---
 title: serve-acp
 description: Start ACP server
+icon: material/server
 ---
 
 # serve-acp

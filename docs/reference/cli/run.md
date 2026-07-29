@@ -1,6 +1,7 @@
 ---
 title: run
 description: Run a node with prompts
+icon: material/play
 ---
 
 # run
