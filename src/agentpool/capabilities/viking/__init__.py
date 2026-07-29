@@ -193,7 +193,7 @@ class VikingCapability(AbstractCapability[Any]):
             api_key=self.api_key,
             account=self.account,
             user=self.user,
-            timeout=self.timeout,
+            timeout=self.timeout if self.timeout is not None else 60.0,
         )
         await self._client.initialize()
         self._resolve_identity_from_apikey()
@@ -230,7 +230,7 @@ class VikingCapability(AbstractCapability[Any]):
             api_key=self.api_key,
             account=self.account,
             user=self.user,
-            timeout=self.timeout,
+            timeout=self.timeout if self.timeout is not None else 60.0,
         )
         await self._client.initialize()
         self._resolve_identity_from_apikey()
