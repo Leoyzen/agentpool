@@ -51,7 +51,6 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
         name: str = "function_tools",
         instructions: str | None = None,
         prompts: Sequence[BasePrompt] | None = None,
-        resources: Sequence[Any] | None = None,
         owner: str | None = None,
     ) -> None:
         """Initialize the capability.
@@ -61,14 +60,12 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
             name: Human-readable name for this capability.
             instructions: Optional instructions string for the system prompt.
             prompts: Optional list of prompts (backward compat).
-            resources: Optional list of resources (backward compat).
             owner: Optional owner string (backward compat).
         """
         self._tools: list[Tool[Any]] = list(tools) if tools else []
         self._name = name
         self._instructions = instructions
         self._prompts: list[BasePrompt] = list(prompts) if prompts else []
-        self._resources: list[Any] = list(resources) if resources else []
         self.owner: str | None = owner
 
     # ---- Backward compat properties ----
@@ -85,10 +82,6 @@ class FunctionToolsetCapability(AbstractCapability[AgentDepsT]):
     async def get_prompts(self) -> list[BasePrompt]:
         """Return the prompts list (backward compat)."""
         return self._prompts
-
-    async def get_resources(self) -> list[Any]:
-        """Return the resources list (backward compat)."""
-        return self._resources
 
     def add_tool(self, tool: ToolType) -> None:
         """Add a tool to this capability."""
