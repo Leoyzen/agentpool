@@ -232,9 +232,9 @@ class AgentFactory:
 
         caps: list[AbstractCapability[Any]] = []
 
-        # 1. Pool-level skills tools provider — native capability.
-        if host_context.skills_tools_provider is not None:
-            caps.append(host_context.skills_tools_provider)
+        # 1. Pool-level skills tools provider — already registered at POOL
+        #    scope by _rebuild_skill_capabilities(). Not included here to
+        #    avoid duplicate AGENT-scope registration.
 
         # 2. Subagent delegation — native capability.
         if self._has_subagent_toolset(cfg):
