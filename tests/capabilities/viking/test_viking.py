@@ -1340,11 +1340,17 @@ class TestErrorHandling:
         assert "viking_set_tags error: invalid tag" in result
 
     @pytest.mark.asyncio
-    async def test_get_client_not_initialized(self) -> None:
-        """_get_client raises RuntimeError when client is not initialized."""
+    async def test_ensure_client_lazy_init(self) -> None:
+        """_ensure_client lazily initializes the SDK client when not set."""
         cap = VikingCapability(mode="all")
-        with pytest.raises(RuntimeError, match="not initialized"):
-            cap._get_client()
+        # _ensure_client should create a client (lazy init), not raise.
+        client = await cap._ensure_client()
+        assert client is not None
+        # Second call returns the same client (no re-init).
+        client2 = await cap._ensure_client()
+        assert client is client2
+        # Clean up
+        await cap.__aexit__(None, None, None)
 
 
 # ---------------------------------------------------------------------------

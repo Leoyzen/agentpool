@@ -84,7 +84,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 JSON-formatted search results.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 sid = _get_session_id(ctx)
                 sdk_filter: dict[str, str] | None = {"level": level} if level else None
                 result = await client.search(
@@ -123,7 +123,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 JSON-formatted search results.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 sdk_filter: dict[str, str] | None = {"level": level} if level else None
                 result = await client.find(
                     query,
@@ -157,7 +157,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Formatted string with recalled memories grouped by context type.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 if quotas is None:
                     quotas = {
                         "events": 3,
@@ -198,7 +198,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Matching lines with line numbers, or "No matches found."
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 result = await client.grep(
                     uri,
                     pattern,
@@ -238,7 +238,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Matching viking:// URIs, one per line.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 result = await client.glob(
                     pattern,
                     uri=uri,
@@ -269,7 +269,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Entries with ``[dir]``/``[file]`` markers.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 entries = await client.ls(uri, simple=False, recursive=recursive)
                 return format_ls_entries(entries if isinstance(entries, list) else [])
             except Exception as e:
@@ -293,7 +293,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 separated by ``=== {uri} ===`` headers.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 offset = line - 1  # SDK offset is 0-indexed
                 uri_list = [uris] if isinstance(uris, str) else uris
                 sections: list[str] = []
@@ -339,7 +339,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string with the generated session ID.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 sid = str(uuid.uuid4())
                 await client.create_session(session_id=sid)
                 for msg in messages:
@@ -367,7 +367,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 await client.write(uri, content, mode=mode)
                 return f"Wrote {len(content)} chars to {uri} (mode={mode})."
             except Exception as e:
@@ -397,7 +397,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 was not found or appeared multiple times.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 current = await client.read(uri)
                 count = current.count(old_string)
                 if count == 0:
@@ -431,7 +431,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 await client.mkdir(uri, description=description)
                 return f"Created directory {uri}."
             except Exception as e:
@@ -461,7 +461,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 # SDK add_resource() does not accept processing_mode;
                 # pass only supported kwargs.
                 result = await client.add_resource(
@@ -489,7 +489,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 await client.rm(uri, recursive=recursive)
                 return f"Removed {uri}."
             except Exception as e:
@@ -525,7 +525,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 await client.link(from_uri, to_uris, reason=reason)
                 targets = to_uris if isinstance(to_uris, list) else [to_uris]
                 return f"Linked {from_uri} -> {', '.join(targets)} (reason: {reason!r})."
@@ -549,7 +549,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 Confirmation string.
             """
             try:
-                client = cap._get_client()
+                client = await cap._ensure_client()
                 await client.set_tags(uri, tags, mode="replace", recursive=recursive)
                 return f"Set {len(tags)} tag(s) on {uri}."
             except Exception as e:

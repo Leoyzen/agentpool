@@ -91,23 +91,30 @@ class VikingCapability(AbstractCapability[Any]):
         """Return ``False`` — Viking does not wrap node execution."""
         return False
 
-    def _get_client(self) -> Any:
-        """Return the SDK client, raising if not initialized.
+    async def _ensure_client(self) -> Any:
+        """Return the SDK client, lazily initializing if needed.
+
+        Follows the same pattern as ``McpServerCap._ensure_client()``:
+        if the client is already set (e.g. from ``__aenter__`` or a
+        ``for_run`` copy), return it directly. Otherwise, lazily import
+        and initialize the SDK client.
 
         Returns:
             The ``AsyncHTTPClient`` instance.
-
-        Raises:
-            RuntimeError: If the client has not been initialized
-                (``__aenter__`` was not called).
         """
-        if self._client is None:
-            msg = (
-                "VikingCapability client not initialized. "
-                "Use 'async with VikingCapability(...) as cap:' "
-                "or ensure the capability is entered via the pool lifecycle."
-            )
-            raise RuntimeError(msg)
+        if self._client is not None:
+            return self._client
+
+        from openviking_sdk import AsyncHTTPClient
+
+        self._client = AsyncHTTPClient(
+            url=self.url,
+            api_key=self.api_key,
+            account=self.account,
+            user=self.user,
+            timeout=self.timeout,
+        )
+        await self._client.initialize()
         return self._client
 
     def _resolve_skills_uri(self) -> str:
@@ -233,7 +240,7 @@ class VikingCapability(AbstractCapability[Any]):
             Returns an empty list on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             uri = self._resolve_skills_uri()
             entries = await client.ls(uri)
             if not isinstance(entries, list):
@@ -272,7 +279,7 @@ class VikingCapability(AbstractCapability[Any]):
             Skill content as a string, or ``None`` if not found or on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             uri = self._resolve_skills_uri()
             content = await client.read(f"{uri}{name}.md")
             return str(content) if content else None
@@ -289,7 +296,7 @@ class VikingCapability(AbstractCapability[Any]):
             ``True`` if the skill exists, ``False`` otherwise or on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             uri = self._resolve_skills_uri()
             entries = await client.ls(uri)
             if not isinstance(entries, list):
@@ -330,7 +337,7 @@ class VikingCapability(AbstractCapability[Any]):
             list on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             uri = self._resolve_resources_uri()
             entries = await client.ls(uri)
             if not isinstance(entries, list):
@@ -377,7 +384,7 @@ class VikingCapability(AbstractCapability[Any]):
             content, or ``None`` if not found or on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             content = await client.read(uri)
             if not content:
                 return None
@@ -406,7 +413,7 @@ class VikingCapability(AbstractCapability[Any]):
             ``True`` if the resource exists, ``False`` otherwise or on error.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             parent = uri.rsplit("/", 1)[0] + "/"
             name = uri.rsplit("/", 1)[1]
             entries = await client.ls(parent)
@@ -558,7 +565,7 @@ class VikingCapability(AbstractCapability[Any]):
             The Viking URI of the uploaded content, or ``None`` on failure.
         """
         try:
-            client = self._get_client()
+            client = await self._ensure_client()
             uploads_uri = self.uploads_uri or (
                 f"viking://user/{self.user or 'default'}/memories/uploads/"
             )

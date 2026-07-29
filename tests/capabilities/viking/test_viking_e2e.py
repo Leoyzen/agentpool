@@ -341,9 +341,7 @@ class TestE2EWriteTools:
         assert "Remembered" in result
         assert "2" in result  # 2 messages
 
-    async def test_viking_add_resource(
-        self, viking_cap: VikingCapability, mock_ctx: Any
-    ) -> None:
+    async def test_viking_add_resource(self, viking_cap: VikingCapability, mock_ctx: Any) -> None:
         """Test viking_add_resource ingests a local file into Viking."""
         client = viking_cap._get_client()
         tools = build_tools(viking_cap)
