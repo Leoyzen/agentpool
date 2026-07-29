@@ -399,6 +399,36 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
         self._extra_capabilities: list[Any] = capabilities or []
 
+        # Eagerly build config-defined capabilities and add to _external_capabilities
+        # so they're visible to _all_capabilities (used by _get_all_tools() for
+        # tool listing endpoints) before get_agentlet() is called.
+        # Built instances are stored in _config_capabilities_built so get_agentlet()
+        # can reuse them instead of rebuilding (preventing double-append bug).
+        self._config_capabilities_built: list[Any] = []
+        if self.config and self.config.capabilities:
+            from pydantic import BaseModel as _BaseModel
+
+            from agentpool_config.capabilities import (
+                EntryPointCapabilityConfig,
+                GenericCapabilityConfig,
+                build_capability,
+            )
+
+            for cap in self.config.capabilities:
+                if cap is None:
+                    continue
+                if isinstance(cap, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
+                    built = cap.build()
+                elif isinstance(cap, _BaseModel):
+                    from typing import cast as _cast
+
+                    built = build_capability(_cast(Any, cap))
+                else:
+                    # Pre-instantiated AbstractCapability
+                    built = cap
+                self._external_capabilities.append(built)
+                self._config_capabilities_built.append(built)
+
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
         """Build MCP config entries from pool-level servers.
 
@@ -1130,8 +1160,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         if self._extra_capabilities:
             tool_capabilities.extend(self._extra_capabilities)
 
-        # Merge user-provided capabilities from config
-        if self.config and self.config.capabilities:
+        # Config-defined capabilities are already in _external_capabilities
+        # (built eagerly in __init__) and are picked up by the _all_capabilities
+        # loop above. No need to re-add them here (issue #306).
+        # However, if config was set after __init__ (e.g. tests mutating
+        # agent.config), _config_capabilities_built will be empty — build
+        # lazily in that case.
+        if self.config and self.config.capabilities and not self._config_capabilities_built:
             from pydantic import BaseModel as _BaseModel
 
             from agentpool_config.capabilities import (
@@ -1144,15 +1179,16 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if cap is None:
                     continue
                 if isinstance(cap, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
-                    tool_capabilities.append(cap.build())
+                    built = cap.build()
                 elif isinstance(cap, _BaseModel):
                     from typing import cast as _cast
 
-                    # Typed built-in config (LoopDetectionCapabilityConfig, etc.)
-                    tool_capabilities.append(build_capability(_cast(Any, cap)))
+                    built = build_capability(_cast(Any, cap))
                 else:
-                    # Pre-instantiated AbstractCapability
-                    tool_capabilities.append(cap)
+                    built = cap
+                tool_capabilities.append(built)
+                self._external_capabilities.append(built)
+                self._config_capabilities_built.append(built)
 
         # ------------------------------------------------------------------
         # Model capability resolution — resolve ModelCapabilities for
@@ -1174,13 +1210,20 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
             for i, cap in enumerate(tool_capabilities):
                 if isinstance(cap, ModalityFilterCapability):
-                    tool_capabilities[i] = ModalityFilterCapability(
+                    populated = ModalityFilterCapability(
                         capabilities=resolved_caps,
                         image_strategy=cap.image_strategy,
                         audio_strategy=cap.audio_strategy,
                         video_strategy=cap.video_strategy,
                         document_strategy=cap.document_strategy,
                     )
+                    tool_capabilities[i] = populated
+                    # Also replace in _external_capabilities so listing
+                    # endpoints see the populated instance.
+                    for j, ext_cap in enumerate(self._external_capabilities):
+                        if ext_cap is cap:
+                            self._external_capabilities[j] = populated
+                            break
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:
