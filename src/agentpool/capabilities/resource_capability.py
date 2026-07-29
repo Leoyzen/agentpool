@@ -17,7 +17,7 @@ Tools exposed:
 from __future__ import annotations
 
 import base64
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated
 
 import logfire
 from pydantic import Field
@@ -128,11 +128,9 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
         """Extract the ``AgentContext`` from the run context deps.
 
-        In production, ``ctx.deps`` is ``agents.context.AgentContext`` (the
-        PydanticAI runtime context). Our ``capabilities.agent_context.AgentContext``
-        is stored at ``deps.data``, set by ``NativeTurn`` (turn.py:
-        ``agent_deps.data = run_ctx.deps``). In tests, deps may be directly
-        our ``AgentContext``.
+        Delegates to the shared ``resolve_agent_context_from_deps`` utility
+        which handles both the production path (``RuntimeAgentContext.data``)
+        and the test path (direct ``AgentContext``).
 
         Args:
             ctx: The pydantic-ai run context.
@@ -143,29 +141,9 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         Raises:
             RuntimeError: If deps is None or AgentContext is not found.
         """
-        from agentpool.agents.context import AgentContext as RuntimeAgentContext
-        from agentpool.capabilities.agent_context import AgentContext
+        from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
-        deps = ctx.deps
-        if deps is None:
-            msg = "ResourceCapability requires AgentContext as deps. Got: None"
-            raise RuntimeError(msg)
-        # Production path: deps is RuntimeAgentContext, M2 AgentContext at .data
-        if isinstance(deps, RuntimeAgentContext):
-            inner = deps.data
-            if inner is None:
-                msg = "ResourceCapability requires AgentContext at deps.data. Got: None"
-                raise RuntimeError(msg)
-            return cast(AgentContext, inner)
-        # Test path: deps is directly our AgentContext
-        if isinstance(deps, AgentContext):
-            return deps
-        msg = (
-            "ResourceCapability requires AgentContext as deps with an "
-            "'extension_registry' field. "
-            f"Got: {type(deps).__name__}"
-        )
-        raise RuntimeError(msg)
+        return resolve_agent_context_from_deps(ctx.deps, capability_name="ResourceCapability")
 
     @staticmethod
     def _make_scope(agent_ctx: AgentContext) -> Scope:

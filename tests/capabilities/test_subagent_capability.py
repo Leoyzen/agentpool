@@ -297,3 +297,14 @@ async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
         RuntimeError, match=r"SubagentCapability requires AgentContext at deps\.data\. Got: None"
     ):
         await SubagentCapability.get_available_agents(ctx)
+
+
+async def test_resolve_agent_context_neither_type() -> None:
+    """_resolve_agent_context raises RuntimeError for unknown deps type."""
+    ctx = MagicMock()
+    ctx.deps = object()
+
+    with pytest.raises(
+        RuntimeError, match=r"SubagentCapability requires AgentContext as deps\. Got: object"
+    ):
+        await SubagentCapability.get_available_agents(ctx)

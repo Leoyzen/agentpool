@@ -956,6 +956,18 @@ async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
         await cap.list_resources(ctx)
 
 
+async def test_resolve_agent_context_neither_type() -> None:
+    """_resolve_agent_context raises RuntimeError for unknown deps type."""
+    ctx = MagicMock()
+    ctx.deps = object()
+
+    cap = ResourceCapability()
+    with pytest.raises(
+        RuntimeError, match=r"ResourceCapability requires AgentContext as deps\. Got: object"
+    ):
+        await cap.list_resources(ctx)
+
+
 async def test_list_resources_providers_return_empty() -> None:
     """list_resources returns 'No resources available.' when providers return empty lists."""
     ra = FakeResourceAccess(resources=[])

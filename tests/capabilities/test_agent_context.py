@@ -247,3 +247,60 @@ def test_agent_context_team_mode_config_accepts_instance() -> None:
     assert ctx.team_mode_config is not None
     assert ctx.team_mode_config.enabled is True
     assert "translator" in ctx.team_mode_config.member_eligible
+
+
+# =============================================================================
+# resolve_agent_context_from_deps utility tests
+# =============================================================================
+
+
+def test_resolve_agent_context_from_deps_direct() -> None:
+    """resolve_agent_context_from_deps returns deps when it is directly an AgentContext."""
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
+
+    agent_ctx = _make_agent_context()
+    result = resolve_agent_context_from_deps(agent_ctx)
+    assert result is agent_ctx
+
+
+def test_resolve_agent_context_from_deps_runtime_context() -> None:
+    """resolve_agent_context_from_deps unwraps .data from RuntimeAgentContext."""
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
+
+    agent_ctx = _make_agent_context()
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = agent_ctx
+
+    result = resolve_agent_context_from_deps(runtime_ctx)
+    assert result is agent_ctx
+
+
+def test_resolve_agent_context_from_deps_none() -> None:
+    """resolve_agent_context_from_deps raises RuntimeError when deps is None."""
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
+
+    with pytest.raises(RuntimeError, match=r"TestCap requires AgentContext as deps\. Got: None"):
+        resolve_agent_context_from_deps(None, capability_name="TestCap")
+
+
+def test_resolve_agent_context_from_deps_runtime_ctx_none_data() -> None:
+    """resolve_agent_context_from_deps raises RuntimeError when .data is None."""
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
+
+    runtime_ctx = RuntimeAgentContext(node=MagicMock())
+    runtime_ctx.data = None
+
+    with pytest.raises(
+        RuntimeError, match=r"TestCap requires AgentContext at deps\.data\. Got: None"
+    ):
+        resolve_agent_context_from_deps(runtime_ctx, capability_name="TestCap")
+
+
+def test_resolve_agent_context_from_deps_neither_type() -> None:
+    """resolve_agent_context_from_deps raises RuntimeError for unknown deps type."""
+    from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
+
+    with pytest.raises(RuntimeError, match=r"TestCap requires AgentContext as deps\. Got: str"):
+        resolve_agent_context_from_deps("not a context", capability_name="TestCap")
