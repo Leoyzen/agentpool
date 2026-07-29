@@ -65,7 +65,7 @@ Everything is a MessageNode - enabling seamless composition:
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/phil65/agentpool/blob/main/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/Million-mo/agentpool/blob/main/LICENSE) for details.
 
 ## Documentation
 

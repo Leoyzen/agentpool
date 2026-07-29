@@ -4,7 +4,7 @@
 [![Package status](https://img.shields.io/pypi/status/agentpool.svg)](https://pypi.org/project/agentpool/)
 [![Monthly downloads](https://img.shields.io/pypi/dm/agentpool.svg)](https://pypi.org/project/agentpool/)
 [![Python version](https://img.shields.io/pypi/pyversions/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Github Stars](https://img.shields.io/github/stars/phil65/agentpool)](https://github.com/phil65/agentpool/stars)
+[![Github Stars](https://img.shields.io/github/stars/Million-mo/agentpool)](https://github.com/Million-mo/agentpool/stars)
 
 **A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
 

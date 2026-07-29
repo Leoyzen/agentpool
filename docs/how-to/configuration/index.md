@@ -225,7 +225,7 @@ AgentPool supports UPaths (universal-pathlib) for `INHERIT`, allowing pointing t
 You can get IDE linter support by adding this line at the top of your YAML:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentpool/refs/heads/main/schema/config-schema.json
 ```
 
 !!! note

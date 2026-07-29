@@ -88,4 +88,4 @@ Each example includes:
 - **Code examples**: Python code demonstrating usage patterns
 - **Explanations**: Detailed descriptions of concepts and approaches
 
-You can find the full source code for these examples in the [GitHub repository](https://github.com/phil65/agentpool/tree/main/examples).
+You can find the full source code for these examples in the [GitHub repository](https://github.com/Million-mo/agentpool/tree/main/examples).

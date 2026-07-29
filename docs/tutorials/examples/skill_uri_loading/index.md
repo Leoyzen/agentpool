@@ -127,7 +127,7 @@ See [Skill URI Usage](../../how-to/configuration/skill-uri-usage.md) for complet
 ### `config.yml`
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentpool/refs/heads/main/schema/config-schema.json
 # Example: Loading Skills by URI
 #
 # This example demonstrates how to load skills using the skill:// URI scheme.

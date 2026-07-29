@@ -857,7 +857,7 @@ def context_aware_sync(
 
 - [pydantic-ai History Processors Guide](https://ai.pydantic.dev/history-processors/)
 - [pydantic-ai RunContext API](https://ai.pydantic.dev/run-context/)
-- [AgentPool Configuration Docs](https://phil65.github.io/agentpool/YAML%20Configuration/session_configuration/)
+- [AgentPool Configuration Docs](https://million-mo.github.io/agentpool/YAML%20Configuration/session_configuration/)
 
 ### Appendix
 

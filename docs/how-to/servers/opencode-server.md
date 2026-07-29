@@ -249,7 +249,7 @@ Current limitations:
 - `fork` not yet implemented
 - Symbol search returns empty (LSP not integrated)
 
-See [ENDPOINTS.md](https://github.com/phil65/agentpool/blob/main/src/agentpool_server/opencode_server/ENDPOINTS.md) for full implementation status.
+See [ENDPOINTS.md](https://github.com/Million-mo/agentpool/blob/main/src/agentpool_server/opencode_server/ENDPOINTS.md) for full implementation status.
 
 ## See Also
 
