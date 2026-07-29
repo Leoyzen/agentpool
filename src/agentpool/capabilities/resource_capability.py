@@ -16,22 +16,19 @@ Tools exposed:
 
 from __future__ import annotations
 
-import base64
 from typing import TYPE_CHECKING, Annotated
 
 import logfire
 from pydantic import Field
-from pydantic_ai import BinaryContent, ToolReturn
+from pydantic_ai import ToolReturn
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.tools import AgentDepsT, RunContext
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.capabilities.extension_registry import Scope, ScopeLevel
 from agentpool.capabilities.resource_protocols import (
-    BlobResourceContent,
     CompletionArgument,
     CompletionResult,
-    TextResourceContent,
 )
 
 
@@ -288,60 +285,25 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             ctx: The run context providing agent dependencies.
             uri: Resource URI to read.
         """
+        from agentpool.capabilities.resource_resolver import resolve_resource_content
+
         agent_ctx = self._resolve_agent_context(ctx)
         registry = agent_ctx.extension_registry
         if registry is None:
             return ToolReturn(return_value=f"Resource not found: {uri}")
 
         scope = self._make_scope(agent_ctx)
+        resource_caps = registry.get_resource_access(scope)
+        skill_caps = registry.get_skill_resources(scope)
 
-        # Route skill:// URIs to SkillResource providers
-        if uri.startswith("skill://"):
-            skill_name = self._extract_skill_name(uri)
-            for skill_cap in registry.get_skill_resources(scope):
-                try:
-                    exists = await skill_cap.skill_exists(skill_name)
-                except Exception:  # noqa: BLE001
-                    continue
-                if not exists:
-                    continue
-                content = await skill_cap.read_skill(skill_name)
-                if content is None:
-                    continue
-                return ToolReturn(
-                    return_value=self._truncate_text(content),
-                    content=[self._truncate_text(content)],
-                )
+        content = await resolve_resource_content(uri, resource_caps, skill_caps)
+        if content is None:
             return ToolReturn(return_value=f"Resource not found: {uri}")
 
-        # Route other URIs to ResourceAccess providers
-        for resource_cap in registry.get_resource_access(scope):
-            try:
-                contents = await resource_cap.read_resource(uri)
-            except Exception:  # noqa: BLE001
-                continue
-            if contents is None:
-                continue
-            parts: list[str | BinaryContent] = []
-            for c in contents:
-                if isinstance(c, TextResourceContent):
-                    parts.append(self._truncate_text(c.text))
-                elif isinstance(c, BlobResourceContent):
-                    media_type = c.mime_type or "application/octet-stream"
-                    parts.append(
-                        BinaryContent(
-                            data=base64.b64decode(c.blob),
-                            media_type=media_type,
-                        )
-                    )
-            if parts:
-                # Join text parts for return_value; BinaryContent parts
-                # go in content for multi-modal delivery.
-                text_parts = [p for p in parts if isinstance(p, str)]
-                return_value = "\n".join(text_parts) if text_parts else ""
-                return ToolReturn(return_value=return_value, content=parts)
-
-        return ToolReturn(return_value=f"Resource not found: {uri}")
+        # Bridge list[UserContent] → ToolReturn
+        text_parts = [p for p in content if isinstance(p, str)]
+        return_value = "\n".join(text_parts) if text_parts else ""
+        return ToolReturn(return_value=return_value, content=content)
 
     @logfire.instrument("capability.resource_capability.resource_exists")
     async def resource_exists(

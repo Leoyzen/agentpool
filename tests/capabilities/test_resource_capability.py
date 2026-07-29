@@ -332,10 +332,16 @@ async def test_read_resource_blob() -> None:
 
     assert isinstance(result, ToolReturn)
     assert result.content is not None
-    binary = result.content[0]
+    # XML wrapper: [opening_str, BinaryContent, closing_str]
+    assert len(result.content) == 3
+    assert isinstance(result.content[0], str)
+    assert "<resource uri=" in result.content[0]
+    binary = result.content[1]
     assert isinstance(binary, BinaryContent)
     assert binary.data == raw_data
     assert binary.media_type == "image/png"
+    assert isinstance(result.content[2], str)
+    assert "</resource>" in result.content[2]
 
 
 async def test_read_resource_not_found() -> None:
@@ -605,9 +611,14 @@ async def test_read_resource_blob_default_mime_type() -> None:
 
     assert isinstance(result, ToolReturn)
     assert result.content is not None
-    binary = result.content[0]
+    # XML wrapper: [opening_str, BinaryContent, closing_str]
+    assert len(result.content) == 3
+    assert isinstance(result.content[0], str)
+    binary = result.content[1]
     assert isinstance(binary, BinaryContent)
     assert binary.media_type == "application/octet-stream"
+    assert isinstance(result.content[2], str)
+    assert "</resource>" in result.content[2]
 
 
 def test_extract_skill_name() -> None:
@@ -753,7 +764,8 @@ async def test_read_resource_text_no_truncation_at_limit() -> None:
 
     assert isinstance(result, ToolReturn)
     assert "[truncated" not in result.return_value
-    assert result.return_value == text
+    # return_value is the joined text parts; with XML wrapper it contains the full text
+    assert text in result.return_value
 
 
 async def test_read_resource_skill_truncation() -> None:
@@ -847,11 +859,16 @@ async def test_read_resource_mixed_text_and_blob() -> None:
 
     assert isinstance(result, ToolReturn)
     assert result.content is not None
-    assert len(result.content) == 2
+    # XML wrapper: [text_wrapped_str, opening_str, BinaryContent, closing_str]
+    assert len(result.content) == 4
     assert isinstance(result.content[0], str)
-    assert result.content[0] == "text part"
-    assert isinstance(result.content[1], BinaryContent)
-    assert result.content[1].data == raw_data
+    assert "text part" in result.content[0]
+    assert "<resource uri=" in result.content[0]
+    assert isinstance(result.content[1], str)
+    assert isinstance(result.content[2], BinaryContent)
+    assert result.content[2].data == raw_data
+    assert isinstance(result.content[3], str)
+    assert "</resource>" in result.content[3]
 
 
 async def test_resource_exists_multiple_providers_first_false_second_true() -> None:

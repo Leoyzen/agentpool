@@ -20,7 +20,6 @@ from pydantic_ai import (
 from agentpool import log
 from agentpool.messaging.messages import ChatMessage
 from agentpool.sessions.models import SessionData
-from agentpool.tools.exceptions import ToolError
 from agentpool.utils import identifiers as identifier
 from agentpool.utils.pydantic_ai_helpers import safe_args_as_dict, to_user_content_or_path_ref
 from agentpool.utils.time_utils import datetime_to_ms, ms_to_datetime
@@ -130,25 +129,42 @@ def _get_input_from_state(state: ToolState, *, convert_params: bool = False) -> 
     return _convert_params_for_ui(state.input) if convert_params else state.input
 
 
-async def _resolve_mcp_resource(source: ResourceSource, agent: BaseAgent[Any, Any]) -> str | None:
-    """Resolve an MCP resource and return its content as text (or None if cant be read)."""
-    try:
-        resource = await agent.get_resource(source.uri)
-    except ToolError:
-        logger.warning("MCP resource not found", client_name=source.client_name, uri=source.uri)
-        return None
-    try:
-        contents = await resource.read()
-        return "\n".join(contents) if contents else None
-    except Exception:
-        logger.exception(
-            "Failed to read MCP resource", client_name=source.client_name, uri=source.uri
+async def _resolve_resource(
+    source: ResourceSource, agent: BaseAgent[Any, Any], session_id: str
+) -> list[UserContent] | None:
+    """Resolve a resource and return its content as a list of UserContent items.
+
+    Uses the agent's ``ExtensionRegistry`` (via ``host_context``) with a
+    session-scoped ``Scope`` to find ``ResourceAccess`` and ``SkillResource``
+    providers. Falls back to ``agent._all_capabilities`` if the registry
+    is unavailable.
+
+    Returns None if the resource is not found.
+    """
+    from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+    from agentpool.capabilities.resource_resolver import resolve_resource_content
+
+    scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
+    host_ctx = agent.host_context
+    if host_ctx is None:
+        raise RuntimeError(f"Agent host_context is None, cannot resolve resource {source.uri!r}")
+    registry = host_ctx.extension_registry
+    if registry is None:
+        raise RuntimeError(
+            f"Agent extension_registry is None, cannot resolve resource {source.uri!r}"
         )
-        return None
+    resource_caps = registry.get_resource_access(scope)
+    skill_caps = registry.get_skill_resources(scope)
+
+    content = await resolve_resource_content(source.uri, resource_caps, skill_caps)
+    if content is None:
+        logger.warning("Resource not found", client_name=source.client_name, uri=source.uri)
+    return content
 
 
 async def extract_user_prompt_from_parts(
     parts: list[PartInput],
+    session_id: str,
     fs: AsyncFileSystem | None = None,
     agent: BaseAgent[Any, Any] | None = None,
 ) -> Sequence[UserContent | PathReference]:
@@ -166,6 +182,8 @@ async def extract_user_prompt_from_parts(
         parts: List of OpenCode message input parts
         fs: Optional async filesystem for PathReference resolution
         agent: Optional agent for resolving MCP resources
+        session_id: Optional session ID for scoped resource resolution via
+            ExtensionRegistry. When empty, falls back to agent._all_capabilities.
 
     Returns:
         Either a simple string (text-only) or a list of UserContent/PathReference items
@@ -178,9 +196,9 @@ async def extract_user_prompt_from_parts(
             case TextPartInput(text=text):
                 result.append(text)
             case FilePartInput(source=ResourceSource() as resource) if agent is not None:
-                content = await _resolve_mcp_resource(resource, agent)
+                content = await _resolve_resource(resource, agent, session_id=session_id)
                 if content is not None:
-                    result.append(content)
+                    result.extend(content)
             case FilePartInput(mime=mime, url=url, filename=filename):
                 file_content = to_user_content_or_path_ref(mime, url, filename, fs=fs)
                 result.append(file_content)
