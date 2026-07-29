@@ -8,6 +8,7 @@ exceptions to the caller.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Literal
 import uuid
@@ -262,50 +263,129 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
 
         async def viking_ls(
             ctx: RunContext[Any],
-            uri: str,
+            uri: str = "",
             recursive: bool = False,
+            show_abstract: bool = False,
         ) -> str:
             """List contents of a Viking directory.
 
             Args:
                 uri: Full viking:// URI of the directory to list.
                 recursive: Whether to list recursively into subdirectories.
+                show_abstract: If True, fetch and display L0 abstract for each
+                    directory. Costs extra API calls but helps judge directory
+                    relevance.
 
             Returns:
-                Entries with ``[dir]``/``[file]`` markers.
+                Entries with ``[dir]``/``[file]`` markers. When
+                ``show_abstract=True``, directories include an L0 abstract
+                after a dash separator.
             """
             try:
                 client = await cap._ensure_client()
                 entries = await client.ls(uri, simple=False, recursive=recursive)
-                return format_ls_entries(entries if isinstance(entries, list) else [])
+                entry_list = entries if isinstance(entries, list) else []
+
+                if show_abstract and entry_list:
+                    # Fetch abstracts for directories only
+                    async def _safe_abstract(entry_uri: str) -> str:
+                        try:
+                            return str(await client.abstract(entry_uri) or "")
+                        except Exception:
+                            return ""
+
+                    abstract_uris: list[str] = []
+                    abstract_tasks: list[Any] = []
+                    for entry in entry_list:
+                        if isinstance(entry, dict):
+                            is_dir = entry.get("type") in (
+                                "directory",
+                                "dir",
+                                "folder",
+                            ) or entry.get("isDir")
+                            if is_dir:
+                                e_uri = str(entry.get("uri") or "")
+                                if e_uri:
+                                    abstract_uris.append(e_uri)
+                                    abstract_tasks.append(_safe_abstract(e_uri))
+
+                    if abstract_tasks:
+                        abstracts = await asyncio.gather(*abstract_tasks)
+                        abstract_map: dict[str, str] = {}
+                        for e_uri, ab in zip(abstract_uris, abstracts, strict=False):
+                            if isinstance(ab, str) and ab.strip():
+                                abstract_map[e_uri] = ab.strip()
+
+                        if abstract_map:
+                            lines: list[str] = []
+                            for entry in entry_list:
+                                if isinstance(entry, dict):
+                                    name = entry.get("name", entry.get("uri", "?"))
+                                    entry_type = entry.get("type", "file")
+                                    is_dir = entry_type in (
+                                        "directory",
+                                        "dir",
+                                        "folder",
+                                    ) or entry.get("isDir")
+                                    marker = "[dir]" if is_dir else "[file]"
+                                    e_uri = str(entry.get("uri") or "")
+                                    ab = abstract_map.get(e_uri, "")
+                                    if ab:
+                                        lines.append(f"{marker} {name} — {ab}")
+                                    else:
+                                        lines.append(f"{marker} {name}")
+                                else:
+                                    lines.append(f"[file] {entry}")
+                            return "\n".join(lines)
+
+                return format_ls_entries(entry_list)
             except Exception as e:
                 return f"viking_ls error: {e}"
 
         async def viking_read(
             ctx: RunContext[Any],
             uris: str | list[str],
+            level: str = "read",
             line: int = 1,
             limit: int = -1,
         ) -> str:
-            """Read content from one or more Viking URIs.
+            """Read content from one or more Viking URIs with tiered loading.
 
             Args:
                 uris: A single viking:// URI or a list of URIs to read.
-                line: Starting line number (1-indexed).
-                limit: Maximum number of lines to read (-1 for all).
+                level: Content depth — "abstract" (L0, ~100 tokens summary),
+                    "overview" (L1, ~2k tokens structure), or "read" (L2, full
+                    content). Default "read" for full content. Use "abstract"
+                    for quick relevance checks or "overview" for planning without
+                    loading full content.
+                line: Starting line number (1-indexed, only applies when
+                    level="read").
+                limit: Maximum number of lines to read (-1 for all, only
+                    applies when level="read").
 
             Returns:
-                File content with line number prefixes. Multiple files are
-                separated by ``=== {uri} ===`` headers.
+                File content with line number prefixes (for level="read").
+                Multiple files are separated by ``=== {uri} ===`` headers.
             """
             try:
                 client = await cap._ensure_client()
-                offset = line - 1  # SDK offset is 0-indexed
                 uri_list = [uris] if isinstance(uris, str) else uris
                 sections: list[str] = []
                 for u in uri_list:
-                    content = await client.read(u, offset=offset, limit=limit)
-                    numbered = add_line_numbers(content, start_line=line)
+                    if level == "abstract":
+                        content = await client.abstract(u)
+                    elif level == "overview":
+                        content = await client.overview(u)
+                    else:
+                        offset = line - 1  # SDK offset is 0-indexed
+                        content = await client.read(u, offset=offset, limit=limit)
+
+                    if level == "read":
+                        numbered = add_line_numbers(str(content), start_line=line)
+                    else:
+                        # For abstract/overview, return content without line numbers
+                        numbered = str(content)
+
                     if len(uri_list) > 1:
                         sections.append(f"=== {u} ===\n{numbered}")
                     else:

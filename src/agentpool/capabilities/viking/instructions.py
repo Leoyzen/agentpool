@@ -112,4 +112,17 @@ Use `viking_ls` to discover available URIs when unsure.
 
 Use links to express relationships between entities.
 Use tags for metadata and categorization.
+
+## Tiered Content Loading (L0/L1/L2)
+
+Viking processes all content into three tiers:
+- **L0 (abstract)**: One-sentence summary (~100 tokens). Use `viking_read(level="abstract")` for quick relevance checks.
+- **L1 (overview)**: Structure and key points (~2k tokens). Use `viking_read(level="overview")` for planning.
+- **L2 (read)**: Full original content. Use `viking_read(level="read")` when you need complete details.
+
+**Strategy**: Start with L0 abstracts to identify relevant resources, then drill down to L1 overview for promising hits, and only load L2 full content when necessary. This minimizes token consumption.
+
+When listing resources, the description field contains the L0 abstract for each resource.
+
+When using @ mention to reference a resource, the system returns L1 overview by default (configurable via `resource_read_level`). Use `viking_read(uri, level="read")` to access the full content if needed.
 """

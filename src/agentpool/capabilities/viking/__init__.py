@@ -16,8 +16,9 @@ Configuration is via ``VikingCapabilityConfig`` in
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic_ai.capabilities import AbstractCapability
@@ -99,6 +100,12 @@ class VikingCapability(AbstractCapability[Any]):
     """File extensions to include in ``list_resources()``. Files with
     extensions not in this set are skipped. Set to an empty tuple to
     include all files regardless of extension."""
+    resource_read_level: Literal["abstract", "overview", "read"] = "overview"
+    """Default content level for ``read_resource()`` (ResourceAccess Protocol).
+    ``"abstract"`` (L0, ~100 tokens), ``"overview"`` (L1, ~2k tokens, default),
+    or ``"read"`` (L2, full content). When ``read_resource()`` is called (e.g.
+    via @ mention in OpenCode), this controls how much content is returned.
+    Falls back to L2 if the requested level is unavailable."""
     model_capabilities: ModelCapabilities | None = None
     """Resolved model capabilities for multimodal bridge. Set by the
     agent factory after capability construction."""
@@ -215,6 +222,7 @@ class VikingCapability(AbstractCapability[Any]):
             enable_link=self.enable_link,
             enable_memory=self.enable_memory,
             resource_file_extensions=self.resource_file_extensions,
+            resource_read_level=self.resource_read_level,
             model_capabilities=self.model_capabilities,
             _client=self._client,
             _owns_client=False,
@@ -442,6 +450,25 @@ class VikingCapability(AbstractCapability[Any]):
                         mime_type=mime_type,
                     )
                 )
+
+            # Enrich with L0 abstracts — batch-call client.abstract() for each
+            # resource. If abstracts fail, keep the path-based description.
+            if resources:
+
+                async def _safe_abstract(client: Any, r_uri: str) -> str:
+                    try:
+                        return str(await client.abstract(r_uri) or "")
+                    except Exception:
+                        return ""
+
+                abstracts = await asyncio.gather(
+                    *[_safe_abstract(client, r.uri) for r in resources],
+                    return_exceptions=True,
+                )
+                for i, ab in enumerate(abstracts):
+                    if isinstance(ab, str) and ab.strip():
+                        resources[i] = replace(resources[i], description=ab.strip())
+
             return resources
         except Exception:
             return []
@@ -450,6 +477,10 @@ class VikingCapability(AbstractCapability[Any]):
         self, uri: str
     ) -> list[TextResourceContent | BlobResourceContent] | None:
         """Read a Viking resource by URI.
+
+        Uses the configured ``resource_read_level`` to determine content
+        depth (L0 abstract, L1 overview, or L2 full content). Falls back
+        to L2 (``client.read``) if the requested level is unavailable.
 
         Args:
             uri: The Viking URI of the resource to read.
@@ -460,7 +491,21 @@ class VikingCapability(AbstractCapability[Any]):
         """
         try:
             client = await self._ensure_client()
-            content = await client.read(uri)
+            # Use configured read level (L0/L1/L2), fallback to L2 if unavailable
+            content: str | None = None
+            if self.resource_read_level == "abstract":
+                try:
+                    content = await client.abstract(uri)
+                except Exception:
+                    content = await client.read(uri)  # fallback to L2
+            elif self.resource_read_level == "overview":
+                try:
+                    content = await client.overview(uri)
+                except Exception:
+                    content = await client.read(uri)  # fallback to L2
+            else:
+                content = await client.read(uri)
+
             if not content:
                 return None
 

@@ -46,6 +46,8 @@ def mock_client() -> AsyncMock:
     client.glob = AsyncMock(return_value={"matches": []})
     client.ls = AsyncMock(return_value=[])
     client.read = AsyncMock(return_value="file content")
+    client.abstract = AsyncMock(return_value="abstract summary")
+    client.overview = AsyncMock(return_value="overview content")
     client.write = AsyncMock(return_value={"status": "ok"})
     client.mkdir = AsyncMock(return_value=None)
     client.rm = AsyncMock(return_value=None)
@@ -118,6 +120,7 @@ class TestVikingCapabilityConfig:
         assert cfg.multimodal_bridge is False
         assert cfg.uploads_uri is None
         assert cfg.public_download_base_url is None
+        assert cfg.resource_read_level == "overview"
 
     def test_mode_retrieve(self) -> None:
         """Mode 'retrieve' is accepted."""
@@ -324,6 +327,7 @@ class TestForRun:
         assert copy_cap.multimodal_bridge == cap.multimodal_bridge
         assert copy_cap.uploads_uri == cap.uploads_uri
         assert copy_cap.public_download_base_url == cap.public_download_base_url
+        assert copy_cap.resource_read_level == cap.resource_read_level
 
     @pytest.mark.asyncio
     async def test_for_run_copy_does_not_close_parent_client(self, mock_client: AsyncMock) -> None:
@@ -1877,6 +1881,7 @@ class TestResourceAccessProtocol:
     ) -> None:
         # First call: top-level ls returns files + one directory
         # Second call: recursive ls of the directory returns more files
+        # abstract() calls enrich descriptions with L0 abstracts
         mock_client.ls = AsyncMock(
             side_effect=[
                 [
@@ -1889,15 +1894,19 @@ class TestResourceAccessProtocol:
                 ],
             ]
         )
+        mock_client.abstract = AsyncMock(return_value="L0 abstract")
         result = await viking_cap.list_resources()
         assert len(result) == 3  # only text files, no directories
         assert result[0].name == "doc1.md"
         assert result[0].uri == "viking://resources/doc1.md"
         assert result[0].mime_type == "text/markdown"
+        # Descriptions enriched with L0 abstracts
+        assert result[0].description == "L0 abstract"
         assert result[1].name == "doc2.txt"
         assert result[1].mime_type == "text/plain"
+        assert result[1].description == "L0 abstract"
         assert result[2].name == "doc3.md"
-        assert result[2].description == "subdir/doc3.md"
+        assert result[2].description == "L0 abstract"
 
     async def test_list_resources_empty(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
@@ -1923,18 +1932,20 @@ class TestResourceAccessProtocol:
     async def test_read_resource_success(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        mock_client.read = AsyncMock(return_value="resource content here")
+        # Default resource_read_level is "overview", so overview() is called
+        mock_client.overview = AsyncMock(return_value="resource content here")
         result = await viking_cap.read_resource("viking://resources/doc.md")
         assert result is not None
         assert len(result) == 1
         assert result[0].text == "resource content here"
         assert result[0].uri == "viking://resources/doc.md"
         assert result[0].mime_type == "text/markdown"
+        mock_client.overview.assert_called_once_with("viking://resources/doc.md")
 
     async def test_read_resource_non_markdown(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        mock_client.read = AsyncMock(return_value="plain text")
+        mock_client.overview = AsyncMock(return_value="plain text")
         result = await viking_cap.read_resource("viking://resources/doc.txt")
         assert result is not None
         assert result[0].mime_type is None
@@ -1942,13 +1953,15 @@ class TestResourceAccessProtocol:
     async def test_read_resource_empty(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
-        mock_client.read = AsyncMock(return_value="")
+        mock_client.overview = AsyncMock(return_value="")
         result = await viking_cap.read_resource("viking://resources/missing.md")
         assert result is None
 
     async def test_read_resource_error(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
+        # Both overview and read fail
+        mock_client.overview = AsyncMock(side_effect=RuntimeError("not found"))
         mock_client.read = AsyncMock(side_effect=RuntimeError("not found"))
         result = await viking_cap.read_resource("viking://resources/missing.md")
         assert result is None
@@ -2254,3 +2267,421 @@ class TestMultimodalBridge:
         copy = await cap.for_run(MagicMock())
         assert copy.model_capabilities is caps
         assert copy.multimodal_bridge is True
+
+
+# ---------------------------------------------------------------------------
+# Tiered Loading Tests (L0/L1/L2)
+# ---------------------------------------------------------------------------
+
+
+class TestTieredLoadingVikingRead:
+    """Tests for viking_read level parameter (L0/L1/L2)."""
+
+    @pytest.mark.asyncio
+    async def test_viking_read_level_abstract(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_read with level='abstract' calls client.abstract()."""
+        mock_client.abstract = AsyncMock(return_value="Short summary")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://doc.md", level="abstract")
+
+        mock_client.abstract.assert_called_once_with("viking://doc.md")
+        mock_client.read.assert_not_called()
+        assert "Short summary" in result
+        # Abstracts don't get line numbers
+        assert "\u2502" not in result
+
+    @pytest.mark.asyncio
+    async def test_viking_read_level_overview(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_read with level='overview' calls client.overview()."""
+        mock_client.overview = AsyncMock(return_value="Overview content")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://doc.md", level="overview")
+
+        mock_client.overview.assert_called_once_with("viking://doc.md")
+        mock_client.read.assert_not_called()
+        assert "Overview content" in result
+        # Overviews don't get line numbers
+        assert "\u2502" not in result
+
+    @pytest.mark.asyncio
+    async def test_viking_read_level_read_default(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_read with default level='read' calls client.read()."""
+        mock_client.read = AsyncMock(return_value="full content")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://doc.md")
+
+        mock_client.read.assert_called_once()
+        mock_client.abstract.assert_not_called()
+        mock_client.overview.assert_not_called()
+        # Read level gets line numbers
+        assert "\u2502" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_read_abstract_multi_uri(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_read with level='abstract' and multiple URIs."""
+        mock_client.abstract = AsyncMock(return_value="summary")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris=["viking://a.md", "viking://b.md"], level="abstract")
+
+        assert mock_client.abstract.call_count == 2
+        assert "=== viking://a.md ===" in result
+        assert "=== viking://b.md ===" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_read_abstract_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_read with level='abstract' handles errors."""
+        mock_client.abstract = AsyncMock(side_effect=RuntimeError("not available"))
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://doc.md", level="abstract")
+
+        assert "viking_read error: not available" in result
+
+
+class TestTieredLoadingReadResource:
+    """Tests for read_resource with resource_read_level config."""
+
+    @pytest.mark.asyncio
+    async def test_read_resource_level_overview(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """read_resource with default resource_read_level='overview' calls overview()."""
+        mock_client.overview = AsyncMock(return_value="overview text")
+        result = await viking_cap.read_resource("viking://resources/doc.md")
+
+        assert result is not None
+        assert result[0].text == "overview text"
+        mock_client.overview.assert_called_once_with("viking://resources/doc.md")
+        mock_client.read.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_read_resource_level_abstract(self, mock_client: AsyncMock) -> None:
+        """read_resource with resource_read_level='abstract' calls abstract()."""
+        cap = VikingCapability(mode="all", resource_read_level="abstract")
+        cap._client = mock_client
+        mock_client.abstract = AsyncMock(return_value="abstract text")
+
+        result = await cap.read_resource("viking://resources/doc.md")
+
+        assert result is not None
+        assert result[0].text == "abstract text"
+        mock_client.abstract.assert_called_once_with("viking://resources/doc.md")
+        mock_client.read.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_read_resource_level_read(self, mock_client: AsyncMock) -> None:
+        """read_resource with resource_read_level='read' calls read()."""
+        cap = VikingCapability(mode="all", resource_read_level="read")
+        cap._client = mock_client
+        mock_client.read = AsyncMock(return_value="full content")
+
+        result = await cap.read_resource("viking://resources/doc.md")
+
+        assert result is not None
+        assert result[0].text == "full content"
+        mock_client.read.assert_called_once_with("viking://resources/doc.md")
+
+    @pytest.mark.asyncio
+    async def test_read_resource_overview_fallback_to_read(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """read_resource falls back to read() when overview() fails."""
+        mock_client.overview = AsyncMock(side_effect=RuntimeError("not available"))
+        mock_client.read = AsyncMock(return_value="fallback content")
+
+        result = await viking_cap.read_resource("viking://resources/doc.md")
+
+        assert result is not None
+        assert result[0].text == "fallback content"
+        mock_client.overview.assert_called_once()
+        mock_client.read.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_read_resource_abstract_fallback_to_read(self, mock_client: AsyncMock) -> None:
+        """read_resource with abstract level falls back to read() when abstract fails."""
+        cap = VikingCapability(mode="all", resource_read_level="abstract")
+        cap._client = mock_client
+        mock_client.abstract = AsyncMock(side_effect=RuntimeError("not available"))
+        mock_client.read = AsyncMock(return_value="fallback content")
+
+        result = await cap.read_resource("viking://resources/doc.md")
+
+        assert result is not None
+        assert result[0].text == "fallback content"
+        mock_client.abstract.assert_called_once()
+        mock_client.read.assert_called_once()
+
+
+class TestTieredLoadingListResources:
+    """Tests for list_resources with L0 abstract enrichment."""
+
+    @pytest.mark.asyncio
+    async def test_list_resources_with_abstracts(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """list_resources enriches descriptions with L0 abstracts."""
+        mock_client.ls = AsyncMock(
+            side_effect=[
+                [
+                    {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
+                ],
+            ]
+        )
+        mock_client.abstract = AsyncMock(return_value="This is the L0 abstract")
+        result = await viking_cap.list_resources()
+
+        assert len(result) == 1
+        assert result[0].description == "This is the L0 abstract"
+        mock_client.abstract.assert_called_once_with("viking://resources/doc1.md")
+
+    @pytest.mark.asyncio
+    async def test_list_resources_abstract_failure_keeps_path(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """list_resources keeps path-based description when abstract fails."""
+        mock_client.ls = AsyncMock(
+            side_effect=[
+                [
+                    {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
+                ],
+            ]
+        )
+        mock_client.abstract = AsyncMock(side_effect=RuntimeError("not available"))
+        result = await viking_cap.list_resources()
+
+        assert len(result) == 1
+        # Falls back to path-based description
+        assert result[0].description == "doc1.md"
+
+    @pytest.mark.asyncio
+    async def test_list_resources_empty_abstract_keeps_path(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """list_resources keeps path-based description when abstract is empty."""
+        mock_client.ls = AsyncMock(
+            side_effect=[
+                [
+                    {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
+                ],
+            ]
+        )
+        mock_client.abstract = AsyncMock(return_value="")
+        result = await viking_cap.list_resources()
+
+        assert len(result) == 1
+        assert result[0].description == "doc1.md"
+
+
+class TestTieredLoadingVikingLs:
+    """Tests for viking_ls with show_abstract parameter."""
+
+    @pytest.mark.asyncio
+    async def test_viking_ls_show_abstract(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_ls with show_abstract=True fetches abstracts for directories."""
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "chapters", "type": "directory", "uri": "viking://resources/chapters/"},
+                {"name": "file1.md", "type": "file", "uri": "viking://resources/file1.md"},
+            ]
+        )
+        mock_client.abstract = AsyncMock(return_value="Knowledge base about machines")
+        tools = build_tools(viking_cap)
+        ls_tool = _get_tool(tools, "viking_ls")
+
+        ctx = _make_ctx()
+        result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
+
+        mock_client.abstract.assert_called_once_with("viking://resources/chapters/")
+        assert "[dir] chapters" in result
+        assert "Knowledge base about machines" in result
+        assert "[file] file1.md" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_ls_show_abstract_no_dirs(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_ls with show_abstract=True and no directories doesn't call abstract."""
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "file1.md", "type": "file", "uri": "viking://resources/file1.md"},
+            ]
+        )
+        mock_client.abstract = AsyncMock(return_value="should not be called")
+        tools = build_tools(viking_cap)
+        ls_tool = _get_tool(tools, "viking_ls")
+
+        ctx = _make_ctx()
+        result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
+
+        mock_client.abstract.assert_not_called()
+        assert "[file] file1.md" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_ls_show_abstract_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_ls with show_abstract=True handles abstract errors gracefully."""
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "chapters", "type": "directory", "uri": "viking://resources/chapters/"},
+            ]
+        )
+        mock_client.abstract = AsyncMock(side_effect=RuntimeError("not available"))
+        tools = build_tools(viking_cap)
+        ls_tool = _get_tool(tools, "viking_ls")
+
+        ctx = _make_ctx()
+        result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
+
+        # Still shows the directory without abstract
+        assert "[dir] chapters" in result
+
+    @pytest.mark.asyncio
+    async def test_viking_ls_default_no_show_abstract(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """viking_ls without show_abstract doesn't call abstract."""
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "dir1", "type": "directory", "uri": "viking://resources/dir1/"},
+                {"name": "file1.md", "type": "file", "uri": "viking://resources/file1.md"},
+            ]
+        )
+        mock_client.abstract = AsyncMock(return_value="should not be called")
+        tools = build_tools(viking_cap)
+        ls_tool = _get_tool(tools, "viking_ls")
+
+        ctx = _make_ctx()
+        result = await ls_tool(ctx, uri="viking://resources/")
+
+        mock_client.abstract.assert_not_called()
+        assert "[dir] dir1" in result
+        assert "[file] file1.md" in result
+
+
+class TestTieredLoadingForRun:
+    """Tests that for_run() preserves resource_read_level."""
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_resource_read_level(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves resource_read_level='abstract'."""
+        cap = VikingCapability(mode="all", resource_read_level="abstract")
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.resource_read_level == "abstract"
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_resource_read_level_overview(
+        self, mock_client: AsyncMock
+    ) -> None:
+        """for_run() preserves resource_read_level='overview' (default)."""
+        cap = VikingCapability(mode="all")
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.resource_read_level == "overview"
+
+    @pytest.mark.asyncio
+    async def test_for_run_preserves_resource_read_level_read(self, mock_client: AsyncMock) -> None:
+        """for_run() preserves resource_read_level='read'."""
+        cap = VikingCapability(mode="all", resource_read_level="read")
+        cap._client = mock_client
+
+        ctx = _make_ctx()
+        copy_cap = await cap.for_run(ctx)
+
+        assert copy_cap.resource_read_level == "read"
+
+
+class TestTieredLoadingFormatSearchResults:
+    """Tests for format_search_results with Viking grouped format and abstracts."""
+
+    def test_format_search_results_viking_memories(self) -> None:
+        """format_search_results handles Viking's memories/resources/skills format."""
+        results = {
+            "memories": [{"uri": "viking://mem.md", "score": 0.9, "abstract": "test abstract"}]
+        }
+        formatted = format_search_results(results)
+        assert "viking://mem.md" in formatted
+        assert "test abstract" in formatted
+        assert "0.9000" in formatted
+
+    def test_format_search_results_viking_resources(self) -> None:
+        """format_search_results handles resources key."""
+        results = {"resources": [{"uri": "viking://res.md", "abstract": "resource abstract"}]}
+        formatted = format_search_results(results)
+        assert "viking://res.md" in formatted
+        assert "resource abstract" in formatted
+
+    def test_format_search_results_viking_skills(self) -> None:
+        """format_search_results handles skills key."""
+        results = {"skills": [{"uri": "viking://skill.md", "abstract": "skill abstract"}]}
+        formatted = format_search_results(results)
+        assert "viking://skill.md" in formatted
+        assert "skill abstract" in formatted
+
+    def test_format_search_results_viking_combined(self) -> None:
+        """format_search_results combines memories + resources + skills."""
+        results = {
+            "memories": [{"uri": "viking://mem.md", "abstract": "mem abstract"}],
+            "resources": [{"uri": "viking://res.md", "abstract": "res abstract"}],
+            "skills": [{"uri": "viking://skill.md", "abstract": "skill abstract"}],
+        }
+        formatted = format_search_results(results)
+        assert "viking://mem.md" in formatted
+        assert "viking://res.md" in formatted
+        assert "viking://skill.md" in formatted
+
+    def test_format_search_results_with_abstract_and_content(self) -> None:
+        """format_search_results shows both abstract and content when present."""
+        results = {
+            "hits": [
+                {
+                    "uri": "viking://doc.md",
+                    "score": 0.95,
+                    "abstract": "L0 summary",
+                    "content": "Full content snippet",
+                }
+            ]
+        }
+        formatted = format_search_results(results)
+        assert "viking://doc.md" in formatted
+        assert "abstract: L0 summary" in formatted
+        assert "Full content snippet" in formatted
+
+    def test_format_search_results_viking_empty_groups(self) -> None:
+        """format_search_results returns 'No results' when all groups are empty."""
+        results = {"memories": [], "resources": [], "skills": []}
+        formatted = format_search_results(results)
+        assert formatted == "No results found."

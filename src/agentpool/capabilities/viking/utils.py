@@ -14,14 +14,24 @@ def format_search_results(results: dict[str, Any] | list[Any]) -> str:
     """Format SDK search/find results as a readable string.
 
     Args:
-        results: A dict (with ``hits`` or ``results`` key) or a list of hits.
+        results: A dict (with ``hits``, ``results``, or Viking's grouped keys
+            like ``memories``/``resources``/``skills``) or a list of hits.
 
     Returns:
         A formatted multi-line string. Each hit shows URI, score (if present),
-        and a snippet of content.
+        the L0 abstract (if present), and a snippet of content.
     """
     if isinstance(results, dict):
-        hits: list[Any] = results.get("hits") or results.get("results") or []
+        # Viking find()/search() returns results grouped by context type
+        hits: list[Any] = (
+            results.get("hits")
+            or results.get("results")
+            or (
+                results.get("memories", [])
+                + results.get("resources", [])
+                + results.get("skills", [])
+            )
+        )
     else:
         hits = results
 
@@ -34,6 +44,7 @@ def format_search_results(results: dict[str, Any] | list[Any]) -> str:
         if isinstance(hit, dict):
             uri = hit.get("uri", hit.get("path", "?"))
             score = hit.get("score", hit.get("similarity"))
+            abstract = hit.get("abstract", "")
             content = hit.get("content", hit.get("text", hit.get("snippet", "")))
             header = f"{i}. {uri}"
             if score is not None:
@@ -41,6 +52,11 @@ def format_search_results(results: dict[str, Any] | list[Any]) -> str:
                     f" (score: {score:.4f})" if isinstance(score, float) else f" (score: {score})"
                 )
             lines.append(header)
+            if abstract:
+                ab = str(abstract)
+                if len(ab) > _snippet_limit:
+                    ab = ab[:_snippet_limit] + "..."
+                lines.append(f"   abstract: {ab}")
             if content:
                 snippet = str(content)
                 if len(snippet) > _snippet_limit:

@@ -404,3 +404,66 @@ async def test_build_capability_from_config_and_use() -> None:
     result = await search_tool(ctx, query="find me", limit=5)
     assert "viking://found.md" in result
     mock_client.search.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# 9.5 — Test resource_read_level config parsing
+# ---------------------------------------------------------------------------
+
+
+def test_resource_read_level_default_overview() -> None:
+    """Default resource_read_level is 'overview'."""
+    cfg = VikingCapabilityConfig()
+    assert cfg.resource_read_level == "overview"
+
+
+def test_resource_read_level_abstract() -> None:
+    """resource_read_level='abstract' parses correctly."""
+    cfg = VikingCapabilityConfig(resource_read_level="abstract")
+    assert cfg.resource_read_level == "abstract"
+
+
+def test_resource_read_level_read() -> None:
+    """resource_read_level='read' parses correctly."""
+    cfg = VikingCapabilityConfig(resource_read_level="read")
+    assert cfg.resource_read_level == "read"
+
+
+def test_resource_read_level_yaml_parsing() -> None:
+    """YAML config with resource_read_level parses correctly."""
+    from agentpool import AgentsManifest
+
+    yaml_str = """
+agents:
+  test_agent:
+    type: native
+    model: test
+    capabilities:
+      - type: viking
+        mode: all
+        resource_read_level: abstract
+"""
+    d = yamling.load_yaml(yaml_str, verify_type=dict)
+    manifest = AgentsManifest.model_validate(d)
+    cfg = manifest.agents["test_agent"].capabilities[0]
+    assert isinstance(cfg, VikingCapabilityConfig)
+    assert cfg.resource_read_level == "abstract"
+
+
+@pytest.mark.asyncio
+async def test_resource_read_level_propagates_to_capability() -> None:
+    """Build capability from config with resource_read_level='abstract'."""
+    cfg = VikingCapabilityConfig(resource_read_level="abstract")
+    cap = build_capability(cfg)
+    assert isinstance(cap, VikingCapability)
+    assert cap.resource_read_level == "abstract"
+
+    # Verify it propagates through for_run
+    mock_client = AsyncMock()
+    cap._client = mock_client
+    from unittest.mock import MagicMock
+
+    ctx = MagicMock()
+    ctx.deps = MagicMock()
+    copy_cap = await cap.for_run(ctx)
+    assert copy_cap.resource_read_level == "abstract"

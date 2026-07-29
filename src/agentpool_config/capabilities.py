@@ -203,6 +203,9 @@ class VikingCapabilityConfig(BaseModel):
     )
     """File extensions to include in list_resources(). Files with extensions
     not in this set are skipped. Set to an empty list to include all files."""
+    resource_read_level: Literal["abstract", "overview", "read"] = "overview"
+    """Default content level for read_resource() (ResourceAccess Protocol).
+    "abstract" (L0), "overview" (L1, default), or "read" (L2, full)."""
 
 
 # ---------------------------------------------------------------------------
