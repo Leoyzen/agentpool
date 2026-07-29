@@ -73,7 +73,7 @@ if TYPE_CHECKING:
     from pydantic_ai.run import AgentRunResult
     from pydantic_ai.tools import ToolDefinition
 
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool.capabilities.file_team_state import FileTeamState
     from agentpool.lifecycle.types import DeliveryMode
     from agentpool.tools.base import Tool
@@ -172,7 +172,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def _notify_member(
         self,
-        agent_ctx: AgentContext,
+        agent_ctx: AgentContextDeps,
         team_id: str,
         member_name: str,
         msg_body: str,
@@ -223,27 +223,27 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContext:
-        """Extract AgentContext from a pydantic-ai RunContext.
+    def _resolve_agent_context(self, ctx: RunContext[Any]) -> AgentContextDeps:
+        """Extract AgentContextDeps from a pydantic-ai RunContext.
 
         Delegates to the shared ``resolve_agent_context_from_deps`` utility
         which handles both the production path (``RuntimeAgentContext.data``)
-        and the test path (direct ``AgentContext``).
+        and the test path (direct ``AgentContextDeps``).
 
         Args:
             ctx: The RunContext passed to a tool function.
 
         Returns:
-            The AgentContext from ``ctx.deps`` (or ``ctx.deps.data``).
+            The AgentContextDeps from ``ctx.deps`` (or ``ctx.deps.data``).
 
         Raises:
-            RuntimeError: If ``ctx.deps`` is None or AgentContext is not found.
+            RuntimeError: If ``ctx.deps`` is None or AgentContextDeps is not found.
         """
         from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
         return resolve_agent_context_from_deps(ctx.deps, capability_name="TeamCommCapability")
 
-    def _get_team_state(self, agent_ctx: AgentContext) -> FileTeamState | None:
+    def _get_team_state(self, agent_ctx: AgentContextDeps) -> FileTeamState | None:
         """Create a FileTeamState for the current team, or None if not in a team.
 
         Args:
@@ -260,7 +260,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
             return None
         # Prefer base_dir from session metadata (set by team_create) so
         # that team_status and other tools always find the state even if
-        # team_mode_config is None in the per-turn AgentContext.
+        # team_mode_config is None in the per-turn AgentContextDeps.
         base_dir: str = agent_ctx.session.metadata.get(
             "team_base_dir",
             "",
@@ -275,7 +275,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     async def _create_member_session(
         self,
-        agent_ctx: AgentContext,
+        agent_ctx: AgentContextDeps,
         agent_name: str,
         parent_session_id: str,
         description: str,
@@ -378,7 +378,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return child_sid
 
-    def _get_team_id(self, agent_ctx: AgentContext) -> str | None:
+    def _get_team_id(self, agent_ctx: AgentContextDeps) -> str | None:
         """Return the team_id from session metadata, or None."""
         team_id: str | None = agent_ctx.session.metadata.get("team_id")
         return team_id
@@ -1866,7 +1866,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
     def _schedule_member_cleanup(
         self,
-        agent_ctx: AgentContext,
+        agent_ctx: AgentContextDeps,
         lead_session_id: str,
         member_session_ids: list[str],
     ) -> None:

@@ -438,7 +438,7 @@ def _make_run_context(
     session_id: str | None = None,
     delegation: MagicMock | None = None,
 ) -> MagicMock:
-    """Create a mock RunContext with AgentContext deps.
+    """Create a mock RunContext with AgentContextDeps deps.
 
     Args:
         metadata: Session metadata dict (defaults to team session metadata).
@@ -450,9 +450,9 @@ def _make_run_context(
         delegation: Mock DelegationService (defaults to a generic MagicMock).
 
     Returns:
-        A MagicMock whose .deps is a mock AgentContext.
+        A MagicMock whose .deps is a mock AgentContextDeps.
     """
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
     cfg = config or _make_enabled_config(base_dir=base_dir)
 
@@ -476,7 +476,7 @@ def _make_run_context(
         ):
             session_pool.event_bus = None
 
-    agent_ctx = MagicMock(spec=AgentContext)
+    agent_ctx = MagicMock(spec=AgentContextDeps)
     agent_ctx.session.metadata = metadata if metadata is not None else _make_session_metadata()
     agent_ctx.host.session_pool = session_pool
     agent_ctx.team_mode_config = cfg
@@ -1844,20 +1844,20 @@ async def test_team_create_uses_config_default_members(tmp_path: Any) -> None:
 
 @pytest.mark.unit
 async def test_resolve_agent_context_from_runtime_context(tmp_path: Any) -> None:
-    """Test _resolve_agent_context extracts AgentContext from runtime context.
+    """Test _resolve_agent_context extracts AgentContextDeps from runtime context.
 
-    In production, PydanticAI wraps our AgentContext inside agents.context.AgentContext.data.
+    In production, PydanticAI wraps our AgentContextDeps inside agents.context.AgentContext.data.
     The tool functions receive ctx.deps = agents.context.AgentContext, and our
-    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    capabilities.agent_context.AgentContextDeps is at ctx.deps.data.
     """
     from agentpool.agents.context import AgentContext as RuntimeAgentContext
-    from agentpool.capabilities.agent_context import AgentContext as CapAgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool.orchestrator.session_controller import SessionState
 
-    # Create our capabilities AgentContext (the frozen dataclass).
+    # Create our capabilities AgentContextDeps (the frozen dataclass).
     session = SessionState(session_id="test-session-123", agent_name="test_agent")
     session.metadata = {"team_id": "test-team"}
-    cap_ctx = CapAgentContext(
+    cap_ctx = AgentContextDeps(
         agent_registry=MagicMock(),
         delegation=MagicMock(),
         session=session,
@@ -1878,7 +1878,7 @@ async def test_resolve_agent_context_from_runtime_context(tmp_path: Any) -> None
     config = _make_enabled_config(base_dir=str(tmp_path))
     cap = TeamCommCapability(config, "test_agent")
 
-    # This should NOT raise 'AgentContext object has no attribute session'.
+    # This should NOT raise 'AgentContextDeps object has no attribute session'.
     result = cap._resolve_agent_context(ctx)
     assert result is cap_ctx
     assert result.session is not None
@@ -2601,7 +2601,7 @@ async def test_send_message_to_nonexistent_member_no_phantom(tmp_path: Any) -> N
 async def test_team_status_shows_added_member_no_team_mode_config(tmp_path: Any) -> None:
     """BUG-001 regression: team_status finds team state even when.
 
-    team_mode_config is None in the per-turn AgentContext.
+    team_mode_config is None in the per-turn AgentContextDeps.
     team_create stores base_dir in session.metadata['team_base_dir'].
     _get_team_state falls back to that when team_mode_config is None.
     """

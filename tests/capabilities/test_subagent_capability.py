@@ -9,7 +9,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import FunctionToolset
 import pytest
 
-from agentpool.capabilities.agent_context import AgentContext
+from agentpool.capabilities.agent_context import AgentContextDeps
 from agentpool.capabilities.delegation import AgentNotFoundError, DelegationService
 from agentpool.capabilities.subagent_capability import SubagentCapability
 from agentpool.host.context import RunScope
@@ -64,7 +64,7 @@ class FakeDelegationService:
 
 
 def _make_ctx(delegation: DelegationService) -> Any:
-    """Create a RunContext-like object with AgentContext as deps.
+    """Create a RunContext-like object with AgentContextDeps as deps.
 
     Sets ``host.session_pool = None`` so the fallback delegation path
     is exercised (matching pre-migration behavior). The
@@ -76,7 +76,7 @@ def _make_ctx(delegation: DelegationService) -> Any:
     agent_registry = MagicMock()
     agent_registry.list_names = MagicMock(return_value=delegation.get_available_agents())
     ctx = MagicMock()
-    ctx.deps = AgentContext(
+    ctx.deps = AgentContextDeps(
         agent_registry=agent_registry,
         delegation=delegation,
         session=MagicMock(),
@@ -239,12 +239,12 @@ def test_agent_not_found_error_message() -> None:
 
 
 async def test_resolve_agent_context_from_runtime_context() -> None:
-    """_resolve_agent_context unwraps AgentContext from RuntimeAgentContext.data.
+    """_resolve_agent_context unwraps AgentContextDeps from RuntimeAgentContext.data.
 
-    In production, PydanticAI wraps our AgentContext inside
+    In production, PydanticAI wraps our AgentContextDeps inside
     agents.context.AgentContext.data. The tool functions receive
     ctx.deps = agents.context.AgentContext, and our
-    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    capabilities.agent_context.AgentContextDeps is at ctx.deps.data.
     """
     from agentpool.agents.context import AgentContext as RuntimeAgentContext
 
@@ -254,7 +254,7 @@ async def test_resolve_agent_context_from_runtime_context() -> None:
     agent_registry = MagicMock()
     agent_registry.list_names = MagicMock(return_value=delegation.get_available_agents())
 
-    cap_ctx = AgentContext(
+    cap_ctx = AgentContextDeps(
         agent_registry=agent_registry,
         delegation=delegation,
         session=MagicMock(),
@@ -278,7 +278,7 @@ async def test_resolve_agent_context_none_deps() -> None:
     ctx.deps = None
 
     with pytest.raises(
-        RuntimeError, match=r"SubagentCapability requires AgentContext as deps\. Got: None"
+        RuntimeError, match=r"SubagentCapability requires AgentContextDeps as deps\. Got: None"
     ):
         await SubagentCapability.get_available_agents(ctx)
 
@@ -294,7 +294,8 @@ async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
     ctx.deps = runtime_ctx
 
     with pytest.raises(
-        RuntimeError, match=r"SubagentCapability requires AgentContext at deps\.data\. Got: None"
+        RuntimeError,
+        match=r"SubagentCapability requires AgentContextDeps at deps\.data\. Got: None",
     ):
         await SubagentCapability.get_available_agents(ctx)
 
@@ -305,6 +306,6 @@ async def test_resolve_agent_context_neither_type() -> None:
     ctx.deps = object()
 
     with pytest.raises(
-        RuntimeError, match=r"SubagentCapability requires AgentContext as deps\. Got: object"
+        RuntimeError, match=r"SubagentCapability requires AgentContextDeps as deps\. Got: object"
     ):
         await SubagentCapability.get_available_agents(ctx)

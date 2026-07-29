@@ -109,10 +109,10 @@ def test_delegation_service_get_available_agents_deprecation() -> None:
 @pytest.mark.anyio
 async def test_subagent_capability_uses_run_agent() -> None:
     """SubagentCapability.spawn_subagent calls run_agent() when session_pool is available."""
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool.capabilities.subagent_capability import SubagentCapability
 
-    # Build a mock AgentContext with a non-None session_pool.
+    # Build a mock AgentContextDeps with a non-None session_pool.
     session_pool = MagicMock()
     session_pool.run_agent = AsyncMock(return_value="subagent result")
 
@@ -127,7 +127,7 @@ async def test_subagent_capability_uses_run_agent() -> None:
 
     delegation = MagicMock()
 
-    agent_ctx = AgentContext(
+    agent_ctx = AgentContextDeps(
         agent_registry=agent_registry,
         delegation=delegation,
         session=session,
@@ -164,7 +164,7 @@ async def test_subagent_capability_fallback() -> None:
         yield "chunk1"
         yield "chunk2"
 
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool.capabilities.subagent_capability import SubagentCapability
 
     host = MagicMock()
@@ -179,7 +179,7 @@ async def test_subagent_capability_fallback() -> None:
     agent_registry = MagicMock()
     agent_registry.list_names = MagicMock(return_value=["a"])
 
-    agent_ctx = AgentContext(
+    agent_ctx = AgentContextDeps(
         agent_registry=agent_registry,
         delegation=delegation,
         session=session,

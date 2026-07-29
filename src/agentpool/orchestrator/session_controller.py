@@ -240,9 +240,9 @@ class SessionState:
     # HostContext injection (moved from RunHandle)
     # ------------------------------------------------------------------
     _host_context: HostContext | None = None
-    """HostContext for constructing per-turn AgentContext.
+    """HostContext for constructing per-turn AgentContextDeps.
 
-    When set, RunHandle constructs an ``AgentContext`` per turn and
+    When set, RunHandle constructs an ``AgentContextDeps`` per turn and
     injects it into ``run_ctx.deps`` so capabilities like
     ``SubagentCapability`` can access the delegation service.
     """

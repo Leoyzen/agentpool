@@ -26,7 +26,7 @@ from agentpool.observability.spans import safe_span
 
 
 if TYPE_CHECKING:
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
 
 class SubagentCapability(AbstractCapability[AgentDepsT]):
@@ -42,7 +42,7 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
       to ``ctx.deps.delegation.get_available_agents()`` (deprecated).
 
     The capability holds no ``AgentPool`` reference — all delegation
-    goes through the ``AgentContext`` at runtime.
+    goes through the ``AgentContextDeps`` at runtime.
     """
 
     def __init__(self, *, toolset_id: str = "subagent") -> None:
@@ -76,7 +76,7 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         """Return a ``FunctionToolset`` with delegation tools.
 
         The tools access ``ctx.deps`` at runtime, which must be an
-        ``AgentContext`` with a ``delegation`` field implementing
+        ``AgentContextDeps`` with a ``delegation`` field implementing
         ``DelegationService``.
         """
         return FunctionToolset(
@@ -150,21 +150,21 @@ class SubagentCapability(AbstractCapability[AgentDepsT]):
         return agent_ctx.agent_registry.list_names()
 
 
-def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
-    """Extract the ``AgentContext`` from the run context deps.
+def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContextDeps:
+    """Extract the ``AgentContextDeps`` from the run context deps.
 
     Delegates to the shared ``resolve_agent_context_from_deps`` utility
     which handles both the production path (``RuntimeAgentContext.data``)
-    and the test path (direct ``AgentContext``).
+    and the test path (direct ``AgentContextDeps``).
 
     Args:
         ctx: The pydantic-ai run context.
 
     Returns:
-        The ``AgentContext`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
+        The ``AgentContextDeps`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
 
     Raises:
-        RuntimeError: If deps is None or AgentContext is not found.
+        RuntimeError: If deps is None or AgentContextDeps is not found.
     """
     from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
