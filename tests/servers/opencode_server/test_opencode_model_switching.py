@@ -108,7 +108,9 @@ async def test_resolve_model_string_with_variant(agent_with_variants: Agent):
 
 @pytest.mark.unit
 @pytest.mark.real_model
-async def test_get_available_models_excludes_variants(agent_with_variants: Agent):
+async def test_get_available_models_excludes_variants(
+    agent_with_variants: Agent, monkeypatch: pytest.MonkeyPatch
+):
     """CRITICAL TEST: get_available_models() returns tokonomics models, not config variants.
 
     This is the ROOT CAUSE of the validation failure.
@@ -119,6 +121,8 @@ async def test_get_available_models_excludes_variants(agent_with_variants: Agent
 
     Result: Validation fails because 'qwen35' is not in the tokonomics list.
     """
+    # Use tokonomics path so the get_all_models mock is exercised
+    monkeypatch.setenv("MODELS_DEV_FALLBACK", "1")
     agent = agent_with_variants
 
     # Mock tokonomics to return a predictable list
@@ -151,7 +155,9 @@ async def test_get_available_models_excludes_variants(agent_with_variants: Agent
 
 @pytest.mark.unit
 @pytest.mark.real_model
-async def test_set_mode_validation_fails_for_variants(agent_with_variants: Agent):
+async def test_set_mode_validation_fails_for_variants(
+    agent_with_variants: Agent, monkeypatch: pytest.MonkeyPatch
+):
     """CRITICAL TEST: Verify that _set_mode validation fails for model_variants.
 
     This reproduces the exact failure that happens when OpenCode TUI
@@ -163,6 +169,8 @@ async def test_set_mode_validation_fails_for_variants(agent_with_variants: Agent
     This test documents the CURRENT BUGGY BEHAVIOR.
     After fix, this test should pass.
     """
+    # Use tokonomics path so the get_all_models mock is exercised
+    monkeypatch.setenv("MODELS_DEV_FALLBACK", "1")
     agent = agent_with_variants
 
     # Mock get_available_models to simulate tokonomics response
