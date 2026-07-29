@@ -36,6 +36,17 @@ pytestmark = [
 TEST_BASE = "viking://user/default/memories/viking_e2e_test/"
 
 
+@pytest.fixture(autouse=True)
+async def _skip_if_no_viking_server() -> Any:
+    """Skip all E2E tests if no Viking server is reachable."""
+    cap = VikingCapability(mode="all")
+    try:
+        await cap.__aenter__()
+        await cap.__aexit__(None, None, None)
+    except Exception:  # noqa: BLE001
+        pytest.skip("No Viking server available", allow_module_level=True)
+
+
 def _random_name() -> str:
     """Generate a random name for test isolation."""
     return uuid.uuid4().hex[:8]

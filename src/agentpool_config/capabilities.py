@@ -377,7 +377,9 @@ def build_config_capabilities(capabilities: list[Any]) -> list[Any]:
         if cap is None:
             continue
         if isinstance(cap, BaseModel):
-            built.append(build_capability(cap))
+            from typing import cast as _cast
+
+            built.append(build_capability(_cast("CapabilityConfig", cap)))
         else:
             # Pre-instantiated AbstractCapability
             built.append(cap)

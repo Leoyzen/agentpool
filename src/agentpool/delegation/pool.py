@@ -301,9 +301,7 @@ class AgentPool[TPoolDeps = None]:
                 from agentpool.host.factory import AgentFactory
 
                 factory = AgentFactory(self)
-                factory.register_config_capabilities(
-                    self.manifest, self.get_context()
-                )
+                factory.register_config_capabilities(self.manifest, self.get_context())
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 # Use the StorageManager's already-initialized provider as session store.

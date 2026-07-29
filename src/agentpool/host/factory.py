@@ -187,8 +187,8 @@ class AgentFactory:
             host_context: The host context with shared services.
         """
         from agentpool.capabilities.extension_registry import Scope, ScopeLevel
-        from agentpool_config.capabilities import build_config_capabilities
         from agentpool.models.agents import NativeAgentConfig
+        from agentpool_config.capabilities import build_config_capabilities
 
         for agent_name, cfg in manifest.agents.items():
             if not isinstance(cfg, NativeAgentConfig) or not cfg.capabilities:
