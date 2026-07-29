@@ -341,12 +341,8 @@ class TestE2EWriteTools:
         assert "Remembered" in result
         assert "2" in result  # 2 messages
 
-    @pytest.mark.xfail(
-        reason="Viking add_resource() requires 'to' to target resources/ path, not memories/",
-        strict=False,
-    )
     async def test_viking_add_resource(
-        self, viking_cap: VikingCapability, test_dir: str, mock_ctx: Any
+        self, viking_cap: VikingCapability, mock_ctx: Any
     ) -> None:
         """Test viking_add_resource ingests a local file into Viking."""
         client = viking_cap._get_client()
@@ -365,13 +361,15 @@ class TestE2EWriteTools:
                 path=str(tmp_path),
                 to=target_uri,
             )
-            assert "error" not in result.lower()
+            # SDK response includes 'errors': [] in JSON, so check for
+            # the success marker instead of absence of "error" substring
             assert "Added resource" in result
+            assert "viking_add_resource error:" not in result
         finally:
             # Clean up local temp file
             with suppress(Exception):
                 tmp_path.unlink()
-            # Clean up Viking resource directory
+            # Clean up Viking resource (may still be processing, ignore errors)
             with suppress(Exception):
                 await client.rm(target_uri, recursive=True)
 
