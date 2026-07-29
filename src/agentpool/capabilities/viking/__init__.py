@@ -125,6 +125,53 @@ class VikingCapability(AbstractCapability[Any]):
         """Return ``False`` — Viking does not wrap node execution."""
         return False
 
+    def _resolve_identity_from_apikey(self) -> None:
+        """Extract account and user from the API key if not already set.
+
+        Viking API keys follow the format
+        ``base64(account).base64(user).base64(signature)``. The SDK's
+        ``resolve_client_config`` does not parse the key to populate
+        ``user`` / ``account``, so they remain ``None`` when only an
+        API key is configured (the common case via ``ovcli.conf``).
+
+        This method decodes the first two dot-separated parts as
+        base64 and fills in ``self.account`` / ``self.user`` when they
+        are ``None``. This ensures URI-building methods
+        (``_resolve_skills_uri``, ``_resolve_sessions_uri``,
+        ``_upload_binary``) use the correct user instead of falling
+        back to ``"default"``.
+        """
+        if self.account is not None and self.user is not None:
+            return
+
+        import base64
+
+        api_key: str | None = None
+        if self._client is not None:
+            api_key = getattr(self._client, "_api_key", None)
+        if api_key is None:
+            api_key = self.api_key
+        if not api_key or "." not in api_key:
+            return
+
+        parts = api_key.split(".")
+        # API key format: base64(account).base64(user).base64(signature)
+        # Need at least account and user parts to extract identity.
+        if len(parts) < 3:  # noqa: PLR2004
+            return
+
+        try:
+            if self.account is None:
+                decoded_account = base64.b64decode(parts[0] + "==").decode("utf-8")
+                if decoded_account:
+                    self.account = decoded_account
+            if self.user is None:
+                decoded_user = base64.b64decode(parts[1] + "==").decode("utf-8")
+                if decoded_user:
+                    self.user = decoded_user
+        except Exception:
+            logger.debug("Failed to decode identity from API key", exc_info=True)
+
     async def _ensure_client(self) -> Any:
         """Return the SDK client, lazily initializing if needed.
 
@@ -149,6 +196,7 @@ class VikingCapability(AbstractCapability[Any]):
             timeout=self.timeout,
         )
         await self._client.initialize()
+        self._resolve_identity_from_apikey()
         return self._client
 
     def _resolve_skills_uri(self) -> str:
@@ -185,6 +233,7 @@ class VikingCapability(AbstractCapability[Any]):
             timeout=self.timeout,
         )
         await self._client.initialize()
+        self._resolve_identity_from_apikey()
         return self
 
     async def __aexit__(
