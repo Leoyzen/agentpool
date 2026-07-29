@@ -405,6 +405,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         self._resolved_history_processors: list[Callable[..., Any]] | None = None
         self._extra_capabilities: list[Any] = capabilities or []
 
+        # Track session IDs for which we've registered SESSION-scope capabilities
+        # in the ExtensionRegistry. Prevents duplicate registration on repeated
+        # get_agentlet() calls within the same session.
+        self._registered_session_ids: set[str] = set()
+
         # Eagerly build config-defined capabilities and add to _external_capabilities
         # so they're visible to _all_capabilities (used by _get_all_tools() for
         # tool listing endpoints) before get_agentlet() is called.
@@ -1153,6 +1158,39 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if resource_cap is not None:
                     tool_capabilities.append(resource_cap)
 
+        # Register per-session capabilities (MCP, SkillManagerCap,
+        # ResourceCapability) at SESSION scope in the ExtensionRegistry.
+        # This is done once per session — subsequent get_agentlet() calls
+        # within the same session skip registration.
+        if self.host_context is not None and run_ctx is not None:
+            registry = self.host_context.extension_registry
+            if registry is not None:
+                session_id = run_ctx.session_id
+                if session_id not in self._registered_session_ids:
+                    from agentpool.capabilities.extension_registry import (
+                        Scope,
+                        ScopeLevel,
+                    )
+
+                    session_scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
+                    for cap in mcp_capabilities:
+                        registry.register(cap, session_scope)
+                    if pool is not None:
+                        pool_caps = pool.skill_capabilities
+                        if pool_caps:
+                            from agentpool.capabilities.skill_manager_cap import (
+                                SkillManagerCap,
+                            )
+
+                            for cap in pool_caps:
+                                if isinstance(cap, SkillManagerCap):
+                                    registry.register(cap, session_scope)
+                        if self.config is not None and self.config.resources.enabled:
+                            resource_cap = pool.resource_capability
+                            if resource_cap is not None:
+                                registry.register(resource_cap, session_scope)
+                    self._registered_session_ids.add(session_id)
+
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers
         all_instructions: list[Any] = []
 
@@ -1256,6 +1294,26 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                         if ext_cap is cap:
                             self._external_capabilities[j] = populated
                             break
+
+                    # Register the populated ModalityFilterCapability at
+                    # TURN scope — it depends on the resolved model which
+                    # is specific to this turn's model resolution.
+                    if self.host_context is not None and run_ctx is not None:
+                        registry = self.host_context.extension_registry
+                        if registry is not None:
+                            from agentpool.capabilities.extension_registry import (
+                                Scope,
+                                ScopeLevel,
+                            )
+
+                            turn_id = run_ctx.turn_id or ""
+                            turn_scope = Scope(
+                                level=ScopeLevel.TURN,
+                                agent_name=self.name,
+                                session_id=run_ctx.session_id,
+                                turn_id=turn_id,
+                            )
+                            registry.register(populated, turn_scope)
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:

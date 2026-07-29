@@ -103,7 +103,7 @@ class FakeAgent:
     at POOL scope so ``_resolve_resource`` can find them via the registry.
     """
 
-    def __init__(self, capabilities: list[Any]) -> None:
+    def __init__(self, capabilities: list[Any], name: str = "fake-agent") -> None:
         from agentpool.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
 
         registry = ExtensionRegistry()
@@ -111,6 +111,7 @@ class FakeAgent:
         for cap in capabilities:
             registry.register(cap, pool_scope)
         # Lightweight fake host_context — only extension_registry is accessed
+        self.name = name
         self._host_context = SimpleNamespace(extension_registry=registry)
 
     @property

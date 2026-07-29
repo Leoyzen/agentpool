@@ -335,6 +335,7 @@ class RunHandle:
             extension_registry=(
                 self._host_context.extension_registry if self._host_context is not None else None
             ),
+            agent_name=self.agent.name if self.agent is not None else self.agent_type,
         )
         self.run_ctx.deps = ctx
 
