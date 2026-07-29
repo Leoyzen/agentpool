@@ -180,6 +180,8 @@ class VikingCapabilityConfig(BaseModel):
     """Override for skills URI. Default: viking://user/{user or 'default'}/skills/"""
     resources_uri: str | None = None
     """Override for resources URI."""
+    sessions_uri: str | None = None
+    """Override for sessions URI. Default: viking://user/{user}/sessions/"""
     multimodal_bridge: bool = False
     """Enable multimodal bridge (Phase 6, not yet implemented)."""
     uploads_uri: str | None = None

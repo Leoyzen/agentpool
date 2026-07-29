@@ -76,6 +76,10 @@ class VikingCapability(AbstractCapability[Any]):
     timeout: float | None = None
     skills_uri: str | None = None
     resources_uri: str | None = None
+    sessions_uri: str | None = None
+    """Override for sessions URI. Default: ``viking://user/{user}/sessions/``.
+    When set, ``list_resources()`` includes files from this URI tree in
+    addition to ``resources_uri``."""
     multimodal_bridge: bool = False
     """Enable multimodal bridge — auto-upload binary content to Viking
     before sending to the model."""
@@ -373,16 +377,100 @@ class VikingCapability(AbstractCapability[Any]):
             return self.resources_uri
         return "viking://resources/"
 
-    async def list_resources(self) -> Sequence[ResourceEntry]:
-        """List Viking resources under ``resources_uri``.
+    def _resolve_sessions_uri(self) -> str:
+        """Return the sessions URI, using override or default convention.
 
-        Performs a recursive ``client.ls()`` to find actual files (not
-        directories) and returns them as ``ResourceEntry`` objects.
+        Returns:
+            The sessions URI string (e.g.
+            ``viking://user/{user}/sessions/``).
+        """
+        if self.sessions_uri is not None:
+            return self.sessions_uri
+        return f"viking://user/{self.user or 'default'}/sessions/"
+
+    async def _list_resource_entries_from_uri(
+        self, client: Any, uri: str
+    ) -> list[ResourceEntry]:
+        """Recursively list files under a single Viking URI.
+
+        Performs a per-directory recursive ``client.ls()`` to work around
+        Viking's incomplete root-level recursive traversal, then builds
+        ``ResourceEntry`` objects for each file (filtering by configured
+        extensions and inferring MIME types).
+
+        Args:
+            client: The Viking SDK client.
+            uri: The base URI to list (e.g. ``viking://resources/``).
+
+        Returns:
+            A list of ``ResourceEntry`` descriptors for text files.
+        """
+        from agentpool.capabilities.resource_protocols import ResourceEntry
+
+        top_entries = await client.ls(uri)
+        if not isinstance(top_entries, list):
+            return []
+
+        all_entries: list[dict[str, Any]] = []
+        for entry in top_entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("isDir"):
+                sub_uri = str(entry.get("uri") or "")
+                if sub_uri:
+                    sub_entries = await client.ls(sub_uri, recursive=True, node_limit=5000)
+                    if isinstance(sub_entries, list):
+                        all_entries.extend(e for e in sub_entries if isinstance(e, dict))
+            else:
+                all_entries.append(entry)
+
+        resources: list[ResourceEntry] = []
+        for entry in all_entries:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("isDir"):
+                continue
+            resource_uri = str(entry.get("uri") or "")
+            if not resource_uri:
+                continue
+            name = str(entry.get("name") or resource_uri.rsplit("/", 1)[-1] or resource_uri)
+            # Filter by configured extensions; skip files not in the set
+            lowered = name.lower()
+            if self.resource_file_extensions and not lowered.endswith(
+                self.resource_file_extensions
+            ):
+                continue
+            # Infer MIME type from extension
+            mime_type = ""
+            if lowered.endswith(".md"):
+                mime_type = "text/markdown"
+            elif lowered.endswith(".txt"):
+                mime_type = "text/plain"
+            elif lowered.endswith(".json"):
+                mime_type = "application/json"
+            elif lowered.endswith((".yaml", ".yml")):
+                mime_type = "text/yaml"
+            elif lowered.endswith(".html"):
+                mime_type = "text/html"
+            resources.append(
+                ResourceEntry(
+                    uri=resource_uri,
+                    name=name,
+                    description=resource_uri.removeprefix(uri),
+                    mime_type=mime_type,
+                )
+            )
+        return resources
+
+    async def list_resources(self) -> Sequence[ResourceEntry]:
+        """List Viking resources from multiple URI trees.
+
+        Lists files from both ``resources_uri`` (shared resources) and
+        ``sessions_uri`` (user session content), merges and deduplicates
+        by URI, then enriches descriptions with L0 abstracts.
+
         Files are what users @ mention — directories can't be read as
         content.
-
-        Uses per-directory recursive listing to work around Viking's
-        incomplete root-level recursive traversal.
 
         Returns:
             A sequence of ``ResourceEntry`` descriptors for text files.
@@ -390,66 +478,25 @@ class VikingCapability(AbstractCapability[Any]):
         """
         try:
             client = await self._ensure_client()
-            uri = self._resolve_resources_uri()
+            uris = [self._resolve_resources_uri(), self._resolve_sessions_uri()]
 
-            # Viking's recursive ls from root may not traverse all
-            # subdirectories completely. Work around this by first listing
-            # top-level entries, then recursively listing each subdirectory.
-            top_entries = await client.ls(uri)
-            if not isinstance(top_entries, list):
-                return []
+            # List from each URI tree in parallel
+            results = await asyncio.gather(
+                *[self._list_resource_entries_from_uri(client, u) for u in uris],
+                return_exceptions=True,
+            )
 
-            all_entries: list[dict[str, Any]] = []
-            for entry in top_entries:
-                if not isinstance(entry, dict):
-                    continue
-                if entry.get("isDir"):
-                    sub_uri = str(entry.get("uri") or "")
-                    if sub_uri:
-                        sub_entries = await client.ls(sub_uri, recursive=True, node_limit=5000)
-                        if isinstance(sub_entries, list):
-                            all_entries.extend(e for e in sub_entries if isinstance(e, dict))
-                else:
-                    all_entries.append(entry)
-
-            from agentpool.capabilities.resource_protocols import ResourceEntry
-
+            # Merge results, deduplicate by URI
+            seen_uris: set[str] = set()
             resources: list[ResourceEntry] = []
-            for entry in all_entries:
-                if not isinstance(entry, dict):
+
+            for result in results:
+                if not isinstance(result, list):
                     continue
-                if entry.get("isDir"):
-                    continue
-                resource_uri = str(entry.get("uri") or "")
-                if not resource_uri:
-                    continue
-                name = str(entry.get("name") or resource_uri.rsplit("/", 1)[-1] or resource_uri)
-                # Filter by configured extensions; skip files not in the set
-                lowered = name.lower()
-                if self.resource_file_extensions and not lowered.endswith(
-                    self.resource_file_extensions
-                ):
-                    continue
-                # Infer MIME type from extension
-                mime_type = ""
-                if lowered.endswith(".md"):
-                    mime_type = "text/markdown"
-                elif lowered.endswith(".txt"):
-                    mime_type = "text/plain"
-                elif lowered.endswith(".json"):
-                    mime_type = "application/json"
-                elif lowered.endswith((".yaml", ".yml")):
-                    mime_type = "text/yaml"
-                elif lowered.endswith(".html"):
-                    mime_type = "text/html"
-                resources.append(
-                    ResourceEntry(
-                        uri=resource_uri,
-                        name=name,
-                        description=resource_uri.removeprefix(uri),
-                        mime_type=mime_type,
-                    )
-                )
+                for entry in result:
+                    if entry.uri not in seen_uris:
+                        seen_uris.add(entry.uri)
+                        resources.append(entry)
 
             # Enrich with L0 abstracts — batch-call client.abstract() for each
             # resource. If abstracts fail, keep the path-based description.
