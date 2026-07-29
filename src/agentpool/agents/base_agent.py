@@ -560,33 +560,30 @@ class BaseAgent[TDeps = None, TResult = str](MessageNode[TDeps, TResult]):
     async def get_resource(self, name: str) -> Any:
         """Get a specific MCP resource by name or URI.
 
+        Uses the ``ResourceAccess`` protocol to list resources from all
+        capabilities that implement it (e.g., ``McpServerCap``,
+        ``VikingCapability``).
+
         Args:
             name: Name or URI of the resource to find
 
         Raises:
             ToolError: If resource not found
         """
-        from typing import Protocol, runtime_checkable
+        import asyncio
 
+        from agentpool.capabilities.resource_protocols import ResourceAccess
         from agentpool.tools.exceptions import ToolError
-
-        @runtime_checkable
-        class _ResourceProviding(Protocol):
-            async def get_resources(self) -> Sequence[Any]: ...
 
         all_resources: list[Any] = []
         caps = self._all_capabilities
-        coros: list[Any] = []
-        caps_with_resources: list[Any] = []
-        for cap in caps:
-            if isinstance(cap, _ResourceProviding):
-                coros.append(cap.get_resources())
-                caps_with_resources.append(cap)
-        if coros:
-            import asyncio
-
-            results = await asyncio.gather(*coros, return_exceptions=True)
-            for _cap, result in zip(caps_with_resources, results, strict=False):
+        resource_caps = [cap for cap in caps if isinstance(cap, ResourceAccess)]
+        if resource_caps:
+            results = await asyncio.gather(
+                *(cap.list_resources() for cap in resource_caps),
+                return_exceptions=True,
+            )
+            for result in results:
                 if isinstance(result, BaseException):
                     continue
                 all_resources.extend(result)
