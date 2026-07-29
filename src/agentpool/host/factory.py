@@ -326,7 +326,7 @@ class AgentFactory:
 
         return resolve_capability_type(type_name, self._entry_point_capabilities)
 
-    async def create_session_agent(
+    async def create_session_agent(  # noqa: PLR0915
         self,
         agent_name: str,
         session_id: str,
@@ -458,6 +458,19 @@ class AgentFactory:
 
                 session_scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
                 self._pool.extension_registry.register(team_cap, session_scope)
+
+        # Register config-defined capabilities (e.g. Viking) at AGENT scope.
+        # These are eagerly built in NativeAgent.__init__ from the agent's
+        # YAML config and are the same across all sessions. AGENT scope makes
+        # them visible to all registry queries (SESSION scope includes AGENT).
+        from agentpool.agents.native_agent import Agent as _NativeAgent2
+
+        if isinstance(agent, _NativeAgent2) and agent._config_capabilities_built:
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
+            for cap in agent._config_capabilities_built:
+                self._pool.extension_registry.register(cap, agent_scope)
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)
