@@ -153,6 +153,8 @@ max-complexity = 15
 ]
 # Viking capability: BLE001 for safe SkillResource defaults, TRY300 for early-return pattern
 "src/agentpool/capabilities/viking/__init__.py" = ["BLE001", "TRY300"]
+# Viking instructions: E501 for markdown table lines
+"src/agentpool/capabilities/viking/instructions.py" = ["E501"]
 
 [format]
 preview = true

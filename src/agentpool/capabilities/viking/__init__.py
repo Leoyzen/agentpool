@@ -234,6 +234,23 @@ class VikingCapability(AbstractCapability[Any]):
             return None
         return FunctionToolset(tool_fns, id="viking")
 
+    async def get_tools(self) -> Sequence[Any]:
+        """Return tools as ``Tool`` objects for listing endpoints.
+
+        This is required by ``_get_all_tools()`` in ``base_agent.py``,
+        which uses the ``_ToolProviding`` Protocol (``get_tools()``).
+        Without this, Viking tools won't appear in the OpenCode
+        ``/experimental/tool`` endpoint.
+
+        Returns:
+            A list of ``FunctionTool`` objects wrapping the tool closures.
+        """
+        from agentpool.capabilities.viking.tools import build_tools
+        from agentpool.tools.base import FunctionTool
+
+        tool_fns = build_tools(self)
+        return [FunctionTool.from_callable(fn) for fn in tool_fns]
+
     def on_change(self) -> AsyncIterator[ChangeEvent] | None:
         """Return ``None`` — Viking tools never change at runtime."""
         return None
@@ -339,8 +356,10 @@ class VikingCapability(AbstractCapability[Any]):
     async def list_resources(self) -> Sequence[ResourceEntry]:
         """List Viking resources under ``resources_uri``.
 
-        Calls ``client.ls(resources_uri)`` and returns non-directory
-        entries as ``ResourceEntry`` objects.
+        Calls ``client.ls(resources_uri)`` and returns entries as
+        ``ResourceEntry`` objects. Both files and directories are
+        included so that the OpenCode @ mention list can show
+        browsable resource trees.
 
         Returns:
             A sequence of ``ResourceEntry`` descriptors. Returns an empty
@@ -359,8 +378,7 @@ class VikingCapability(AbstractCapability[Any]):
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
-                if entry.get("isDir"):
-                    continue
+                # Include both files and directories for @ mention browsing
                 name = str(entry.get("name") or entry.get("uri") or "")
                 resource_uri = str(entry.get("uri") or f"{uri}{name}")
                 description = str(

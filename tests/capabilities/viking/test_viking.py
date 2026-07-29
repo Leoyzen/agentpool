@@ -1889,13 +1889,14 @@ class TestResourceAccessProtocol:
             ]
         )
         result = await viking_cap.list_resources()
-        assert len(result) == 3  # subdir excluded
+        assert len(result) == 4  # includes directories for @ mention browsing
         assert result[0].name == "doc1.md"
         assert result[0].uri == "viking://resources/doc1.md"
         assert result[0].mime_type == "text/markdown"
         assert result[1].name == "doc2.txt"
         assert result[1].mime_type == ""
-        assert result[2].description == "A test document"
+        assert result[2].name == "subdir"  # directory included
+        assert result[3].description == "A test document"
 
     async def test_list_resources_empty(
         self, viking_cap: VikingCapability, mock_client: AsyncMock
