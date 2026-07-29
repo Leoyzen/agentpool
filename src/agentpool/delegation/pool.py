@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from anyenv import ProcessManager
 import anyio
+import logfire
 from upathtools import to_upath
 
 from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, _NamedCapability
@@ -188,6 +189,8 @@ class AgentPool[TPoolDeps = None]:
             self._skill_capabilities: list[Any] = []  # SkillManagerCap instances
             # Pool-level ExtensionRegistry for global capability scoping.
             self._extension_registry: ExtensionRegistry = ExtensionRegistry()
+            # ResourceCapability instance — created in _setup_resource_capability()
+            self._resource_capability: Any = None
             skill_scopes = getattr(self.manifest, "model_extra", None) or {}
             raw_skill_scopes = skill_scopes.get("_skill_scopes", {})
             self._default_skill_scope = str(raw_skill_scopes.get("default_scope", "host"))
@@ -290,6 +293,8 @@ class AgentPool[TPoolDeps = None]:
                 # Command discovery is handled by ExtensionRegistry.get_command_resources().
                 # Create pool-scoped capabilities for all discovered skills
                 await self._rebuild_skill_capabilities()
+                # Register the unified ResourceCapability at pool scope.
+                await self._setup_resource_capability()
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 # Use the StorageManager's already-initialized provider as session store.
@@ -701,6 +706,37 @@ class AgentPool[TPoolDeps = None]:
         dynamic skill registration/unregistration.
         """
         return self._skill_capabilities
+
+    @property
+    def resource_capability(self) -> Any:
+        """Get the pool-scoped ``ResourceCapability`` instance.
+
+        Created during ``__aenter__`` via ``_setup_resource_capability()``.
+        Returns ``None`` if not yet initialized.
+        """
+        return self._resource_capability
+
+    @logfire.instrument("pool.setup_resource_capability")
+    async def _setup_resource_capability(self) -> None:
+        """Create and register the ``ResourceCapability`` at pool scope.
+
+        The capability provides 5 agent-facing tools (``list_resources``,
+        ``read_resource``, ``resource_exists``, ``list_resource_templates``,
+        ``complete_resource_template``) that aggregate resource access
+        across all visible providers in the ``ExtensionRegistry``.
+
+        The capability is stateless — it reads ``AgentContext`` at runtime
+        to resolve providers. Per-agent opt-out is handled in
+        ``get_agentlet()`` by checking ``agent_config.resources.enabled``.
+        """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+        from agentpool.capabilities.resource_capability import ResourceCapability
+
+        cap = ResourceCapability()
+        self._resource_capability = cap
+        pool_scope = Scope(level=ScopeLevel.POOL)
+        self._extension_registry.register(cap, pool_scope)
+        logger.debug("Registered ResourceCapability at pool scope")
 
     async def _on_skills_changed(self, event: Any) -> None:
         """Handle skills changed events from the skill provider.

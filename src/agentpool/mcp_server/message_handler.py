@@ -29,8 +29,10 @@ class MCPMessageHandler:
     """Tool change callback."""
     prompt_change_callback: Callable[[], Awaitable[None]] | None = None
     """Prompt change callback."""
-    resource_change_callback: Callable[[], Awaitable[None]] | None = None
-    """Resource change callback."""
+    resource_list_changed_callback: Callable[[], Awaitable[None]] | None = None
+    """Resource list changed callback (resources/list_changed)."""
+    resource_updated_callback: Callable[[str], Awaitable[None]] | None = None
+    """Resource updated callback (resources/updated). Called with the URI."""
 
     async def __call__(
         self,
@@ -109,14 +111,15 @@ class MCPMessageHandler:
     ) -> None:
         """Handle resource list changes."""
         logger.info("MCP resource list changed", message=message)
-        # Call the resource change callback if provided
-        if self.resource_change_callback:
-            await self.resource_change_callback()
+        if self.resource_list_changed_callback:
+            await self.resource_list_changed_callback()
 
     async def on_resource_updated(self, message: mcp.types.ResourceUpdatedNotification) -> None:
-        """Handle resource updates."""
-        # ResourceUpdatedNotification has uri directly, not in params
-        logger.info("MCP resource updated", uri=getattr(message, "uri", "unknown"))
+        """Handle resource content updates."""
+        uri = str(message.params.uri)
+        logger.info("MCP resource updated", uri=uri)
+        if self.resource_updated_callback:
+            await self.resource_updated_callback(uri)
 
     async def on_progress(self, message: mcp.types.ProgressNotification) -> None:
         """Handle progress notifications with proper context."""
