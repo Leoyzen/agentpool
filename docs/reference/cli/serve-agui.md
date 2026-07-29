@@ -1,8 +1,18 @@
 ---
 title: serve-agui
-description: Run agents as an AG-UI server
+description: Start AG-UI server
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="serve-agui") }}
-///
+# serve-agui
+
+Start the AG-UI protocol server to expose agents to AG-UI compatible frontends.
+
+```bash
+agentpool serve-agui config.yml
+```
+
+For a full list of options, run:
+
+```bash
+agentpool serve-agui --help
+```

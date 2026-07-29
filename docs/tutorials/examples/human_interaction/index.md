@@ -7,11 +7,6 @@ hide:
 
 # Human Interaction
 
-/// mknodes
-{{ ['docs/examples/human_interaction/main.py', 'docs/examples/human_interaction/config.yml'] | pydantic_playground }}
-///
-
-
 This example demonstrates how AI agents can interact with humans:
 
 - Using agent capabilities for human interaction
@@ -42,3 +37,80 @@ This demonstrates how to:
 - Enable AI-human collaboration
 - Control when AI can request human input
 - Integrate human knowledge into AI responses
+## Code
+
+### `main.py`
+
+```python
+# /// script
+# dependencies = ["agentpool"]
+# ///
+
+
+"""Example of AI-Human interaction using agent capabilities.
+
+This example demonstrates:
+- Using a human agent for interactive input
+- AI agent querying human agent when unsure
+- Using the can_ask_agents capability
+"""
+
+from __future__ import annotations
+
+import os
+
+from agentpool import AgentPool, AgentsManifest
+from agentpool.docs.utils import get_config_path, is_pyodide, run
+
+
+# set your OpenAI API key here
+os.environ["OPENAI_API_KEY"] = os.environ.get("OPENAI_API_KEY", "your_api_key_here")
+
+
+QUESTION = """
+What is the current status of Project DoomsDay?
+This is crucial information that only a human would know.
+If you don't know, ask the agent named "human".
+"""
+
+
+async def run_example() -> None:
+    # Load config from YAML
+    config_path = get_config_path(None if is_pyodide() else __file__)
+    manifest = AgentsManifest.from_file(config_path)
+
+    async with AgentPool(manifest) as pool:
+        # Get the assistant agent
+        assistant = pool.get_agent("assistant")
+
+        # Run interaction
+        await assistant.run(QUESTION)
+
+        # Print conversation history
+        print(await assistant.conversation.format_history())
+
+
+if __name__ == "__main__":
+    run(run_example())
+```
+
+### `config.yml`
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phil65/agentpool/refs/heads/main/schema/config-schema.json
+agents:
+  assistant:
+    type: native
+    model: openai:gpt-5-nano
+    tools:
+      - type: agent_cli
+    system_prompt: |
+      You are a helpful assistant. When you're not sure about something,
+      don't hesitate to ask the human agent for guidance.
+
+  human:
+    model:
+      type: input
+    description: "A human who can provide answers"
+```
+

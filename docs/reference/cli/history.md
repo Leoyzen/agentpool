@@ -1,8 +1,18 @@
 ---
 title: history
-description: Manage conversation history
+description: View agent interaction history
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="history") }}
-///
+# history
+
+View and analyze agent interaction history.
+
+```bash
+agentpool history stats --group-by model
+```
+
+For a full list of options, run:
+
+```bash
+agentpool history --help
+```

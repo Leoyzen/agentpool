@@ -1,8 +1,18 @@
 ---
 title: serve-opencode
-description: Run agents as an OpenCode server
+description: Start OpenCode server
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="serve-opencode") }}
-///
+# serve-opencode
+
+Start the OpenCode server to expose agents to the OpenCode TUI/Desktop interface.
+
+```bash
+agentpool serve-opencode config.yml
+```
+
+For a full list of options, run:
+
+```bash
+agentpool serve-opencode --help
+```

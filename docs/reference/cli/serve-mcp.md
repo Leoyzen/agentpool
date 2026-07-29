@@ -1,8 +1,18 @@
 ---
 title: serve-mcp
-description: Run agents as an MCP server
+description: Start MCP server
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="serve-mcp") }}
-///
+# serve-mcp
+
+Start the MCP (Model Context Protocol) server to expose agent tools to other MCP-compatible clients.
+
+```bash
+agentpool serve-mcp config.yml
+```
+
+For a full list of options, run:
+
+```bash
+agentpool serve-mcp --help
+```

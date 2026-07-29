@@ -50,9 +50,18 @@ Everything is a MessageNode - enabling seamless composition:
 
 ## Dependencies
 
-/// mknodes
-{{ "agentpool"| MkDependencyTable }}
-///
+| Category | Representative Packages |
+|---|---|
+| **Framework & AI** | `pydantic`, `pydantic-ai-slim`, `pydantic-graph` |
+| **Web, Server & Protocols** | `fastapi`, `mcp`, `starlette`, `uvicorn`, `websockets` |
+| **Storage & Database** | `sqlalchemy`, `sqlmodel`, `alembic` |
+| **CLI & Configuration** | `typer`, `rich`, `yamling`, `schemez` |
+| **Async, IO & Execution** | `anyio`, `anyenv`, `fsspec`, `watchfiles` |
+| **Observability** | `logfire`, `structlog` |
+| **Documents & Search** | `docler`, `searchly`, `ripgrep-rs`, `tokonomics` |
+| **Tooling & Events** | `jinja2`, `psygnal`, `evented`, `slashed`, `pydocket` |
+
+> See the [full dependency list](tutorials/dependencies.md) for complete details and version info.
 
 ## License
 

@@ -1,8 +1,18 @@
 ---
 title: watch
-description: Run agents in event-watching mode
+description: Watch for triggers and react
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="watch") }}
-///
+# watch
+
+Watch for triggers and react automatically based on configured event sources.
+
+```bash
+agentpool watch --config agents.yml
+```
+
+For a full list of options, run:
+
+```bash
+agentpool watch --help
+```

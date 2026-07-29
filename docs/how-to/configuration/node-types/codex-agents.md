@@ -28,9 +28,16 @@ Codex agents are ideal for:
 
 ## Configuration Reference
 
-/// mknodes
-{{ "agentpool.models.codex_agents.CodexAgentConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", as_listitem=False) }}
-///
+The Codex agent accepts the following configuration parameters:
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `type` | string | Must be `"codex"` | Required |
+| `model` | string | Codex model identifier | Required |
+| `cwd` | string | Working directory | Current directory |
+| `reasoning_effort` | string | Reasoning level (`low`, `medium`, `high`) | `"medium"` |
+| `approval_policy` | string | Tool execution approval (`never`, `auto`, `always`) | `"never"` |
+| `output_type` | string | Structured output type name | None |
 
 ## Examples
 

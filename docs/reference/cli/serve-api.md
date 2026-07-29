@@ -1,8 +1,18 @@
 ---
 title: serve-api
-description: Run agents as an API server
+description: Start OpenAI-compatible API server
 ---
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="serve-api") }}
-///
+# serve-api
+
+Start an OpenAI-compatible API server that exposes agents through a drop-in OpenAI API replacement.
+
+```bash
+agentpool serve-api config.yml
+```
+
+For a full list of options, run:
+
+```bash
+agentpool serve-api --help
+```

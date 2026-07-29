@@ -18,9 +18,59 @@ These commands help you inspect which configs are being loaded and create new on
 
 ## Commands
 
-/// mknodes
-{{ "agentpool.__main__:cli"| MkCliDoc(prog_name="config") }}
-///
+The `config` command group includes the following commands:
+
+```bash
+# Show current configuration
+agentpool config show [config_path]
+
+# Show config search paths
+agentpool config paths
+
+# Initialize a new configuration
+agentpool config init [path] [--force]
+```
+
+### config show
+
+Display the current configuration, showing which config files are found and what they contain.
+
+```bash
+# Show merged configuration
+agentpool config show
+
+# Show with a specific explicit config
+agentpool config show my-agents.yml
+
+# Output as YAML
+agentpool config show --format yaml
+```
+
+### config paths
+
+Display the paths AgentPool searches for configuration files.
+
+```bash
+agentpool config paths
+```
+
+### config init
+
+Create a new configuration file.
+
+```bash
+# Create a starter config in current project
+agentpool config init
+
+# Create global config for user-wide preferences
+agentpool config init global
+
+# Create at a specific path
+agentpool config init ./configs/my-agents.yml
+
+# Overwrite existing config
+agentpool config init --force
+```
 
 ## Examples
 

@@ -28,9 +28,19 @@ Claude Code agents are ideal for:
 
 ## Configuration Reference
 
-/// mknodes
-{{ "agentpool.models.claude_code_agents.ClaudeCodeAgentConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", as_listitem=False) }}
-///
+The Claude Code agent accepts the following configuration parameters:
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `type` | string | Must be `"claude_code"` | Required |
+| `model` | string | Claude model identifier | Required |
+| `system_prompt` | string/list | Custom system prompts | None |
+| `include_builtin_system_prompt` | bool | Whether to include built-in prompt | `true` |
+| `allowed_tools` | list | Restrict to specific tools | All allowed |
+| `disallowed_tools` | list | Block specific tools | None |
+| `max_thinking_tokens` | int | Extended thinking budget | None |
+| `permission_mode` | string | Tool permission handling | `"default"` |
+| `env_vars` | dict | Environment variables | `{}` |
 
 ## Examples
 

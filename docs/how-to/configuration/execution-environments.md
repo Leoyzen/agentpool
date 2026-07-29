@@ -7,9 +7,14 @@ Execution environments allow you to configure the runtime environment for your a
 
 Any Agent which can perform IO (regular Agents & ACP Agents) can get assigned an execution environment.
 
-/// mknodes
-{{ "exxec.configs.ExecutionEnvironmentConfig" | union_to_markdown(display_mode="yaml", header_style="pymdownx") }}
-///
+## Configuration
 
-Theres one more execution environment, the ACP environment.
-This one cannot get assigned manually, but it becomes to default execution environment for any agent participating in an ACP session. (its overridable though, an ACP agent can also work remotely!)
+The execution environment can be configured with the following options:
+
+- **type**: The type of execution environment (e.g., `local`)
+- **cwd**: Working directory for command execution
+- **env**: Environment variables
+- **timeout**: Maximum execution time
+
+There's one more execution environment, the ACP environment.
+This one cannot get assigned manually, but it becomes the default execution environment for any agent participating in an ACP session (it's overridable though, an ACP agent can also work remotely!).

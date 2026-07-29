@@ -1,33 +1,54 @@
 ---
 title: User Interaction Toolset
-description: Interact with users
+description: Interact with users via forms and questions
 ---
 
 # User Interaction Toolset
 
-Tools for agents to interact with users during execution.
-
-## Basic Usage
-
-```yaml
-agents:
-  my_agent:
-    tools:
-      - type: user_interaction
-```
+The user interaction toolset provides tools for agents to ask questions and collect structured responses from users. It uses the MCP Elicit protocol so forms can be rendered by compatible clients (IDEs, TUI, etc.).
 
 ## Available Tools
 
-```python exec="true"
-from agentpool_toolsets.builtin import UserInteractionTools
-from agentpool.docs.utils import generate_tool_docs
+| Tool | Purpose |
+|---|---|
+| `question_for_user` | Present a multi-question XML questionnaire (enum, multi, input types) |
+| `ask_followup_question` | Ask a single follow-up question with `<suggest>` tag options |
 
-toolset = UserInteractionTools()
-print(generate_tool_docs(toolset))
+## `question_for_user`
+
+Takes an XML `questionnaire` string describing one or more questions and presents them as a form.
+
+XML format (use single quotes for attributes to avoid JSON escaping issues):
+
+```xml
+<question header="Model" type="enum" required="true">
+  <text>What model?</text>
+  <suggest type="choice">Option 1</suggest>
+  <suggest type="choice">Option 2</suggest>
+</question>
 ```
 
-## Configuration Reference
+Supported question types:
 
-/// mknodes
-{{ "agentpool_config.toolsets.UserInteractionToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
-///
+- `enum`: single choice from a list of `<suggest>` options
+- `multi`: multiple choice
+- `input`: free-text input
+
+## `ask_followup_question`
+
+Takes a `question` string and a `follow_up` string containing `<suggest>` tags.
+
+```xml
+Do you want to proceed?
+<suggest type="choice">Yes</suggest>
+<suggest type="choice">No</suggest>
+<suggest type="input">Tell me more...</suggest>
+```
+
+The user can pick one of the choices or provide custom input.
+
+## Responses
+
+Both tools return the user's answers through the agent tool result. Agents can then use the answers to decide next steps or personalize their response.
+
+For implementation details, see `agentpool_toolsets.builtin.question_tools`.

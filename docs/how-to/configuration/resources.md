@@ -24,9 +24,7 @@ Resources are loaded on-demand when agents request them, supporting parameteriza
 
 ## Configuration Reference
 
-/// mknodes
-{{ "agentpool_config.loaders.Resource" | union_to_markdown(display_mode="yaml", header_style="pymdownx") }}
-///
+For the full resource type reference, see the `agentpool_config.loaders.Resource` schema documentation.
 
 ## Key Features
 

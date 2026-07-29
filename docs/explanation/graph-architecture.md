@@ -52,7 +52,7 @@ flowchart LR
     start((start)) --> agent1[analyzer]
     agent1 --> agent2[reviewer]
     agent2 --> agent3[formatter]
-    agent3 --> end((end))
+    agent3 --> end_node((end))
 ```
 
 **Parallel teams** compile to Fork + Join:
@@ -64,7 +64,7 @@ flowchart TB
     fork --> agent2[goose]
     agent1 --> join{Join}
     agent2 --> join
-    join --> end((end))
+    join --> end_node((end))
 ```
 
 The `AgentPool` lazily builds the graph from registered nodes and `Talk` connections. The graph rebuilds automatically when nodes are added or removed.

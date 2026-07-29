@@ -24,11 +24,18 @@ AG-UI agents are useful for:
 - Connecting to remote agent deployments
 - Testing with locally spawned servers
 
-## Configuration Reference
+## Configuration Schema
 
-/// mknodes
-{{ "agentpool.models.agui_agents.AGUIAgentConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx") }}
-///
+The AG-UI agent accepts the following configuration fields:
+
+| Field | Type | Description | Default |
+|-------|------|-------------|---------|
+| `type` | string | Must be `"agui"` | Required |
+| `endpoint` | string | HTTP URL for the AG-UI agent server | Required |
+| `timeout` | float | Maximum wait time for agent responses | 30.0 |
+| `headers` | dict | Custom HTTP headers for authentication | `{}` |
+| `startup_command` | string | Command to spawn the server process | None |
+| `startup_delay` | float | Delay before connecting after startup | 0.0 |
 
 ## Basic Usage
 

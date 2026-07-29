@@ -24,8 +24,30 @@ agents:
       temperature: 0.5
 ```
 
-## Configuration Reference
+## Supported Models
 
-/// mknodes
-{{ "llmling_models_config.AnyModelConfig" | union_to_markdown(display_mode="yaml", header_style="pymdownx") }}
-///
+AgentPool supports the following model providers through Pydantic-AI:
+
+- **openai**: OpenAI models (GPT-4, GPT-3.5, etc.)
+- **anthropic**: Anthropic Claude models
+- **google-vertex**: Google Vertex AI models
+- **groq**: Groq models
+- **mistral**: Mistral AI models
+- **cohere**: Cohere models
+- **gemini**: Google Gemini models
+- **ollama**: Local models via Ollama
+
+## Model Configuration Options
+
+Models can be configured with:
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `provider` | Model provider name | Required |
+| `model` | Model identifier | Required |
+| `temperature` | Sampling temperature | 0.7 |
+| `max_tokens` | Maximum tokens per response | Varies |
+| `top_p` | Top-p sampling | 1.0 |
+| `timeout` | Request timeout | 60s |
+
+For the full schema documentation, see the [LLMling-models](https://github.com/phil65/LLMling-models) package.
