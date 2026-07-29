@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage, ModelResponse, ToolReturnPart
 
     from agentpool import AgentPool
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool_config.team_mode import TeamModeConfig
 
 
@@ -74,7 +74,7 @@ def _user_prompt_text(messages: list[ModelMessage]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# AgentContext builder for direct capability testing
+# AgentContextDeps builder for direct capability testing
 # ---------------------------------------------------------------------------
 
 
@@ -82,14 +82,14 @@ def build_agent_context(
     pool: AgentPool[Any],
     session_id: str,
     team_mode_config: TeamModeConfig,
-) -> AgentContext:
-    """Construct a real ``AgentContext`` for calling team tools directly.
+) -> AgentContextDeps:
+    """Construct a real ``AgentContextDeps`` for calling team tools directly.
 
     This mirrors what the RunLoop creates per-turn, allowing tests to
     invoke ``TeamCommCapability`` methods without going through
     ``Agent.run()``.
     """
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
     from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
     from agentpool.host.context import RunScope
     from agentpool.host.registry import AgentRegistry
@@ -112,7 +112,7 @@ def build_agent_context(
         user_id=None,
         session_id=session_id,
     )
-    return AgentContext(
+    return AgentContextDeps(
         agent_registry=registry,
         delegation=delegation,
         session=session,
@@ -122,11 +122,11 @@ def build_agent_context(
     )
 
 
-def make_mock_run_context(agent_ctx: AgentContext) -> MagicMock:
-    """Create a mock pydantic-ai ``RunContext`` with ``AgentContext`` as deps.
+def make_mock_run_context(agent_ctx: AgentContextDeps) -> MagicMock:
+    """Create a mock pydantic-ai ``RunContext`` with ``AgentContextDeps`` as deps.
 
-    ``_resolve_agent_context`` checks ``isinstance(deps, AgentContext)``
-    from ``capabilities.agent_context`` — our ``AgentContext`` matches that
+    ``_resolve_agent_context`` checks ``isinstance(deps, AgentContextDeps)``
+    from ``capabilities.agent_context`` — our ``AgentContextDeps`` matches that
     check and is returned directly.
     """
     ctx: Any = MagicMock()
@@ -245,12 +245,12 @@ def make_run_context(
     session_id: str = "lead_session_001",
     delegation: MagicMock | None = None,
 ) -> MagicMock:
-    """Create a mock RunContext with AgentContext deps.
+    """Create a mock RunContext with AgentContextDeps deps.
 
     If ``session_pool`` is provided, ensures its async methods and
     sub-attributes are properly mocked for team tool operations.
     """
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
     cfg = config or make_enabled_config(base_dir=base_dir)
 
@@ -269,7 +269,7 @@ def make_run_context(
         if not (isinstance(eb, MagicMock) and isinstance(getattr(eb, "publish", None), AsyncMock)):
             session_pool.event_bus = None
 
-    agent_ctx: Any = MagicMock(spec=AgentContext)
+    agent_ctx: Any = MagicMock(spec=AgentContextDeps)
     agent_ctx.session.metadata = metadata if metadata is not None else make_lead_metadata()
     agent_ctx.host.session_pool = session_pool
     agent_ctx.team_mode_config = cfg

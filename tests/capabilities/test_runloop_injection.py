@@ -1,6 +1,6 @@
-"""Tests for AgentContext runtime injection into RunLoop (task group 15).
+"""Tests for AgentContextDeps runtime injection into RunLoop (task group 15).
 
-Verifies that RunHandle._inject_agent_context() constructs an AgentContext
+Verifies that RunHandle._inject_agent_context() constructs an AgentContextDeps
 per turn and sets it as run_ctx.deps, making it available to capabilities
 like SubagentCapability via pydantic-ai's RunContext.
 """
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentpool.agents.context import AgentRunContext
-from agentpool.capabilities.agent_context import AgentContext
+from agentpool.capabilities.agent_context import AgentContextDeps
 from agentpool.capabilities.delegation import DelegationService
 from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
 from agentpool.host.context import HostContext, RunScope
@@ -59,14 +59,14 @@ def _make_run_handle(
 
 
 def test_inject_agent_context_sets_deps() -> None:
-    """Test that _inject_agent_context sets run_ctx.deps to an AgentContext."""
+    """Test that _inject_agent_context sets run_ctx.deps to an AgentContextDeps."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
 
     assert handle.run_ctx.deps is None
     handle._inject_agent_context()
-    assert isinstance(handle.run_ctx.deps, AgentContext)
+    assert isinstance(handle.run_ctx.deps, AgentContextDeps)
 
 
 def test_inject_agent_context_noop_without_host() -> None:
@@ -85,62 +85,62 @@ def test_inject_agent_context_noop_without_registry() -> None:
 
 
 def test_injected_context_has_correct_scope() -> None:
-    """Test that the injected AgentContext has the correct session_id scope."""
+    """Test that the injected AgentContextDeps has the correct session_id scope."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
     handle._inject_agent_context()
 
-    ctx: AgentContext = handle.run_ctx.deps
+    ctx: AgentContextDeps = handle.run_ctx.deps
     assert isinstance(ctx.scope, RunScope)
     assert ctx.scope.session_id == "test-session"
 
 
 def test_injected_context_has_delegation_service() -> None:
-    """Test that the injected AgentContext has a RunLoopDelegationService."""
+    """Test that the injected AgentContextDeps has a RunLoopDelegationService."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
     handle._inject_agent_context()
 
-    ctx: AgentContext = handle.run_ctx.deps
+    ctx: AgentContextDeps = handle.run_ctx.deps
     assert isinstance(ctx.delegation, RunLoopDelegationService)
     assert isinstance(ctx.delegation, DelegationService)
 
 
 def test_injected_context_has_host() -> None:
-    """Test that the injected AgentContext.host is the same HostContext."""
+    """Test that the injected AgentContextDeps.host is the same HostContext."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
     handle._inject_agent_context()
 
-    ctx: AgentContext = handle.run_ctx.deps
+    ctx: AgentContextDeps = handle.run_ctx.deps
     assert ctx.host is host
 
 
 def test_injected_context_has_registry() -> None:
-    """Test that the injected AgentContext.agent_registry is the same registry."""
+    """Test that the injected AgentContextDeps.agent_registry is the same registry."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
     handle._inject_agent_context()
 
-    ctx: AgentContext = handle.run_ctx.deps
+    ctx: AgentContextDeps = handle.run_ctx.deps
     assert ctx.agent_registry is registry
 
 
 def test_inject_creates_fresh_context_per_call() -> None:
-    """Test that each injection call creates a new AgentContext instance."""
+    """Test that each injection call creates a new AgentContextDeps instance."""
     host = _make_host_context()
     registry = AgentRegistry()
     handle = _make_run_handle(host_context=host, agent_registry=registry)
 
     handle._inject_agent_context()
-    ctx1: AgentContext = handle.run_ctx.deps
+    ctx1: AgentContextDeps = handle.run_ctx.deps
 
     handle._inject_agent_context()
-    ctx2: AgentContext = handle.run_ctx.deps
+    ctx2: AgentContextDeps = handle.run_ctx.deps
 
     assert ctx1 is not ctx2
 

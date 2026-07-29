@@ -11,7 +11,7 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import FunctionToolset
 import pytest
 
-from agentpool.capabilities.agent_context import AgentContext
+from agentpool.capabilities.agent_context import AgentContextDeps
 from agentpool.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
 from agentpool.capabilities.resource_capability import ResourceCapability
 from agentpool.capabilities.resource_protocols import (
@@ -133,14 +133,14 @@ class FakeResourceTemplateAccess:
 
 def _make_agent_context(
     registry: ExtensionRegistry | None = None,
-) -> AgentContext:
-    """Build an AgentContext with test doubles."""
+) -> AgentContextDeps:
+    """Build an AgentContextDeps with test doubles."""
     agent_registry = MagicMock()
     delegation = MagicMock()
     session = MagicMock()
     session.session_id = "test-session-001"
     host = MagicMock()
-    return AgentContext(
+    return AgentContextDeps(
         agent_registry=agent_registry,
         delegation=delegation,
         session=session,
@@ -150,8 +150,8 @@ def _make_agent_context(
     )
 
 
-def _make_ctx(agent_ctx: AgentContext) -> Any:
-    """Create a RunContext-like object with AgentContext as deps."""
+def _make_ctx(agent_ctx: AgentContextDeps) -> Any:
+    """Create a RunContext-like object with AgentContextDeps as deps."""
     ctx = MagicMock()
     ctx.deps = agent_ctx
     return ctx
@@ -893,22 +893,22 @@ async def test_list_resources_multiple_providers_same_type() -> None:
 
 
 async def test_resolve_agent_context_wrong_deps_type() -> None:
-    """_resolve_agent_context raises RuntimeError for non-AgentContext deps."""
+    """_resolve_agent_context raises RuntimeError for non-AgentContextDeps deps."""
     ctx = MagicMock()
-    ctx.deps = "not an AgentContext"
+    ctx.deps = "not an AgentContextDeps"
 
     cap = ResourceCapability()
-    with pytest.raises(RuntimeError, match="ResourceCapability requires AgentContext"):
+    with pytest.raises(RuntimeError, match="ResourceCapability requires AgentContextDeps"):
         await cap.list_resources(ctx)
 
 
 async def test_resolve_agent_context_from_runtime_context() -> None:
     """_resolve_agent_context unwraps AgentContext from RuntimeAgentContext.data.
 
-    In production, PydanticAI wraps our AgentContext inside
+    In production, PydanticAI wraps our AgentContextDeps inside
     agents.context.AgentContext.data. The tool functions receive
     ctx.deps = agents.context.AgentContext, and our
-    capabilities.agent_context.AgentContext is at ctx.deps.data.
+    capabilities.agent_context.AgentContextDeps is at ctx.deps.data.
     """
     from agentpool.agents.context import AgentContext as RuntimeAgentContext
 
@@ -923,7 +923,7 @@ async def test_resolve_agent_context_from_runtime_context() -> None:
     result = await cap.list_resources(ctx)
 
     # Should NOT raise — should return "No resources available." since
-    # extension_registry is None on the inner AgentContext.
+    # extension_registry is None on the inner AgentContextDeps.
     assert result == "No resources available."
 
 
@@ -934,7 +934,7 @@ async def test_resolve_agent_context_none_deps() -> None:
 
     cap = ResourceCapability()
     with pytest.raises(
-        RuntimeError, match=r"ResourceCapability requires AgentContext as deps\. Got: None"
+        RuntimeError, match=r"ResourceCapability requires AgentContextDeps as deps\. Got: None"
     ):
         await cap.list_resources(ctx)
 
@@ -951,7 +951,8 @@ async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
 
     cap = ResourceCapability()
     with pytest.raises(
-        RuntimeError, match=r"ResourceCapability requires AgentContext at deps\.data\. Got: None"
+        RuntimeError,
+        match=r"ResourceCapability requires AgentContextDeps at deps\.data\. Got: None",
     ):
         await cap.list_resources(ctx)
 
@@ -963,7 +964,7 @@ async def test_resolve_agent_context_neither_type() -> None:
 
     cap = ResourceCapability()
     with pytest.raises(
-        RuntimeError, match=r"ResourceCapability requires AgentContext as deps\. Got: object"
+        RuntimeError, match=r"ResourceCapability requires AgentContextDeps as deps\. Got: object"
     ):
         await cap.list_resources(ctx)
 

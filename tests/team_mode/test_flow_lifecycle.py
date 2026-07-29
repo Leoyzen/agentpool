@@ -71,7 +71,7 @@ def _make_run_context(
     session_id: str = "lead_session_001",
     delegation: MagicMock | None = None,
 ) -> MagicMock:
-    """Create a mock RunContext with AgentContext deps.
+    """Create a mock RunContext with AgentContextDeps deps.
 
     Args:
         metadata: Session metadata dict (defaults to lead metadata).
@@ -83,13 +83,13 @@ def _make_run_context(
         delegation: Mock DelegationService (defaults to a generic MagicMock).
 
     Returns:
-        A MagicMock whose .deps is a mock AgentContext.
+        A MagicMock whose .deps is a mock AgentContextDeps.
     """
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
     cfg = config or _make_enabled_config(base_dir=base_dir)
 
-    agent_ctx = MagicMock(spec=AgentContext)
+    agent_ctx = MagicMock(spec=AgentContextDeps)
     agent_ctx.session.metadata = metadata if metadata is not None else _make_lead_metadata()
     agent_ctx.host.session_pool = session_pool
     agent_ctx.team_mode_config = cfg

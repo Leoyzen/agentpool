@@ -22,7 +22,7 @@ import pytest
 import yamling
 
 from agentpool import AgentPool, AgentsManifest
-from agentpool.capabilities.agent_context import AgentContext
+from agentpool.capabilities.agent_context import AgentContextDeps
 from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
 from agentpool.capabilities.team_comm_capability import TeamCommCapability
 from agentpool.host.context import RunScope
@@ -78,8 +78,8 @@ def _make_agent_context(
     pool: AgentPool[Any],
     session_id: str,
     team_mode_config: TeamModeConfig,
-) -> AgentContext:
-    """Construct a real AgentContext for calling team_create directly."""
+) -> AgentContextDeps:
+    """Construct a real AgentContextDeps for calling team_create directly."""
     session_pool = pool.session_pool
     assert session_pool is not None
     session = session_pool.sessions.get_session(session_id)
@@ -98,7 +98,7 @@ def _make_agent_context(
         user_id=None,
         session_id=session_id,
     )
-    return AgentContext(
+    return AgentContextDeps(
         agent_registry=registry,
         delegation=delegation,
         session=session,
@@ -108,11 +108,11 @@ def _make_agent_context(
     )
 
 
-def _make_mock_run_context(agent_ctx: AgentContext) -> MagicMock:
-    """Create a mock pydantic-ai RunContext with AgentContext as deps.
+def _make_mock_run_context(agent_ctx: AgentContextDeps) -> MagicMock:
+    """Create a mock pydantic-ai RunContext with AgentContextDeps as deps.
 
-    ``_resolve_agent_context`` checks ``isinstance(deps, AgentContext)``
-    from ``capabilities.agent_context`` — our AgentContext matches that
+    ``_resolve_agent_context`` checks ``isinstance(deps, AgentContextDeps)``
+    from ``capabilities.agent_context`` — our AgentContextDeps matches that
     check and is returned directly.
     """
     ctx = MagicMock()
@@ -181,7 +181,7 @@ async def test_member_sessions_closed_when_lead_idle_and_no_active_runs(
         # (needed for team_create's cleanup scheduling).
         run_handle = _inject_run_handle(session_pool, lead_session)
 
-        # Construct AgentContext and call team_create.
+        # Construct AgentContextDeps and call team_create.
         agent_ctx = _make_agent_context(pool, lead_session_id, team_mode_config)
         cap = TeamCommCapability(
             team_mode_config,

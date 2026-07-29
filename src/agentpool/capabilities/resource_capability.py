@@ -4,7 +4,7 @@ Provides a single ``AbstractCapability`` that aggregates resource access
 across all visible ``ResourceAccess``, ``SkillResource``, and
 ``ResourceTemplateAccess`` providers registered in the
 ``ExtensionRegistry``. The capability is stateless — it reads
-``ctx.deps`` (an ``AgentContext``) at runtime to resolve providers.
+``ctx.deps`` (an ``AgentContextDeps``) at runtime to resolve providers.
 
 Tools exposed:
     - ``list_resources``: Aggregate resources from MCP + skills
@@ -36,7 +36,7 @@ from agentpool.capabilities.resource_protocols import (
 
 
 if TYPE_CHECKING:
-    from agentpool.capabilities.agent_context import AgentContext
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
 
 # Number of header lines (header + separator) before data rows.
@@ -52,7 +52,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     """Unified resource access capability providing 5 agent-facing tools.
 
     Aggregates resources from all visible providers (MCP servers, local
-    skills) via the ``ExtensionRegistry`` on ``AgentContext``. The
+    skills) via the ``ExtensionRegistry`` on ``AgentContextDeps``. The
     capability is stateless — no resources are held between turns.
 
     Tools route by URI scheme:
@@ -107,7 +107,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         """Return a ``FunctionToolset`` with all 5 resource tools.
 
         The tools access ``ctx.deps`` at runtime, which must be an
-        ``AgentContext`` with an ``extension_registry`` field.
+        ``AgentContextDeps`` with an ``extension_registry`` field.
         """
         return FunctionToolset(
             [
@@ -125,29 +125,29 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContext:
-        """Extract the ``AgentContext`` from the run context deps.
+    def _resolve_agent_context(ctx: RunContext[AgentDepsT]) -> AgentContextDeps:
+        """Extract the ``AgentContextDeps`` from the run context deps.
 
         Delegates to the shared ``resolve_agent_context_from_deps`` utility
         which handles both the production path (``RuntimeAgentContext.data``)
-        and the test path (direct ``AgentContext``).
+        and the test path (direct ``AgentContextDeps``).
 
         Args:
             ctx: The pydantic-ai run context.
 
         Returns:
-            The ``AgentContext`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
+            The ``AgentContextDeps`` instance from ``ctx.deps`` (or ``ctx.deps.data``).
 
         Raises:
-            RuntimeError: If deps is None or AgentContext is not found.
+            RuntimeError: If deps is None or AgentContextDeps is not found.
         """
         from agentpool.capabilities.agent_context import resolve_agent_context_from_deps
 
         return resolve_agent_context_from_deps(ctx.deps, capability_name="ResourceCapability")
 
     @staticmethod
-    def _make_scope(agent_ctx: AgentContext) -> Scope:
-        """Build a ``Scope`` from ``AgentContext`` fields.
+    def _make_scope(agent_ctx: AgentContextDeps) -> Scope:
+        """Build a ``Scope`` from ``AgentContextDeps`` fields.
 
         Args:
             agent_ctx: The per-turn agent context.

@@ -1,17 +1,20 @@
-"""AgentContext — frozen dataclass carrying per-turn runtime state.
+"""AgentContextDeps — frozen dataclass carrying per-turn runtime state.
 
 Constructed by RunLoop at Turn time (M2 task group 15), not by
 AgentFactory at compile time. Provides typed references to all
 per-turn services that agent tools and capabilities need.
 
-ResourceSource is imported under TYPE_CHECKING to avoid a circular
-dependency with todo 2's ``resource_source.py`` module.
+This class is the ``deps`` type for pydantic-ai's ``RunContext``.
+It is distinct from ``agentpool.agents.context.AgentContext`` which IS
+the ``RunContext`` itself. The name ``AgentContextDeps`` makes this
+relationship explicit: ``RunContext[AgentContextDeps]``.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
+import warnings
 
 
 if TYPE_CHECKING:
@@ -24,8 +27,8 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class AgentContext:
-    """Immutable per-turn context injected into pydantic-ai RunContext.
+class AgentContextDeps:
+    """Immutable per-turn context injected into pydantic-ai RunContext.deps.
 
     Carries typed references to per-turn runtime state. A new instance
     is created for each Turn — no reuse across turns.
@@ -51,40 +54,56 @@ class AgentContext:
 
 def resolve_agent_context_from_deps(
     deps: Any, *, capability_name: str = "Capability"
-) -> AgentContext:
-    """Unwrap the M2 ``AgentContext`` from pydantic-ai runtime deps.
+) -> AgentContextDeps:
+    """Unwrap the M2 ``AgentContextDeps`` from pydantic-ai runtime deps.
 
     In production, ``ctx.deps`` is ``agents.context.AgentContext`` (the
-    PydanticAI runtime context). Our ``capabilities.agent_context.AgentContext``
+    PydanticAI runtime context). Our ``capabilities.agent_context.AgentContextDeps``
     is stored at ``deps.data``, set by ``NativeTurn`` (turn.py:
     ``agent_deps.data = run_ctx.deps``). In tests, deps may be directly
-    our ``AgentContext``.
+    our ``AgentContextDeps``.
 
     Args:
         deps: The ``ctx.deps`` value from a pydantic-ai ``RunContext``.
         capability_name: Name of the calling capability, used in error messages.
 
     Returns:
-        The ``AgentContext`` instance from ``deps`` (or ``deps.data``).
+        The ``AgentContextDeps`` instance from ``deps`` (or ``deps.data``).
 
     Raises:
         RuntimeError: If deps is None, ``.data`` is None, or deps is
-            neither ``RuntimeAgentContext`` nor ``AgentContext``.
+            neither ``RuntimeAgentContext`` nor ``AgentContextDeps``.
     """
     from agentpool.agents.context import AgentContext as RuntimeAgentContext
 
     if deps is None:
-        msg = f"{capability_name} requires AgentContext as deps. Got: None"
+        msg = f"{capability_name} requires AgentContextDeps as deps. Got: None"
         raise RuntimeError(msg)
-    # Production path: deps is RuntimeAgentContext, M2 AgentContext at .data
+    # Production path: deps is RuntimeAgentContext, M2 AgentContextDeps at .data
     if isinstance(deps, RuntimeAgentContext):
         inner = deps.data
         if inner is None:
-            msg = f"{capability_name} requires AgentContext at deps.data. Got: None"
+            msg = f"{capability_name} requires AgentContextDeps at deps.data. Got: None"
             raise RuntimeError(msg)
-        return cast(AgentContext, inner)
-    # Test path: deps is directly our AgentContext
-    if isinstance(deps, AgentContext):
+        return cast(AgentContextDeps, inner)
+    # Test path: deps is directly our AgentContextDeps
+    if isinstance(deps, AgentContextDeps):
         return deps
-    msg = f"{capability_name} requires AgentContext as deps. Got: {type(deps).__name__}"
+    msg = f"{capability_name} requires AgentContextDeps as deps. Got: {type(deps).__name__}"
     raise RuntimeError(msg)
+
+
+# --- Deprecated alias for backward compatibility -----------------------------
+# Remove in the next minor release after external consumers have migrated.
+
+
+def __getattr__(name: str) -> Any:
+    if name == "AgentContext":
+        warnings.warn(
+            "agentpool.capabilities.agent_context.AgentContext is deprecated; "
+            "use AgentContextDeps instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return AgentContextDeps
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

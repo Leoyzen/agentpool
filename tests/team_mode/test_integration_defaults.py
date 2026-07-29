@@ -41,10 +41,10 @@ def _make_run_context(
     delegation: MagicMock,
     session_id: str = "lead_session_001",
 ) -> MagicMock:
-    """Create a mock RunContext with AgentContext deps for integration tests."""
-    from agentpool.capabilities.agent_context import AgentContext
+    """Create a mock RunContext with AgentContextDeps deps for integration tests."""
+    from agentpool.capabilities.agent_context import AgentContextDeps
 
-    agent_ctx = MagicMock(spec=AgentContext)
+    agent_ctx = MagicMock(spec=AgentContextDeps)
     agent_ctx.session.metadata = metadata
     agent_ctx.host.session_pool = session_pool
     agent_ctx.team_mode_config = config

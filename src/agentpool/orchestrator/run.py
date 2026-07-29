@@ -244,9 +244,9 @@ class RunHandle:
     # HostContext injection (M3 task group 15) — now sourced from SessionState
     # ------------------------------------------------------------------
     _host_context: HostContext | None = None
-    """HostContext for constructing per-turn AgentContext.
+    """HostContext for constructing per-turn AgentContextDeps.
 
-    When set, ``start()`` constructs an ``AgentContext`` per turn and
+    When set, ``start()`` constructs an ``AgentContextDeps`` per turn and
     injects it into ``run_ctx.deps`` so capabilities like
     ``SubagentCapability`` can access the delegation service.
     """
@@ -295,10 +295,10 @@ class RunHandle:
         return self.active_agent_run
 
     def _inject_agent_context(self) -> None:
-        """Construct and inject AgentContext into run_ctx.deps.
+        """Construct and inject AgentContextDeps into run_ctx.deps.
 
-        Builds a fresh ``AgentContext`` per turn using the host context,
-        agent registry, and resource source. The AgentContext is set as
+        Builds a fresh ``AgentContextDeps`` per turn using the host context,
+        agent registry, and resource source. The AgentContextDeps is set as
         ``run_ctx.deps`` so pydantic-ai's ``RunContext.deps`` carries it
         into tool calls. Capabilities like ``SubagentCapability`` access
         it via ``ctx.deps``.
@@ -308,7 +308,7 @@ class RunHandle:
         """
         if self._host_context is None:
             return
-        from agentpool.capabilities.agent_context import AgentContext
+        from agentpool.capabilities.agent_context import AgentContextDeps
         from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
         from agentpool.host.context import RunScope
 
@@ -326,7 +326,7 @@ class RunHandle:
             host=self._host_context,
             session_id=self.session_id,
         )
-        ctx = AgentContext(
+        ctx = AgentContextDeps(
             agent_registry=registry,
             delegation=delegation,
             session=self.session,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
@@ -525,7 +525,7 @@ class RunHandle:
         # Reset per-turn state.
         if self.run_ctx.cancelled:
             self.run_ctx.cancelled = False
-        # Construct per-turn AgentContext and inject as deps so
+        # Construct per-turn AgentContextDeps and inject as deps so
         # capabilities (SubagentCapability, etc.) can access the
         # delegation service, resource sources, and host.
         self._inject_agent_context()
