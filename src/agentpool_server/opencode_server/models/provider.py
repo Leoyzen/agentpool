@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import Field, model_validator
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
     from tokonomics.model_discovery.model_info import ModelInfo as TokoModelInfo
 
     from agentpool_config.model_capabilities import ModelCapabilities
+
+logger = logging.getLogger(__name__)
 
 
 class CostCache(OpenCodeBaseModel):
@@ -154,7 +157,7 @@ class Model(OpenCodeBaseModel):
             if capabilities_override.image_output is not None:
                 output_image = capabilities_override.image_output
         # Use id_override if available (e.g., "opus" for Claude Code SDK)
-        return cls(
+        instance = cls(
             id=model.id_override or model.id,
             name=model.name,
             capabilities=ProviderCapabilities(
@@ -180,6 +183,17 @@ class Model(OpenCodeBaseModel):
             limit=ModelLimit(context=context, output=output),
             release_date=model.created_at.strftime("%Y-%m-%d") if model.created_at else "",
         )
+
+        # Passively populate the CapabilityCache from this ModelInfo.
+        # Zero additional network requests — data is already available.
+        try:
+            from agentpool.host.stubs import _get_default_cache
+
+            _get_default_cache().populate_cache_from_model_info(model)
+        except Exception:  # noqa: BLE001
+            logger.debug("populate_cache_failed: %s", model.id)
+
+        return instance
 
 
 class Provider(OpenCodeBaseModel):

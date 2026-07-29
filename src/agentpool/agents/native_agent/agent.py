@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from agentpool.mcp_server.config_snapshot import McpConfigEntry
     from agentpool.messaging import MessageNode
     from agentpool.models.agents import NativeAgentConfig, ToolMode
+    from agentpool.models.model_configs import BaseModelConfig
     from agentpool.orchestrator.turn import Turn
     from agentpool.prompts.prompts import PromptType
     from agentpool.sessions import SessionData
@@ -247,6 +248,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         metadata: dict[str, Any] | None = None,
         history_processors: Sequence[Callable[..., Any]] | None = None,
         capabilities: list[Any] | None = None,
+        resolved_model_config: BaseModelConfig | None = None,
     ) -> None:
         """Initialize agent.
 
@@ -297,6 +299,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             metadata: Arbitrary metadata for the agent (e.g., feature flags)
             history_processors: Callable history processors for message processing
             capabilities: Extra capability instances or configs to attach
+            resolved_model_config: Resolved model config (after variant lookup).
+                Used for capability resolution when the agent references a
+                model variant by name.
         """
         from agentpool.agents.interactions import Interactions
         from agentpool.agents.native_agent.hook_manager import NativeAgentHookManager
@@ -308,6 +313,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
 
         self.model_settings = model_settings
         self.config = agent_config
+        self._resolved_model_config = resolved_model_config
         self._direct_history_processors = None
         memory_cfg = (
             session if isinstance(session, MemoryConfig) else MemoryConfig.from_value(session)
@@ -628,7 +634,7 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         merged_handlers: list[AnyEventHandlerType] = [*config_handlers, *(event_handlers or [])]
 
         # Handle model configuration - resolve model_variants reference if needed
-        from agentpool.models.model_configs import StringModelConfig
+        from agentpool.models.model_configs import BaseModelConfig, StringModelConfig
 
         model_config = config.model
         if (
@@ -667,6 +673,9 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             providers=config.model_providers,
             metadata=getattr(config, "metadata", None),
             capabilities=None,  # Built lazily in get_agentlet() from self.config.capabilities
+            resolved_model_config=model_config
+            if isinstance(model_config, BaseModelConfig)
+            else None,
         )
 
     async def __aenter__(self) -> Self:
@@ -863,9 +872,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
             FallbackModelConfig,
         )
 
-        if self.config is None:
+        if self.config is None and self._resolved_model_config is None:
             return []
-        model_cfg = self.config.model
+        model_cfg: BaseModelConfig | str | None = self._resolved_model_config
+        if model_cfg is None and self.config is not None:
+            model_cfg = self.config.model
         if not isinstance(model_cfg, BaseModelConfig):
             # model is a plain string (ModelId | str)
             return [str(model_cfg)]
@@ -885,14 +896,18 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     def _get_declared_capabilities(self) -> ModelCapabilities | None:
         """Extract declared ModelCapabilities from the agent's model config.
 
+        Reads from ``self._resolved_model_config`` (which has model variant
+        references resolved) first; falls back to ``self.config.model`` if
+        ``_resolved_model_config`` is ``None`` (e.g. programmatic agents).
+
         Returns ``None`` when no model config or no capabilities field is
         present.
         """
         from agentpool.models.model_configs import BaseModelConfig
 
-        if self.config is None:
-            return None
-        model_cfg = self.config.model
+        model_cfg: BaseModelConfig | str | None = self._resolved_model_config
+        if model_cfg is None and self.config is not None:
+            model_cfg = self.config.model
         if not isinstance(model_cfg, BaseModelConfig):
             return None
         return model_cfg.capabilities
@@ -903,30 +918,47 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
     ) -> ModelCapabilities | None:
         """Resolve full ModelCapabilities (all fields bool) for the agent.
 
-        Returns ``None`` when no model name is available for tokonomics
-        lookup and no capabilities are declared.  For FallbackModelConfig,
-        computes the intersection (pessimistic) of all sub-models'
-        resolved capabilities.
+        Uses ``resolve_capabilities(cache_only=True)`` to read from the
+        in-memory cache without initiating tokonomics network queries.
+        Cache misses default to ``False`` (text-only modality).
+
+        Returns ``ModelCapabilities()`` (all ``None``) when no model name
+        is available — this ensures ``ModalityFilterCapability`` is still
+        populated (passes the ``is not None`` guard) and text-only
+        filtering is applied via the ``is True`` check in
+        ``_is_modality_supported()``.
+
+        For ``FallbackModelConfig``, returns declared capabilities
+        directly without per-model cache lookups or intersection.
         """
-        from agentpool.host.stubs import resolve_capabilities
         from agentpool_config.model_capabilities import ModelCapabilities
 
         declared = self._get_declared_capabilities()
         model_names = self._get_model_names_for_capability_resolution()
 
         if not model_names:
-            # No model name for tokonomics — return declared (or None).
-            return declared
+            # No model name for cache lookup — return ModelCapabilities()
+            # (all None) instead of None so ModalityFilterCapability is
+            # still populated.  _is_modality_supported() treats None as
+            # unsupported via ``is True`` check (text-only behavior).
+            return declared if declared is not None else ModelCapabilities()
 
         if declared is None:
             declared = ModelCapabilities()
 
         if len(model_names) == 1:
-            return await resolve_capabilities(model_names[0], declared)
+            from agentpool.host.stubs import resolve_capabilities
 
-        # Fallback: intersection (pessimistic) of all sub-models.
-        resolved_list = [await resolve_capabilities(name, declared) for name in model_names]
-        return _intersect_capabilities(resolved_list)
+            return await resolve_capabilities(
+                model_names[0],
+                declared,
+                cache_only=True,
+            )
+
+        # Intentional simplification: fallback models use declared/text-only
+        # defaults.  Per-model cache lookup + intersection is not performed.
+        # ``_intersect_capabilities()`` is preserved for future use.
+        return declared
 
     def _apply_image_output_profile(
         self,
@@ -1646,6 +1678,23 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if model is not None:
                     all_models.append(model)
 
+        # Passively populate CapabilityCache from the parsed models.
+        # Zero additional network requests — data is already available.
+        if all_models:
+            try:
+                from agentpool.host.stubs import _get_default_cache
+
+                cache = _get_default_cache()
+                for model_info in all_models:
+                    try:
+                        cache.populate_cache_from_model_info(model_info)
+                    except Exception:  # noqa: BLE001
+                        logger.debug(
+                            "populate_cache_failed: %s",
+                            getattr(model_info, "id", "unknown"),
+                        )
+            except Exception:  # noqa: BLE001
+                logger.debug("populate_cache_init_failed")
         return all_models
 
     @staticmethod

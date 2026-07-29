@@ -20,10 +20,11 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-# Per-modality default values when tokonomics has no data.
+# Per-modality default values when no data is available.
+# All default to False (text-only) — conservative for unknown models.
 _MODALITY_DEFAULTS: dict[str, bool] = {
-    "image_input": True,
-    "audio_input": True,
+    "image_input": False,
+    "audio_input": False,
     "video_input": False,
     "document_input": False,
     "image_output": False,
@@ -98,6 +99,58 @@ class CapabilityCache:
         finally:
             async with self._lock:
                 self._inflight.pop(key, None)
+
+    def get_cached_only(self, model_name: str, modality: str) -> bool | None:
+        """Synchronous cache-only read — never initiates queries.
+
+        Returns the cached value if present, or ``None`` on miss.
+        A cached ``None`` (negative cache from a failed query) and a
+        cache miss both return ``None`` — both default to ``False`` in
+        ``resolve_capabilities``, so no sentinel is needed.
+        """
+        key = _cache_key(model_name, modality)
+        if key in self._cache:
+            return self._cache[key]
+        return None
+
+    def populate_cache_from_model_info(self, model_info: object) -> None:
+        """Populate cache from a tokonomics ``ModelInfo`` object.
+
+        Extracts modality booleans from ``model_info.input_modalities``
+        and ``model_info.output_modalities`` and stores them in the cache
+        under both ``model_info.id`` and ``model_info.pydantic_ai_id``
+        (lowercased) so lookups by either name succeed.
+
+        This is a pure in-memory side effect — no additional network
+        requests are made.
+        """
+        try:
+            model_id = model_info.id.lower()  # type: ignore[attr-defined]
+            pydantic_ai_id = model_info.pydantic_ai_id.lower()  # type: ignore[attr-defined]
+            input_modalities = set(
+                model_info.input_modalities or [],  # type: ignore[attr-defined]
+            )
+            output_modalities = set(
+                model_info.output_modalities or [],  # type: ignore[attr-defined]
+            )
+        except AttributeError:
+            logger.debug(
+                "populate_cache_missing_fields",
+                model_info=repr(model_info),
+            )
+            return
+
+        modality_values: dict[str, bool] = {
+            "image_input": "image" in input_modalities,
+            "audio_input": "audio" in input_modalities,
+            "video_input": "video" in input_modalities,
+            "document_input": "pdf" in input_modalities or "file" in input_modalities,
+            "image_output": "image" in output_modalities,
+        }
+
+        for model_name in {model_id, pydantic_ai_id}:
+            for modality, value in modality_values.items():
+                self._cache[_cache_key(model_name, modality)] = value
 
     async def _query_and_cache(
         self,
@@ -215,12 +268,13 @@ async def resolve_capabilities(
     model_name: str,
     declared: ModelCapabilities,
     cache: CapabilityCache | None = None,
+    cache_only: bool = False,
 ) -> ModelCapabilities:
-    """Fill None fields in declared capabilities from tokonomics.
+    """Fill None fields in declared capabilities from tokonomics cache.
 
     For each field in declared that is None, queries CapabilityCache for
     the model's capability. When tokonomics has no data, applies a
-    per-modality default and logs a warning.
+    per-modality default.
 
     Explicit (non-None) values in declared are preserved without querying
     tokonomics.
@@ -229,6 +283,11 @@ async def resolve_capabilities(
         model_name: Name of the model to look up.
         declared: ModelCapabilities with possibly-None fields.
         cache: Optional CapabilityCache instance (uses default if omitted).
+        cache_only: When True, uses ``cache.get_cached_only()`` (sync dict
+            lookup) instead of ``cache.get_capability()`` (async, initiates
+            queries). The function is still ``async def`` so callers use
+            ``await``, but no network I/O is performed internally. Cache
+            misses default to ``False`` (not ``_MODALITY_DEFAULTS``).
 
     Returns:
         New ModelCapabilities with all fields resolved to bool.
@@ -243,15 +302,20 @@ async def resolve_capabilities(
         if data[field_name] is not None:
             continue
 
-        result = await cache.get_capability(model_name, field_name)
-        if result is None:
-            result = _MODALITY_DEFAULTS[field_name]
-            logger.warning(
-                "capability_fallback_default",
-                model=model_name,
-                modality=field_name,
-                default=result,
-            )
+        if cache_only:
+            result = cache.get_cached_only(model_name, field_name)
+            if result is None:
+                result = False
+        else:
+            result = await cache.get_capability(model_name, field_name)
+            if result is None:
+                result = _MODALITY_DEFAULTS[field_name]
+                logger.warning(
+                    "capability_fallback_default",
+                    model=model_name,
+                    modality=field_name,
+                    default=result,
+                )
         updates[field_name] = result
 
     if not updates:
