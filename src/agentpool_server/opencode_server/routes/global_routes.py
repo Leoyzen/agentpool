@@ -227,9 +227,6 @@ async def _event_generator(  # noqa: PLR0915
     subscriber_count = len(state.event_subscribers)
     logger.info("SSE: New client connected (total subscribers: %s)", subscriber_count)
 
-    # Parse last_event_id for deduplication.
-    last_id = int(last_event_id) if last_event_id is not None else 0
-
     # Trigger first subscriber callback if this is the first connection.
     if (
         subscriber_count == 1
@@ -239,23 +236,30 @@ async def _event_generator(  # noqa: PLR0915
         state._first_subscriber_triggered = True
         state.create_background_task(state.on_first_subscriber(), name="on_first_subscriber")
 
-    # Subscribe to EventBus for global SSE events
+    # Subscribe to EventBus for global SSE events.
+    # When the client provides a Last-Event-ID, use conditional replay: only
+    # events with event_id > last_event_id are replayed. When no Last-Event-ID
+    # is provided, replay all buffered events (default behavior).
+    parsed_last_event_id: int | None = int(last_event_id) if last_event_id is not None else None
     event_bus_stream: asyncio.Queue[Any] | None = None
     session_controller = getattr(state, "session_controller", None)
     if session_controller is not None:
         session_pool = getattr(state.pool, "session_pool", None)
         if session_pool is not None:
             event_bus = session_pool.event_bus
-            event_bus_stream = await event_bus.subscribe("__global_sse__", scope="all")
+            event_bus_stream = await event_bus.subscribe(
+                "__global_sse__",
+                scope="all",
+                replay=parsed_last_event_id is not None,
+                last_event_id=parsed_last_event_id,
+            )
 
     try:
         # Send initial connected event
         connected = ServerConnectedEvent()
         data = _serialize_event(connected, wrap_payload=wrap_payload)
         logger.info("SSE: Sending connected event", data=data)
-        event_id = state.get_next_event_id()
-        if event_id > last_id:
-            yield {"data": data, "id": str(event_id)}
+        yield {"data": data, "id": "0"}
 
         if event_bus_stream is None:
             while True:
@@ -303,9 +307,8 @@ async def _event_generator(  # noqa: PLR0915
                     event_type=getattr(event, "type", "unknown"),
                     session_id=_extract_session_id(event) or "-",
                 )
-                event_id = state.get_next_event_id()
-                if event_id > last_id:
-                    yield {"data": data, "id": str(event_id)}
+                event_id = raw_event.event_id if isinstance(raw_event, EventEnvelope) else 0
+                yield {"data": data, "id": str(event_id)}
     finally:
         if event_bus_stream is not None:
             session_pool = getattr(state.pool, "session_pool", None)

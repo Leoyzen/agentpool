@@ -211,7 +211,14 @@ class _MockEventBus:
     def __init__(self) -> None:
         self._subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
 
-    async def subscribe(self, session_id: str, scope: str = "session") -> asyncio.Queue[Any]:
+    async def subscribe(
+        self,
+        session_id: str,
+        scope: str = "session",
+        *,
+        replay: bool = True,
+        last_event_id: int | None = None,
+    ) -> asyncio.Queue[Any]:
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=self._STREAM_BUFFER_SIZE)
         self._subscribers.setdefault(session_id, []).append((queue, scope))
         return queue
@@ -290,8 +297,8 @@ class _MockState:
         """No-op mock for SSE disconnect handler."""
         return []
 
-    def get_next_event_id(self) -> int:
-        return 1
+    # get_next_event_id() removed — event_id now comes from EventBus
+    # (EventEnvelope.event_id assigned at publish time, not ServerState).
 
 
 async def _collect_events(

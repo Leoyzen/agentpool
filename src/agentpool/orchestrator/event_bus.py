@@ -75,6 +75,8 @@ class EventEnvelope:
     """The session that produced this event."""
     event: Any
     """The original event payload (unmodified)."""
+    event_id: int = 0
+    """Monotonic event ID assigned at publish time (0 for legacy/test envelopes)."""
 
     def __getattr__(self, name: str) -> Any:
         """Forward attribute access to the wrapped event."""
@@ -212,8 +214,10 @@ def _merge_progress_events(events: list[ToolCallProgressEvent]) -> ToolCallProgr
 
 
 def _rebind(template: EventEnvelope, new_event: Any) -> EventEnvelope:
-    """Create new EventEnvelope with merged event, preserving source_session_id."""
-    return EventEnvelope(source_session_id=template.source_session_id, event=new_event)
+    """Create new EventEnvelope with merged event, preserving source_session_id and event_id."""
+    return EventEnvelope(
+        source_session_id=template.source_session_id, event=new_event, event_id=template.event_id
+    )
 
 
 def _merge_envelopes(envelopes: list[EventEnvelope]) -> list[EventEnvelope]:
@@ -287,7 +291,7 @@ async def drain_and_merge(
             return
 
         if not isinstance(first, EventEnvelope):
-            first = EventEnvelope(source_session_id="", event=first)
+            first = EventEnvelope(source_session_id="", event=first, event_id=0)
 
         batch: list[EventEnvelope] = [first]
 
@@ -301,7 +305,7 @@ async def drain_and_merge(
                     yield env
                 return
             if not isinstance(item, EventEnvelope):
-                item = EventEnvelope(source_session_id="", event=item)
+                item = EventEnvelope(source_session_id="", event=item, event_id=0)
             batch.append(item)
 
         for env in _merge_envelopes(batch):
@@ -366,9 +370,15 @@ class EventBus:
         self._session_controller = session_controller
         self._replay_buffers: dict[str, deque[EventEnvelope]] = {}
         self._overflow_policy: OverflowPolicy = overflow_policy
+        self._event_counter: int = 0
 
     async def subscribe(
-        self, session_id: str, scope: str = "session"
+        self,
+        session_id: str,
+        scope: str = "session",
+        *,
+        replay: bool = True,
+        last_event_id: int | None = None,
     ) -> asyncio.Queue[EventEnvelope]:
         """Subscribe to events for a session.
 
@@ -376,6 +386,21 @@ class EventBus:
         buffer before live events. Events published during the replay phase
         are drained and re-inserted after historical events to preserve
         ordering and avoid loss.
+
+        Conditional replay is supported via ``replay`` and ``last_event_id``:
+
+        - ``replay=False``: Skip the replay buffer entirely (zero historical
+          events). Only live events published after subscription are delivered.
+        - ``replay=True, last_event_id=None``: Replay all buffered events
+          (default — backward compatible).
+        - ``replay=True, last_event_id=N``: Replay only events with
+          ``event_id > N``. If the buffer's oldest event has
+          ``event_id > N + 1`` (gap detected, meaning events N+1..oldest-1
+          have been evicted), fall back to replaying all events from that
+          buffer to avoid silent data loss.
+
+        For ``scope="all"``, the filtering applies per-buffer after collecting
+        from all buffers.
 
         Args:
             session_id: The session to subscribe to.
@@ -389,6 +414,11 @@ class EventBus:
                     "session" scope with explicit child consumers via
                     `ProtocolEventConsumerMixin._on_spawn_session_start()` instead.
                     The "descendants" enum value is retained for backward compatibility.
+            replay: If False, skip replay buffer (no historical events).
+            last_event_id: If provided with ``replay=True``, only replay
+                events with ``event_id > last_event_id``. Gap detection
+                falls back to full replay when the buffer is missing
+                contiguous events.
 
         Returns:
             An ``asyncio.Queue`` to consume events from.
@@ -404,6 +434,23 @@ class EventBus:
             else:
                 buffer = self._replay_buffers.get(session_id, deque())
                 historical_events = list(buffer)
+
+        # Apply conditional replay filtering
+        if not replay:
+            historical_events = []
+        elif last_event_id is not None and historical_events:
+            # Gap detection: if the oldest event in the buffer has an event_id
+            # greater than last_event_id + 1, the contiguous range has been
+            # broken (events were evicted). Fall back to full replay from
+            # this buffer to avoid silent data loss.
+            oldest_id = historical_events[0].event_id
+            if oldest_id > 0 and oldest_id > last_event_id + 1:
+                # Gap detected — keep all events (full replay fallback)
+                pass
+            else:
+                historical_events = [
+                    env for env in historical_events if env.event_id > last_event_id
+                ]
 
         for envelope in historical_events:
             try:
@@ -575,13 +622,19 @@ class EventBus:
         ``PartDeltaEvent`` with ``delta=None`` is dropped (no content to deliver).
         Coalescing is handled subscriber-side by ``drain_and_merge()``.
 
+        Each published event is assigned a monotonically increasing ``event_id``
+        so that subscribers can request conditional replay via ``last_event_id``.
+
         Args:
             session_id: The session that produced the event.
             event: The event to broadcast.
         """
         if isinstance(event, PartDeltaEvent) and event.delta is None:
             return
-        envelope = EventEnvelope(source_session_id=session_id, event=event)
+        self._event_counter += 1
+        envelope = EventEnvelope(
+            source_session_id=session_id, event=event, event_id=self._event_counter
+        )
         await self._send(session_id, envelope)
 
     async def close_session(self, session_id: str) -> None:

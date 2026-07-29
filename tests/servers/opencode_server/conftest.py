@@ -61,7 +61,13 @@ def _make_functional_event_bus() -> Mock:
     bus = Mock()
     _subscribers: dict[str, list[tuple[asyncio.Queue[Any], str]]] = {}
 
-    async def _subscribe(session_id: str, scope: str = "session") -> asyncio.Queue[Any]:
+    async def _subscribe(
+        session_id: str,
+        scope: str = "session",
+        *,
+        replay: bool = True,
+        last_event_id: int | None = None,
+    ) -> asyncio.Queue[Any]:
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_stream_buffer_size)
         _subscribers.setdefault(session_id, []).append((queue, scope))
         return queue
