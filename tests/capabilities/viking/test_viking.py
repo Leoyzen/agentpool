@@ -10,6 +10,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic import ValidationError
+from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
+from pydantic_ai.models.test import TestModel
 import pytest
 
 from agentpool.capabilities.viking import VikingCapability
@@ -75,6 +77,19 @@ def _make_ctx(session_id: str | None = "test-session") -> MagicMock:
 def _get_tool(tools: list[Any], name: str) -> Any:
     """Find a tool by name from the list returned by build_tools."""
     return next(t for t in tools if t.__name__ == name)
+
+
+def _make_request_context(messages: list[Any]) -> ModelRequestContext:
+    """Build a minimal ModelRequestContext for before_model_request tests."""
+    return ModelRequestContext(
+        model=TestModel(),
+        messages=messages,
+        model_settings=None,
+        model_request_parameters=ModelRequestParameters(
+            function_tools=[],
+            native_tools=[],
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1786,3 +1801,407 @@ class TestUtils:
     def test_truncate_text_exact_length(self) -> None:
         text = "x" * 50
         assert truncate_text(text, 50) == text
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: ResourceAccess Protocol Tests
+# ---------------------------------------------------------------------------
+
+
+class TestResourceAccessProtocol:
+    """Tests for ResourceAccess Protocol implementation (Phase 5)."""
+
+    def test_isinstance_resource_access(self, viking_cap: VikingCapability) -> None:
+        """VikingCapability should be recognized as ResourceAccess."""
+        from agentpool.capabilities.resource_protocols import ResourceAccess
+
+        assert isinstance(viking_cap, ResourceAccess)
+
+    def test_resolve_resources_uri_default(self) -> None:
+        cap = VikingCapability()
+        assert cap._resolve_resources_uri() == "viking://resources/"
+
+    def test_resolve_resources_uri_override(self) -> None:
+        cap = VikingCapability(resources_uri="viking://resources/plm/templates/")
+        assert cap._resolve_resources_uri() == "viking://resources/plm/templates/"
+
+    async def test_list_resources_success(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "doc1.md", "uri": "viking://resources/doc1.md", "isDir": False},
+                {"name": "doc2.txt", "uri": "viking://resources/doc2.txt", "isDir": False},
+                {"name": "subdir", "uri": "viking://resources/subdir", "isDir": True},
+                {
+                    "name": "doc3.md",
+                    "uri": "viking://resources/doc3.md",
+                    "isDir": False,
+                    "meta": {"abstract": "A test document"},
+                },
+            ]
+        )
+        result = await viking_cap.list_resources()
+        assert len(result) == 3  # subdir excluded
+        assert result[0].name == "doc1.md"
+        assert result[0].uri == "viking://resources/doc1.md"
+        assert result[0].mime_type == "text/markdown"
+        assert result[1].name == "doc2.txt"
+        assert result[1].mime_type == ""
+        assert result[2].description == "A test document"
+
+    async def test_list_resources_empty(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(return_value=[])
+        result = await viking_cap.list_resources()
+        assert result == []
+
+    async def test_list_resources_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(side_effect=RuntimeError("network error"))
+        result = await viking_cap.list_resources()
+        assert result == []
+
+    async def test_list_resources_not_list(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(return_value={"error": "bad"})
+        result = await viking_cap.list_resources()
+        assert result == []
+
+    async def test_read_resource_success(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.read = AsyncMock(return_value="resource content here")
+        result = await viking_cap.read_resource("viking://resources/doc.md")
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].text == "resource content here"
+        assert result[0].uri == "viking://resources/doc.md"
+        assert result[0].mime_type == "text/markdown"
+
+    async def test_read_resource_non_markdown(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.read = AsyncMock(return_value="plain text")
+        result = await viking_cap.read_resource("viking://resources/doc.txt")
+        assert result is not None
+        assert result[0].mime_type is None
+
+    async def test_read_resource_empty(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.read = AsyncMock(return_value="")
+        result = await viking_cap.read_resource("viking://resources/missing.md")
+        assert result is None
+
+    async def test_read_resource_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.read = AsyncMock(side_effect=RuntimeError("not found"))
+        result = await viking_cap.read_resource("viking://resources/missing.md")
+        assert result is None
+
+    async def test_resource_exists_true(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(
+            return_value=[
+                {"name": "doc.md", "uri": "viking://resources/doc.md"},
+                {"name": "other.md", "uri": "viking://resources/other.md"},
+            ]
+        )
+        result = await viking_cap.resource_exists("viking://resources/doc.md")
+        assert result is True
+
+    async def test_resource_exists_false(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(
+            return_value=[{"name": "other.md", "uri": "viking://resources/other.md"}]
+        )
+        result = await viking_cap.resource_exists("viking://resources/doc.md")
+        assert result is False
+
+    async def test_resource_exists_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(side_effect=RuntimeError("network error"))
+        result = await viking_cap.resource_exists("viking://resources/doc.md")
+        assert result is False
+
+    async def test_resource_exists_not_list(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        mock_client.ls = AsyncMock(return_value="not a list")
+        result = await viking_cap.resource_exists("viking://resources/doc.md")
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: Multimodal Bridge Tests
+# ---------------------------------------------------------------------------
+
+
+class TestMultimodalBridge:
+    """Tests for multimodal bridge implementation (Phase 6)."""
+
+    def test_supports_modality_no_caps(self) -> None:
+        cap = VikingCapability()
+        assert cap._supports_modality("image/png") is False
+        assert cap._supports_modality("audio/mpeg") is False
+
+    def test_supports_modality_image(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=True))
+        assert cap._supports_modality("image/png") is True
+        assert cap._supports_modality("image/jpeg") is True
+
+    def test_supports_modality_image_false(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=False))
+        assert cap._supports_modality("image/png") is False
+
+    def test_supports_modality_audio(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(audio_input=True))
+        assert cap._supports_modality("audio/mpeg") is True
+
+    def test_supports_modality_video(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(video_input=True))
+        assert cap._supports_modality("video/mp4") is True
+
+    def test_supports_modality_document(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(document_input=True))
+        assert cap._supports_modality("application/pdf") is True
+
+    def test_supports_modality_unknown(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=True))
+        assert cap._supports_modality("application/zip") is False
+
+    def test_guess_extension_known(self) -> None:
+        from agentpool.capabilities.viking import _guess_extension
+
+        assert _guess_extension("image/png") == "png"
+        assert _guess_extension("image/jpeg") == "jpg"
+        assert _guess_extension("audio/mpeg") == "mp3"
+        assert _guess_extension("video/mp4") == "mp4"
+        assert _guess_extension("application/pdf") == "pdf"
+
+    def test_guess_extension_unknown(self) -> None:
+        from agentpool.capabilities.viking import _guess_extension
+
+        assert _guess_extension("application/zip") == "bin"
+
+    async def test_before_model_request_disabled(self, viking_cap: VikingCapability) -> None:
+        """Should return request_context unchanged when bridge is disabled."""
+        rc = _make_request_context([])
+        result = await viking_cap.before_model_request(MagicMock(), rc)
+        assert result is rc
+
+    async def test_before_model_request_no_client(self) -> None:
+        """Should return request_context unchanged when client is None."""
+        cap = VikingCapability(multimodal_bridge=True)
+        cap._client = None
+        rc = _make_request_context([])
+        result = await cap.before_model_request(MagicMock(), rc)
+        assert result is rc
+
+    async def test_before_model_request_no_binary(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Should return request_context unchanged when no binary content."""
+        from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+        cap = VikingCapability(multimodal_bridge=True)
+        cap._client = mock_client
+
+        msg = ModelRequest(parts=[UserPromptPart(content="hello world")])
+        rc = _make_request_context([msg])
+        result = await cap.before_model_request(MagicMock(), rc)
+        assert result is rc  # No modification
+
+    async def test_before_model_request_text_only_model(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Text-only model: binary should be replaced with text reference."""
+        from pydantic_ai.messages import (
+            BinaryContent,
+            ModelRequest,
+            TextPart,
+            UserPromptPart,
+        )
+
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(
+            multimodal_bridge=True,
+            model_capabilities=ModelCapabilities(image_input=False),
+        )
+        cap._client = mock_client
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        binary = BinaryContent(data=b"\x89PNG", media_type="image/png")
+        msg = ModelRequest(parts=[UserPromptPart(content=["look at this", binary])])
+        rc = _make_request_context([msg])
+        result = await cap.before_model_request(MagicMock(), rc)
+
+        assert result is not rc
+        mock_client.write.assert_called_once()
+        new_msg = result.messages[0]
+        content = new_msg.parts[0].content
+        text_parts = [c for c in content if isinstance(c, TextPart)]
+        binary_parts = [c for c in content if isinstance(c, BinaryContent)]
+        assert len(text_parts) == 1
+        assert "viking://" in text_parts[0].content
+        assert len(binary_parts) == 0
+
+    async def test_before_model_request_multimodal_with_url(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Multimodal model + public_download_base_url: replace with HTTP URL."""
+        from pydantic_ai.messages import (
+            BinaryContent,
+            ModelRequest,
+            TextPart,
+            UserPromptPart,
+        )
+
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(
+            multimodal_bridge=True,
+            public_download_base_url="https://download.example.com",
+            model_capabilities=ModelCapabilities(image_input=True),
+        )
+        cap._client = mock_client
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        binary = BinaryContent(data=b"\x89PNG", media_type="image/png")
+        msg = ModelRequest(parts=[UserPromptPart(content=["look", binary])])
+        rc = _make_request_context([msg])
+        result = await cap.before_model_request(MagicMock(), rc)
+
+        assert result is not rc
+        new_msg = result.messages[0]
+        content = new_msg.parts[0].content
+        text_parts = [c for c in content if isinstance(c, TextPart)]
+        assert len(text_parts) == 1
+        assert text_parts[0].content.startswith("https://download.example.com?uri=")
+
+    async def test_before_model_request_multimodal_no_url(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Multimodal model + no URL: keep original binary (persisted)."""
+        from pydantic_ai.messages import (
+            BinaryContent,
+            ModelRequest,
+            UserPromptPart,
+        )
+
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(
+            multimodal_bridge=True,
+            model_capabilities=ModelCapabilities(image_input=True),
+        )
+        cap._client = mock_client
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        binary = BinaryContent(data=b"\x89PNG", media_type="image/png")
+        msg = ModelRequest(parts=[UserPromptPart(content=["look", binary])])
+        rc = _make_request_context([msg])
+        result = await cap.before_model_request(MagicMock(), rc)
+        assert result is rc  # No modification — binary kept as-is
+
+    async def test_before_model_request_upload_failure(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Upload failure: keep original binary content."""
+        from pydantic_ai.messages import (
+            BinaryContent,
+            ModelRequest,
+            UserPromptPart,
+        )
+
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(
+            multimodal_bridge=True,
+            model_capabilities=ModelCapabilities(image_input=False),
+        )
+        cap._client = mock_client
+        mock_client.write = AsyncMock(side_effect=RuntimeError("upload failed"))
+
+        binary = BinaryContent(data=b"\x89PNG", media_type="image/png")
+        msg = ModelRequest(parts=[UserPromptPart(content=["look", binary])])
+        rc = _make_request_context([msg])
+        result = await cap.before_model_request(MagicMock(), rc)
+        assert result is rc  # Upload failed — keep original
+
+    async def test_upload_binary_success(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        from pydantic_ai.messages import BinaryContent
+
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+        binary = BinaryContent(data=b"\x89PNG test", media_type="image/png")
+        uri = await viking_cap._upload_binary(binary)
+        assert uri is not None
+        assert uri.startswith("viking://user/default/memories/uploads/")
+        assert uri.endswith(".png")
+        mock_client.write.assert_called_once()
+        call_kwargs = mock_client.write.call_args
+        assert call_kwargs.kwargs["mode"] == "create"
+
+    async def test_upload_binary_custom_uploads_uri(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        from pydantic_ai.messages import BinaryContent
+
+        cap = VikingCapability(uploads_uri="viking://custom/uploads/")
+        cap._client = mock_client
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+        binary = BinaryContent(data=b"data", media_type="image/jpeg")
+        uri = await cap._upload_binary(binary)
+        assert uri is not None
+        assert uri.startswith("viking://custom/uploads/")
+        assert uri.endswith(".jpg")
+
+    async def test_upload_binary_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        from pydantic_ai.messages import BinaryContent
+
+        mock_client.write = AsyncMock(side_effect=RuntimeError("write failed"))
+        binary = BinaryContent(data=b"data", media_type="image/png")
+        uri = await viking_cap._upload_binary(binary)
+        assert uri is None
+
+    async def test_upload_binary_no_client(self) -> None:
+        from pydantic_ai.messages import BinaryContent
+
+        cap = VikingCapability()
+        binary = BinaryContent(data=b"data", media_type="image/png")
+        uri = await cap._upload_binary(binary)
+        assert uri is None
+
+    async def test_for_run_preserves_model_capabilities(self) -> None:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        caps = ModelCapabilities(image_input=True)
+        cap = VikingCapability(model_capabilities=caps, multimodal_bridge=True)
+        copy = await cap.for_run(MagicMock())
+        assert copy.model_capabilities is caps
+        assert copy.multimodal_bridge is True

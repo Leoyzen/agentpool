@@ -16,6 +16,7 @@ Configuration is via ``VikingCapabilityConfig`` in
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -24,14 +25,22 @@ from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
     from types import TracebackType
     from typing import Self
 
     from pydantic_ai import RunContext
+    from pydantic_ai.messages import BinaryContent
+    from pydantic_ai.models import ModelRequestContext
 
     from agentpool.capabilities.change_event import ChangeEvent
-    from agentpool.capabilities.resource_protocols import SkillEntry
+    from agentpool.capabilities.resource_protocols import (
+        BlobResourceContent,
+        ResourceEntry,
+        SkillEntry,
+        TextResourceContent,
+    )
+    from agentpool_config.model_capabilities import ModelCapabilities
 
 
 @dataclass
@@ -67,8 +76,13 @@ class VikingCapability(AbstractCapability[Any]):
     skills_uri: str | None = None
     resources_uri: str | None = None
     multimodal_bridge: bool = False
+    """Enable multimodal bridge — auto-upload binary content to Viking
+    before sending to the model."""
     uploads_uri: str | None = None
     public_download_base_url: str | None = None
+    model_capabilities: ModelCapabilities | None = None
+    """Resolved model capabilities for multimodal bridge. Set by the
+    agent factory after capability construction."""
     _client: Any = field(default=None, repr=False)
     _owns_client: bool = field(default=True, repr=False)
 
@@ -172,6 +186,7 @@ class VikingCapability(AbstractCapability[Any]):
             multimodal_bridge=self.multimodal_bridge,
             uploads_uri=self.uploads_uri,
             public_download_base_url=self.public_download_base_url,
+            model_capabilities=self.model_capabilities,
             _client=self._client,
             _owns_client=False,
         )
@@ -291,3 +306,295 @@ class VikingCapability(AbstractCapability[Any]):
             return False
         except Exception:
             return False
+
+    # ---- ResourceAccess Protocol (Phase 5) ----
+
+    def _resolve_resources_uri(self) -> str:
+        """Return the resources URI, using override or default convention.
+
+        Returns:
+            The resources URI string (e.g. ``viking://resources/``).
+        """
+        if self.resources_uri is not None:
+            return self.resources_uri
+        return "viking://resources/"
+
+    async def list_resources(self) -> Sequence[ResourceEntry]:
+        """List Viking resources under ``resources_uri``.
+
+        Calls ``client.ls(resources_uri)`` and returns non-directory
+        entries as ``ResourceEntry`` objects.
+
+        Returns:
+            A sequence of ``ResourceEntry`` descriptors. Returns an empty
+            list on error.
+        """
+        try:
+            client = self._get_client()
+            uri = self._resolve_resources_uri()
+            entries = await client.ls(uri)
+            if not isinstance(entries, list):
+                return []
+
+            from agentpool.capabilities.resource_protocols import ResourceEntry
+
+            resources: list[ResourceEntry] = []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("isDir"):
+                    continue
+                name = str(entry.get("name") or entry.get("uri") or "")
+                resource_uri = str(entry.get("uri") or f"{uri}{name}")
+                description = str(
+                    entry.get("meta", {}).get("abstract", "")
+                    if isinstance(entry.get("meta"), dict)
+                    else ""
+                )
+                mime_type = "text/markdown" if name.endswith(".md") else ""
+                resources.append(
+                    ResourceEntry(
+                        uri=resource_uri,
+                        name=name,
+                        description=description,
+                        mime_type=mime_type,
+                    )
+                )
+            return resources
+        except Exception:
+            return []
+
+    async def read_resource(
+        self, uri: str
+    ) -> list[TextResourceContent | BlobResourceContent] | None:
+        """Read a Viking resource by URI.
+
+        Args:
+            uri: The Viking URI of the resource to read.
+
+        Returns:
+            A list containing a ``TextResourceContent`` with the resource
+            content, or ``None`` if not found or on error.
+        """
+        try:
+            client = self._get_client()
+            content = await client.read(uri)
+            if not content:
+                return None
+
+            from agentpool.capabilities.resource_protocols import (
+                TextResourceContent,
+            )
+
+            return [
+                TextResourceContent(
+                    uri=uri,
+                    mime_type="text/markdown" if uri.endswith(".md") else None,
+                    text=str(content),
+                )
+            ]
+        except Exception:
+            return None
+
+    async def resource_exists(self, uri: str) -> bool:
+        """Check if a Viking resource exists.
+
+        Args:
+            uri: The Viking URI of the resource to check.
+
+        Returns:
+            ``True`` if the resource exists, ``False`` otherwise or on error.
+        """
+        try:
+            client = self._get_client()
+            parent = uri.rsplit("/", 1)[0] + "/"
+            name = uri.rsplit("/", 1)[1]
+            entries = await client.ls(parent)
+            if not isinstance(entries, list):
+                return False
+            for entry in entries:
+                entry_name = str(entry.get("name") or "") if isinstance(entry, dict) else str(entry)
+                if entry_name == name:
+                    return True
+            return False
+        except Exception:
+            return False
+
+    # ---- Multimodal Bridge (Phase 6) ----
+
+    async def before_model_request(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Intercept binary content before sending to the model.
+
+        Uploads binary content to Viking, then replaces it based on
+        model capabilities:
+        - Text-only model → text reference with ``viking://`` URI
+        - Multimodal + ``public_download_base_url`` → HTTP URL
+        - Multimodal + no URL → keep original (but persisted in Viking)
+
+        Args:
+            ctx: The pydantic-ai run context.
+            request_context: The model request context containing messages.
+
+        Returns:
+            The (possibly modified) model request context.
+        """
+        if not self.multimodal_bridge or self._client is None:
+            return request_context
+
+        from dataclasses import replace
+
+        from pydantic_ai.messages import (
+            BinaryContent,
+            ModelRequest,
+            TextPart,
+            UserPromptPart,
+        )
+
+        new_messages: list[Any] = []
+        modified = False
+        for msg in request_context.messages:
+            if not isinstance(msg, ModelRequest):
+                new_messages.append(msg)
+                continue
+
+            new_parts: list[Any] = []
+            msg_modified = False
+            for part in msg.parts:
+                if not isinstance(part, UserPromptPart):
+                    new_parts.append(part)
+                    continue
+
+                content = part.content
+                if not isinstance(content, list):
+                    new_parts.append(part)
+                    continue
+
+                new_content: list[Any] = []
+                for item in content:
+                    if not isinstance(item, BinaryContent):
+                        new_content.append(item)
+                        continue
+
+                    viking_uri = await self._upload_binary(item)
+                    if viking_uri is None:
+                        new_content.append(item)
+                        continue
+
+                    supports = self._supports_modality(item.media_type)
+                    if not supports:
+                        new_content.append(
+                            TextPart(
+                                content=(
+                                    f"[Content stored at {viking_uri}. Use viking_read to access.]"
+                                ),
+                            )
+                        )
+                        msg_modified = True
+                    elif self.public_download_base_url:
+                        http_url = f"{self.public_download_base_url}?uri={viking_uri}"
+                        new_content.append(TextPart(content=http_url))
+                        msg_modified = True
+                    else:
+                        new_content.append(item)
+
+                if msg_modified:
+                    new_parts.append(replace(part, content=new_content))
+                    modified = True
+                else:
+                    new_parts.append(part)
+
+            if msg_modified:
+                new_messages.append(replace(msg, parts=new_parts))
+            else:
+                new_messages.append(msg)
+
+        if not modified:
+            return request_context
+        return replace(request_context, messages=new_messages)
+
+    def _supports_modality(self, media_type: str) -> bool:
+        """Check if the model supports the given media type.
+
+        Dispatches on ``media_type`` prefix to the appropriate
+        ``ModelCapabilities`` field.
+
+        Args:
+            media_type: The MIME type of the content (e.g. ``"image/png"``).
+
+        Returns:
+            ``True`` if the model supports this modality, ``False`` otherwise.
+        """
+        caps = self.model_capabilities
+        if caps is None:
+            return False
+        if media_type.startswith("image/"):
+            return bool(caps.image_input)
+        if media_type.startswith("audio/"):
+            return bool(caps.audio_input)
+        if media_type.startswith("video/"):
+            return bool(caps.video_input)
+        if media_type in (
+            "application/pdf",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ):
+            return bool(caps.document_input)
+        return False
+
+    async def _upload_binary(self, content: BinaryContent) -> str | None:
+        """Upload binary content to Viking under ``uploads_uri``.
+
+        Generates a unique URI and uploads via ``client.write()`` with
+        base64-encoded content.
+
+        Args:
+            content: The ``BinaryContent`` to upload.
+
+        Returns:
+            The Viking URI of the uploaded content, or ``None`` on failure.
+        """
+        try:
+            client = self._get_client()
+            uploads_uri = self.uploads_uri or (
+                f"viking://user/{self.user or 'default'}/memories/uploads/"
+            )
+            ext = _guess_extension(content.media_type)
+            uri = f"{uploads_uri}{uuid.uuid4().hex[:12]}.{ext}"
+
+            # write() accepts text content; encode binary as base64
+            import base64
+
+            b64_data = base64.b64encode(content.data).decode("ascii")
+            await client.write(uri, b64_data, mode="create")
+            return uri
+        except Exception:
+            return None
+
+
+def _guess_extension(media_type: str) -> str:
+    """Guess a file extension from a media type.
+
+    Args:
+        media_type: The MIME type (e.g. ``"image/png"``).
+
+    Returns:
+        A file extension string (e.g. ``"png"``).
+    """
+    ext_map = {
+        "image/png": "png",
+        "image/jpeg": "jpg",
+        "image/gif": "gif",
+        "image/webp": "webp",
+        "image/svg+xml": "svg",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+        "audio/ogg": "ogg",
+        "video/mp4": "mp4",
+        "video/webm": "webm",
+        "application/pdf": "pdf",
+    }
+    return ext_map.get(media_type, "bin")
