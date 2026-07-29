@@ -672,3 +672,161 @@ async def test_from_config_capabilities_not_duplicated() -> None:
             f"Expected exactly 1 Instrumentation capability, found {len(instrumentation_caps)}. "
             "Capabilities are being duplicated between _extra_capabilities and config.capabilities."
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue #306: Config-defined capabilities not visible in _all_capabilities
+# before get_agentlet() is called.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_config_capabilities_visible_before_get_agentlet() -> None:
+    """Config-defined capabilities must appear in _all_capabilities immediately.
+
+    Regression test for issue #306: config capabilities were only built lazily
+    in get_agentlet() and added to tool_capabilities, but NOT added to
+    _external_capabilities.  Since _all_capabilities returns
+    _external_capabilities + _session_capabilities + _worker_provider +
+    _builtin_provider, config capabilities were missing from tool listing
+    endpoints (/experimental/tool/ids) until the first agent run.
+    """
+    from pydantic_ai.capabilities import Instrumentation
+
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.model_configs import TestModelConfig
+    from agentpool_config.capabilities import GenericCapabilityConfig
+
+    cap_config = GenericCapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    config = NativeAgentConfig(
+        name="test_visibility_agent",
+        model=TestModelConfig(custom_output_text="test"),
+        system_prompt=["Be helpful."],
+        capabilities=[cap_config],
+    )
+
+    agent = Agent.from_config(config)
+
+    # Before get_agentlet() is called, the config capability should already
+    # be visible in _all_capabilities (and thus _external_capabilities).
+    all_caps = agent._all_capabilities
+    instrumentation_caps = [c for c in all_caps if isinstance(c, Instrumentation)]
+    assert len(instrumentation_caps) == 1, (
+        f"Expected 1 Instrumentation in _all_capabilities before get_agentlet(), "
+        f"found {len(instrumentation_caps)}. Config capabilities are not eagerly "
+        "built into _external_capabilities."
+    )
+
+
+@pytest.mark.anyio
+async def test_no_duplicate_external_capabilities_after_get_agentlet() -> None:
+    """_external_capabilities must not grow after a single get_agentlet() call.
+
+    Regression test: if get_agentlet() rebuilds config capabilities and appends
+    them to _external_capabilities again (in addition to __init__), the list
+    contains duplicate entries.  This causes duplicate prompts/resources in
+    listing endpoints and duplicate change-monitoring tasks.
+    """
+    from pydantic_ai.capabilities import Instrumentation
+
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.model_configs import TestModelConfig
+    from agentpool_config.capabilities import GenericCapabilityConfig
+
+    cap_config = GenericCapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    config = NativeAgentConfig(
+        name="test_no_dup_agent",
+        model=TestModelConfig(custom_output_text="test"),
+        system_prompt=["Be helpful."],
+        capabilities=[cap_config],
+    )
+
+    agent = Agent.from_config(config)
+
+    # Count before get_agentlet()
+    count_before = len([c for c in agent._external_capabilities if isinstance(c, Instrumentation)])
+    assert count_before == 1, (
+        f"Expected 1 Instrumentation in _external_capabilities before get_agentlet(), "
+        f"found {count_before}."
+    )
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await agent.get_agentlet(None, None, None)
+
+    # After get_agentlet(), count must not have increased
+    count_after = len([c for c in agent._external_capabilities if isinstance(c, Instrumentation)])
+    assert count_after == count_before, (
+        f"_external_capabilities grew from {count_before} to {count_after} "
+        f"after get_agentlet(). Config capabilities are being double-appended."
+    )
+
+
+@pytest.mark.anyio
+async def test_no_external_capability_growth_across_multiple_get_agentlet_calls() -> None:
+    """_external_capabilities must not accumulate duplicates across multiple turns.
+
+    get_agentlet() is called per-turn (not cached).  If it rebuilds and appends
+    config capabilities to _external_capabilities each time, after N turns there
+    are N+1 copies.  This test verifies that calling get_agentlet() multiple
+    times does not grow _external_capabilities.
+    """
+    from pydantic_ai.capabilities import Instrumentation
+
+    from agentpool.models.agents import NativeAgentConfig
+    from agentpool.models.model_configs import TestModelConfig
+    from agentpool_config.capabilities import GenericCapabilityConfig
+
+    cap_config = GenericCapabilityConfig(
+        type="pydantic_ai.capabilities.Instrumentation",
+        args={},
+    )
+    config = NativeAgentConfig(
+        name="test_no_growth_agent",
+        model=TestModelConfig(custom_output_text="test"),
+        system_prompt=["Be helpful."],
+        capabilities=[cap_config],
+    )
+
+    agent = Agent.from_config(config)
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+
+        # Call get_agentlet() three times (simulating three turns)
+        for _ in range(3):
+            await agent.get_agentlet(None, None, None)
+
+    # After 3 calls, there should still be exactly 1 Instrumentation
+    instrumentation_caps = [
+        c for c in agent._external_capabilities if isinstance(c, Instrumentation)
+    ]
+    assert len(instrumentation_caps) == 1, (
+        f"Expected 1 Instrumentation after 3 get_agentlet() calls, "
+        f"found {len(instrumentation_caps)}. Capabilities are accumulating "
+        f"across turns (double-append bug)."
+    )
+
+    # Also verify the overall _external_capabilities list didn't grow
+    # (it should contain the config capability + any session/worker providers)
+    # The key invariant: len after N calls == len after 1 call
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await agent.get_agentlet(None, None, None)
+    len_after_4th = len(agent._external_capabilities)
+
+    with patch("agentpool.agents.native_agent.agent.PydanticAgent") as mock_pydantic_agent:
+        mock_pydantic_agent.return_value = MagicMock()
+        await agent.get_agentlet(None, None, None)
+    len_after_5th = len(agent._external_capabilities)
+
+    assert len_after_5th == len_after_4th, (
+        f"_external_capabilities grew from {len_after_4th} to {len_after_5th} "
+        f"between 4th and 5th get_agentlet() call."
+    )
