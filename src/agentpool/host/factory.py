@@ -162,6 +162,42 @@ class AgentFactory:
 
         return AgentRegistry()
 
+    def register_config_capabilities(
+        self,
+        manifest: AgentsManifest,
+        host_context: HostContext,
+    ) -> None:
+        """Register config-defined capabilities at AGENT scope.
+
+        Builds capabilities from each agent's ``capabilities`` config and
+        registers them directly at AGENT scope in the ExtensionRegistry.
+        This ensures they are available for resource resolution (e.g.
+        ``_resolve_resource()`` in OpenCode message handling) before any
+        message handling occurs.
+
+        Unlike ``compile()``, this method does NOT populate
+        ``_capability_registry`` — so ``_extra_capabilities`` injection
+        in ``create_session_agent()`` is unaffected. Only config-defined
+        caps (``cfg.capabilities``) are registered; other compiled caps
+        (SubagentCapability, TeamCommCapability, etc.) are NOT registered
+        here.
+
+        Args:
+            manifest: The agents manifest to register caps from.
+            host_context: The host context with shared services.
+        """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+        from agentpool_config.capabilities import build_config_capabilities
+        from agentpool.models.agents import NativeAgentConfig
+
+        for agent_name, cfg in manifest.agents.items():
+            if not isinstance(cfg, NativeAgentConfig) or not cfg.capabilities:
+                continue
+            config_caps = build_config_capabilities(cfg.capabilities)
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
+            for cap in config_caps:
+                self._pool.extension_registry.register(cap, agent_scope)
+
     @staticmethod
     def _build_agent_descriptions(
         host_context: HostContext,
@@ -257,28 +293,9 @@ class AgentFactory:
         #     _extra_capabilities (line ~438) and conflict with the
         #     agent's own _external_capabilities (duplicate tools).
         if isinstance(cfg, NativeAgentConfig) and cfg.capabilities:
-            from pydantic import BaseModel as _BaseModel
+            from agentpool_config.capabilities import build_config_capabilities
 
-            from agentpool_config.capabilities import (
-                EntryPointCapabilityConfig,
-                GenericCapabilityConfig,
-                build_capability,
-            )
-
-            config_caps: list[AbstractCapability[Any]] = []
-            for cap_cfg in cfg.capabilities:
-                if cap_cfg is None:
-                    continue
-                if isinstance(cap_cfg, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
-                    built = cap_cfg.build()
-                elif isinstance(cap_cfg, _BaseModel):
-                    from typing import cast as _cast
-
-                    built = build_capability(_cast(Any, cap_cfg))
-                else:
-                    # Pre-instantiated AbstractCapability
-                    built = cap_cfg
-                config_caps.append(built)
+            config_caps = build_config_capabilities(cfg.capabilities)
 
             # Register directly at AGENT scope — do NOT add to `caps`.
             from agentpool.capabilities.extension_registry import Scope, ScopeLevel

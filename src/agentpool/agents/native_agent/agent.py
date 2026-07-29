@@ -417,28 +417,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # can reuse them instead of rebuilding (preventing double-append bug).
         self._config_capabilities_built: list[Any] = []
         if self.config and self.config.capabilities:
-            from pydantic import BaseModel as _BaseModel
+            from agentpool_config.capabilities import build_config_capabilities
 
-            from agentpool_config.capabilities import (
-                EntryPointCapabilityConfig,
-                GenericCapabilityConfig,
-                build_capability,
-            )
-
-            for cap in self.config.capabilities:
-                if cap is None:
-                    continue
-                if isinstance(cap, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
-                    built = cap.build()
-                elif isinstance(cap, _BaseModel):
-                    from typing import cast as _cast
-
-                    built = build_capability(_cast(Any, cap))
-                else:
-                    # Pre-instantiated AbstractCapability
-                    built = cap
-                self._external_capabilities.append(built)
-                self._config_capabilities_built.append(built)
+            built_caps = build_config_capabilities(self.config.capabilities)
+            self._external_capabilities.extend(built_caps)
+            self._config_capabilities_built.extend(built_caps)
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
         """Build MCP config entries from pool-level servers.

@@ -349,6 +349,41 @@ def is_known_capability_type(raw_type: str) -> bool:
     return raw_type in KNOWN_CAPABILITY_TYPES
 
 
+def build_config_capabilities(capabilities: list[Any]) -> list[Any]:
+    """Build capability instances from a config capabilities list.
+
+    Handles three item types:
+    - ``GenericCapabilityConfig`` / ``EntryPointCapabilityConfig`` → ``.build()``
+    - Other Pydantic ``BaseModel`` (typed built-in configs) → ``build_capability()``
+    - Pre-instantiated objects → used as-is
+
+    This is the single canonical builder used by:
+    - ``NativeAgent.__init__()`` for eager cap building
+    - ``AgentFactory._compile_agent_capabilities()`` step 3b
+    - ``AgentFactory.register_config_capabilities()`` for pool-init registration
+
+    Args:
+        capabilities: List from a ``NativeAgentConfig.capabilities`` field.
+            Items may be ``None`` (skipped), config models, or pre-instantiated
+            ``AbstractCapability`` instances.
+
+    Returns:
+        List of instantiated capability objects.
+    """
+    from pydantic import BaseModel
+
+    built: list[Any] = []
+    for cap in capabilities:
+        if cap is None:
+            continue
+        if isinstance(cap, BaseModel):
+            built.append(build_capability(cap))
+        else:
+            # Pre-instantiated AbstractCapability
+            built.append(cap)
+    return built
+
+
 def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
     """Build a capability from any config variant.
 

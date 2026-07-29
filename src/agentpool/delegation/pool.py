@@ -295,11 +295,15 @@ class AgentPool[TPoolDeps = None]:
                 await self._rebuild_skill_capabilities()
                 # Create the unified ResourceCapability (not registered in registry).
                 await self._setup_resource_capability()
-                # Compile agent capabilities and register them at AGENT scope.
-                # This eagerly builds config-defined capabilities (e.g. Viking,
-                # MCP, code mode) so they are available in the ExtensionRegistry
-                # before any message handling occurs.
-                self._factory.compile(self.manifest, self.get_context())
+                # Register config-defined capabilities (e.g. Viking, MCP, code
+                # mode) at AGENT scope so they are available in the
+                # ExtensionRegistry before any message handling occurs.
+                from agentpool.host.factory import AgentFactory
+
+                factory = AgentFactory(self)
+                factory.register_config_capabilities(
+                    self.manifest, self.get_context()
+                )
                 # Initialize storage and sessions sequentially (they share the same DB)
                 await self.exit_stack.enter_async_context(self.storage)
                 # Use the StorageManager's already-initialized provider as session store.
