@@ -669,7 +669,10 @@ async def test_resolve_capabilities_cache_only_uses_cache() -> None:
     cache._cache["openai:gpt-4o:image_output"] = False
     declared = ModelCapabilities()
     resolved = await resolve_capabilities(
-        "openai:gpt-4o", declared, cache=cache, cache_only=True,
+        "openai:gpt-4o",
+        declared,
+        cache=cache,
+        cache_only=True,
     )
     assert resolved.image_input is True
     assert resolved.audio_input is False
@@ -681,7 +684,10 @@ async def test_resolve_capabilities_cache_only_miss_defaults_to_false() -> None:
     cache = CapabilityCache()
     declared = ModelCapabilities()
     resolved = await resolve_capabilities(
-        "unknown:model", declared, cache=cache, cache_only=True,
+        "unknown:model",
+        declared,
+        cache=cache,
+        cache_only=True,
     )
     assert resolved.image_input is False
     assert resolved.audio_input is False
@@ -696,10 +702,15 @@ async def test_resolve_capabilities_cache_only_no_network_calls() -> None:
     cache = CapabilityCache()
     declared = ModelCapabilities()
     with patch.object(
-        cache, "get_capability", new_callable=AsyncMock,
+        cache,
+        "get_capability",
+        new_callable=AsyncMock,
     ) as mock_get:
         await resolve_capabilities(
-            "openai:gpt-4o", declared, cache=cache, cache_only=True,
+            "openai:gpt-4o",
+            declared,
+            cache=cache,
+            cache_only=True,
         )
         mock_get.assert_not_called()
 
@@ -711,7 +722,10 @@ async def test_resolve_capabilities_cache_only_preserves_explicit_values() -> No
     cache._cache["openai:gpt-4o:image_input"] = True
     declared = ModelCapabilities(image_input=False, audio_input=None)
     resolved = await resolve_capabilities(
-        "openai:gpt-4o", declared, cache=cache, cache_only=True,
+        "openai:gpt-4o",
+        declared,
+        cache=cache,
+        cache_only=True,
     )
     assert resolved.image_input is False  # explicit override preserved
     assert resolved.audio_input is False  # cache miss -> False default
