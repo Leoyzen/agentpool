@@ -364,6 +364,6 @@ followup("also check tests")
 ## References
 
 - [OpenSpec Change: unify-steer-followup](openspec/changes/unify-steer-followup/) — detailed implementation spec and tasks
-- [RFC-0029: Agent Reactivation](draft/RFC-0029-agent-reactivation-pending-prompt-queue.md) — legacy inject_prompt/queue_prompt design
+- [RFC-0029: Agent Reactivation](./RFC-0029-agent-reactivation-pending-prompt-queue.md) — legacy inject_prompt/queue_prompt design
 - [PydanticAI PendingMessageDrainCapability source](../../../pydantic-ai/pydantic_ai_slim/pydantic_ai/capabilities/_pending_messages.py) — auto-injected capability with asap/when_idle priority
 - [Pi-Agent Steering/Followup Design](https://github.com/pi/pi-agent) — reference implementation with two-queue system (steering vs followup separation)

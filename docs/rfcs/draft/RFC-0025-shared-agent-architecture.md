@@ -465,9 +465,9 @@ Revert to Phase 1's per-session agents by restoring `ServerState.agents: dict[st
 
 ## References
 
-- [RFC-0026: Per-Session Agent Instances](./RFC-0026-per-session-agent-isolation.md) — Phase 1: Remove `agent_lock`
+- [RFC-0026: Per-Session Agent Instances](../implemented/RFC-0026-per-session-agent-isolation.md) — Phase 1: Remove `agent_lock`
 - [RFC-0024: Agent Stateless Refactor](./RFC-0024-agent-stateless-refactor.md) — Phase 2: Make `BaseAgent` stateless
-- [RFC-0021: Agent Concurrent Execution Safety](../accepted/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
+- [RFC-0021: Agent Concurrent Execution Safety](../implemented/RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
 - pydantic-ai `Agent` — Stateless worker pattern
 
 ### Key Source Files

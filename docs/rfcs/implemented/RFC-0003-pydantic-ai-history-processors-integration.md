@@ -849,7 +849,7 @@ def context_aware_sync(
 
 ### Related Documents
 
-- [RFC-0002: Extended Tool Definition](../accepted/RFC-0002-extended-tool-definition.md)
+- [RFC-0002: Extended Tool Definition](./RFC-0002-extended-tool-definition.md)
 - [pydantic-ai Documentation - History Processors](../../../pydantic-ai/docs/message-history.md)
 - [pydantic-ai Test Suite](../../../pydantic-ai/tests/test_history_processor.py)
 

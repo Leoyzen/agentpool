@@ -8,7 +8,7 @@
 
 **A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
 
-[Documentation](https://phil65.github.io/agentpool/)
+[Documentation](https://leoyzen.github.io/agentpool/)
 
 ## The Problem
 
@@ -205,4 +205,4 @@ async with AgentPool("agents.yml") as pool:
 
 ## Documentation
 
-For complete documentation including advanced configuration, connection patterns, and API reference, visit [phil65.github.io/agentpool](https://phil65.github.io/agentpool/).
+For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/agentpool](https://leoyzen.github.io/agentpool/).
