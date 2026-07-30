@@ -417,28 +417,11 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
         # can reuse them instead of rebuilding (preventing double-append bug).
         self._config_capabilities_built: list[Any] = []
         if self.config and self.config.capabilities:
-            from pydantic import BaseModel as _BaseModel
+            from agentpool_config.capabilities import build_config_capabilities
 
-            from agentpool_config.capabilities import (
-                EntryPointCapabilityConfig,
-                GenericCapabilityConfig,
-                build_capability,
-            )
-
-            for cap in self.config.capabilities:
-                if cap is None:
-                    continue
-                if isinstance(cap, (GenericCapabilityConfig, EntryPointCapabilityConfig)):
-                    built = cap.build()
-                elif isinstance(cap, _BaseModel):
-                    from typing import cast as _cast
-
-                    built = build_capability(_cast(Any, cap))
-                else:
-                    # Pre-instantiated AbstractCapability
-                    built = cap
-                self._external_capabilities.append(built)
-                self._config_capabilities_built.append(built)
+            built_caps = build_config_capabilities(self.config.capabilities)
+            self._external_capabilities.extend(built_caps)
+            self._config_capabilities_built.extend(built_caps)
 
     def _build_pool_configs(self) -> tuple[McpConfigEntry, ...]:
         """Build MCP config entries from pool-level servers.
@@ -1158,10 +1141,13 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                 if resource_cap is not None:
                     tool_capabilities.append(resource_cap)
 
-        # Register per-session capabilities (MCP, SkillManagerCap,
-        # ResourceCapability) at SESSION scope in the ExtensionRegistry.
+        # Register per-session capabilities (MCP, SkillManagerCap)
+        # at SESSION scope in the ExtensionRegistry.
         # This is done once per session — subsequent get_agentlet() calls
         # within the same session skip registration.
+        #
+        # Note: ResourceCapability is NOT registered here. It is a tool
+        # wrapper, not a ResourceAccess provider. See pool._setup_resource_capability().
         if self.host_context is not None and run_ctx is not None:
             registry = self.host_context.extension_registry
             if registry is not None:
@@ -1185,10 +1171,6 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                             for cap in pool_caps:
                                 if isinstance(cap, SkillManagerCap):
                                     registry.register(cap, session_scope)
-                        if self.config is not None and self.config.resources.enabled:
-                            resource_cap = pool.resource_capability
-                            if resource_cap is not None:
-                                registry.register(resource_cap, session_scope)
                     self._registered_session_ids.add(session_id)
 
         # Collect pydantic-ai compatible instructions from SystemPrompts and providers

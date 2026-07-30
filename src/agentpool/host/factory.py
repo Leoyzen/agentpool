@@ -162,6 +162,42 @@ class AgentFactory:
 
         return AgentRegistry()
 
+    def register_config_capabilities(
+        self,
+        manifest: AgentsManifest,
+        host_context: HostContext,
+    ) -> None:
+        """Register config-defined capabilities at AGENT scope.
+
+        Builds capabilities from each agent's ``capabilities`` config and
+        registers them directly at AGENT scope in the ExtensionRegistry.
+        This ensures they are available for resource resolution (e.g.
+        ``_resolve_resource()`` in OpenCode message handling) before any
+        message handling occurs.
+
+        Unlike ``compile()``, this method does NOT populate
+        ``_capability_registry`` — so ``_extra_capabilities`` injection
+        in ``create_session_agent()`` is unaffected. Only config-defined
+        caps (``cfg.capabilities``) are registered; other compiled caps
+        (SubagentCapability, TeamCommCapability, etc.) are NOT registered
+        here.
+
+        Args:
+            manifest: The agents manifest to register caps from.
+            host_context: The host context with shared services.
+        """
+        from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+        from agentpool.models.agents import NativeAgentConfig
+        from agentpool_config.capabilities import build_config_capabilities
+
+        for agent_name, cfg in manifest.agents.items():
+            if not isinstance(cfg, NativeAgentConfig) or not cfg.capabilities:
+                continue
+            config_caps = build_config_capabilities(cfg.capabilities)
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
+            for cap in config_caps:
+                self._pool.extension_registry.register(cap, agent_scope)
+
     @staticmethod
     def _build_agent_descriptions(
         host_context: HostContext,
@@ -211,11 +247,13 @@ class AgentFactory:
           includes a ``subagent`` toolset)
         - Config-level tool providers → added directly as native
           capabilities
+        - Config-defined capabilities (e.g. Viking, MCP, code mode) →
+          built from ``cfg.capabilities`` and included for AGENT-scope
+          registration so they are available before any message handling.
 
-        MCP servers, skill capabilities, and code mode are handled
-        separately by the native agent's ``get_agentlet()`` and the
-        pool's ``SkillManager``. They are NOT compiled here to avoid
-        duplication.
+        Skill capabilities and code mode are also handled by the native
+        agent's ``get_agentlet()`` for per-session tool injection, but
+        the registry registration happens here at pool init time.
 
         Args:
             agent_name: Name of the agent.
@@ -230,9 +268,9 @@ class AgentFactory:
 
         caps: list[AbstractCapability[Any]] = []
 
-        # 1. Pool-level skills tools provider — native capability.
-        if host_context.skills_tools_provider is not None:
-            caps.append(host_context.skills_tools_provider)
+        # 1. Pool-level skills tools provider — already registered at POOL
+        #    scope by _rebuild_skill_capabilities(). Not included here to
+        #    avoid duplicate AGENT-scope registration.
 
         # 2. Subagent delegation — native capability.
         if self._has_subagent_toolset(cfg):
@@ -245,6 +283,26 @@ class AgentFactory:
         #    ResourceSource collection and hot-swap can discover them.
         if isinstance(cfg, NativeAgentConfig):
             caps.extend(cfg.get_tool_providers())
+
+        # 3b. Config-defined capabilities (e.g. Viking, MCP, code mode).
+        #     Built from cfg.capabilities and registered directly at AGENT
+        #     scope so the ExtensionRegistry has them before any message
+        #     handling. NOT included in the returned list — the agent
+        #     instance builds its own copies in __init__() for tool
+        #     execution. If we returned them here, they'd be injected as
+        #     _extra_capabilities (line ~438) and conflict with the
+        #     agent's own _external_capabilities (duplicate tools).
+        if isinstance(cfg, NativeAgentConfig) and cfg.capabilities:
+            from agentpool_config.capabilities import build_config_capabilities
+
+            config_caps = build_config_capabilities(cfg.capabilities)
+
+            # Register directly at AGENT scope — do NOT add to `caps`.
+            from agentpool.capabilities.extension_registry import Scope, ScopeLevel
+
+            agent_scope = Scope(level=ScopeLevel.AGENT, agent_name=agent_name)
+            for c in config_caps:
+                self._pool.extension_registry.register(c, agent_scope)
 
         # 4. Team communication capability — shared instance with session_metadata=None.
         #    Per-session instance with actual metadata is created in create_session_agent().
@@ -458,6 +516,10 @@ class AgentFactory:
 
                 session_scope = Scope(level=ScopeLevel.SESSION, session_id=session_id)
                 self._pool.extension_registry.register(team_cap, session_scope)
+
+        # Config-defined capabilities (e.g. Viking) are registered at AGENT
+        # scope during pool init in _compile_agent_capabilities(). No
+        # duplicate registration is needed here.
 
         # Start hot-swap listeners for capabilities with on_change().
         await self._start_hot_swap_listeners(agent_name, agent, caps)

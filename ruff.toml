@@ -144,6 +144,17 @@ max-complexity = 15
 ]  # Examples don't need TYPE_CHECKING imports
 # Team comm tools: ctx parameter is pydantic-ai internal, not described in docstrings
 "src/agentpool/capabilities/team_comm_capability.py" = ["D417"]
+# Viking tools: ctx is pydantic-ai internal, BLE001 is intentional for tool error handling
+"src/agentpool/capabilities/viking/tools.py" = [
+  "D417",
+  "BLE001",
+  "TRY300",
+  "PLR0915"
+]
+# Viking capability: BLE001 for safe SkillResource defaults, TRY300 for early-return pattern
+"src/agentpool/capabilities/viking/__init__.py" = ["BLE001", "TRY300"]
+# Viking instructions: E501 for markdown table lines
+"src/agentpool/capabilities/viking/instructions.py" = ["E501"]
 
 [format]
 preview = true

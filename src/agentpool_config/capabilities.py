@@ -29,6 +29,7 @@ KNOWN_CAPABILITY_TYPES: frozenset[str] = frozenset({
     "skill_activation",
     "memory",
     "modality_filter",
+    "viking",
 })
 
 IMPORT_MAP: dict[str, str] = {
@@ -39,6 +40,7 @@ IMPORT_MAP: dict[str, str] = {
     "skill_activation": "agentpool.capabilities.skill_manager_cap:SkillManagerCap",
     "memory": "agentpool.capabilities.memory.MemoryCapability",
     "modality_filter": "agentpool.capabilities.modality_filter.ModalityFilterCapability",
+    "viking": "agentpool.capabilities.viking.VikingCapability",
 }
 
 
@@ -157,6 +159,143 @@ class ModalityFilterCapabilityConfig(BaseModel):
     """Degradation strategy for unsupported document content."""
 
 
+class VikingCapabilityConfig(BaseModel):
+    """Config for ``VikingCapability``."""
+
+    type: Literal["viking"] = "viking"
+    mode: Literal["retrieve", "write", "graph", "all"] = "all"
+    """Tool exposure mode — retrieve (7 tools), write (6 tools), graph (2 tools), all (15 tools)."""
+    url: str | None = None
+    """Viking server URL. If None, SDK resolves from OPENVIKING_URL env var
+    or ~/.openviking/ovcli.conf."""
+    api_key: str | None = None
+    """Viking API key. If None, SDK resolves from env vars."""
+    account: str | None = None
+    """Viking account ID. If None, SDK resolves from env vars."""
+    user: str | None = None
+    """Viking user ID. If None, SDK resolves from env vars."""
+    timeout: float | None = None
+    """Request timeout in seconds. If None, SDK uses default (60s)."""
+    skills_uri: str | None = None
+    """Override for skills URI. Default: viking://user/{user or 'default'}/skills/"""
+    resources_uri: str | None = None
+    """Override for resources URI."""
+    sessions_uri: str | None = None
+    """Override for sessions URI. Default: viking://user/{user}/sessions/"""
+    multimodal_bridge: bool = False
+    """Enable multimodal bridge (Phase 6, not yet implemented)."""
+    uploads_uri: str | None = None
+    """Override for uploads URI."""
+    public_download_base_url: str | None = None
+    """Base URL for public download links."""
+    enable_link: bool = False
+    """Enable viking_link tool. Requires backend graph link API support.
+    Disabled by default — not all Viking deployments support linking."""
+    enable_memory: bool = False
+    """Enable viking_remember and viking_recall tools. Requires backend
+    session-based memory support. Disabled by default — not all Viking
+    deployments support memory sessions."""
+    resource_file_extensions: tuple[str, ...] = (
+        ".md",
+        ".txt",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".html",
+    )
+    """File extensions to include in list_resources(). Files with extensions
+    not in this set are skipped. Set to an empty list to include all files."""
+    resource_read_level: Literal["abstract", "overview", "read"] = "overview"
+    """Default content level for read_resource() (ResourceAccess Protocol).
+    "abstract" (L0), "overview" (L1, default), or "read" (L2, full)."""
+    auto_resolve_identity: bool = True
+    """When True (default), resolve account_id and user_id automatically
+    from the API key or /health endpoint after client initialization."""
+    memories_uri: str | None = None
+    """Override for memories URI. Default: viking://user/{user_id}/memories/"""
+    actor_peer_id: str | None = None
+    """Explicit actor peer ID for multi-agent isolation. When None (default),
+    the Viking server uses user_id for isolation. When set, passed to the
+    SDK client for all requests."""
+    auto_ingest_enabled: bool = False
+    """Enable automatic conversation ingestion. When True, the capability
+    ingests the previous turn's conversation at the start of the next
+    ``before_model_request`` call (lazy ingestion)."""
+    auto_ingest_mode: Literal["async", "sync"] = "async"
+    """Ingestion mode — ``"async"`` (fire-and-forget background task) or
+    ``"sync"`` (block until ingestion completes). Default is ``"async"``."""
+    auto_ingest_sanitize: bool = True
+    """Strip ``<openviking-recall>`` and ``<openviking-profile>`` XML blocks
+    from messages before ingestion to prevent feedback loops."""
+    auto_ingest_source_type: str = "agentpool"
+    """Source type metadata for ingested sessions."""
+    auto_ingest_keep_recent_turns: int = 0
+    """Number of recent turns to retain in the session after commit.
+    When 0 (default), no retention parameter is passed to commit_session."""
+    auto_recall_enabled: bool = False
+    """When True, perform semantic recall before each model request using the
+    latest user prompt as the query. Results are injected as an
+    <openviking-recall> XML block into the system prompt."""
+    auto_recall_method: Literal["search", "find"] = "search"
+    """Recall retrieval method: "search" (default, session-aware, calls
+    client.search() with session_id) or "find" (faster, deduplicated, calls
+    client.find() without session context)."""
+    auto_recall_max_tokens: int = 2000
+    """Maximum token budget for the injected recall block. Content exceeding
+    this budget is truncated with a [... truncated] indicator."""
+    auto_recall_limit: int = 10
+    """Maximum number of results to request from the Viking server per recall."""
+    auto_recall_min_score: float = 0.3
+    """Minimum composite score for a recall hit to be included in the result."""
+    auto_recall_lexical_boost: float = 0.1
+    """Score boost per overlapping word between the query and hit content."""
+    auto_recall_category_boost: float = 0.05
+    """Score boost applied to hits with context_type="memory"."""
+    auto_recall_context_types: list[str] = Field(default_factory=lambda: ["memory", "resource"])
+    """Context types to include in recall results. Hits with context_type not
+    in this list are filtered out before ranking."""
+    enable_forget: bool = False
+    """Enable the viking_forget tool. This is a destructive operation that
+    removes documents from the Viking knowledge graph. Disabled by default —
+    an agent deleting memories without user confirmation is dangerous.
+    Independent from enable_memory."""
+    uri_guard_enabled: bool = False
+    """When True, block file-access tools (read, bash, grep, glob) from
+    accessing viking:// URIs in their arguments. Forces the agent to use
+    dedicated Viking tools (viking_read, viking_search) instead."""
+    uri_guard_protected_tools: list[str] = Field(
+        default_factory=lambda: ["read", "bash", "grep", "glob"]
+    )
+    """Tool names protected by the URI guard. When uri_guard_enabled is True,
+    these tools are blocked from accessing viking:// URIs. Customize to add
+    or remove tools from the protected list."""
+    compaction_enabled: bool = False
+    """When True, archive old conversation messages to Viking before context
+    overflow. Disabled by default."""
+    compaction_threshold: int = 100_000
+    """Estimated token count above which compaction is triggered. Only
+    checked when compaction_enabled is True."""
+    compaction_keep_recent_turns: int = 5
+    """Number of recent turns to keep when compacting. Older messages are
+    archived to viking://user/{user_id}/memories/compacted/."""
+    compaction_expand_tool: bool = True
+    """When True (and compaction_enabled is True), expose a viking_expand
+    tool that loads the full content of a previously archived conversation."""
+    profile_enabled: bool = False
+    """Enable first-turn profile injection from Viking memories. When True,
+    the capability queries Viking for memory search results on the first
+    turn and injects them as an <openviking-profile> XML block."""
+    profile_max_tokens: int = 1000
+    """Maximum token budget for the injected profile block. Content exceeding
+    this budget is truncated with a [... truncated] indicator."""
+    profile_limit: int = 5
+    """Maximum number of memory hits to retrieve for the profile block."""
+    profile_first_turn_only: bool = True
+    """When True (default), profile injection runs only on the first turn
+    of a session (message count <= 2). When False, injection runs on every
+    before_model_request call where _profile_injected is False."""
+
+
 # ---------------------------------------------------------------------------
 # Entry-point-based config
 # ---------------------------------------------------------------------------
@@ -271,7 +410,8 @@ BuiltinCapabilityConfig = Annotated[
     | DCPCapabilityConfig
     | SkillActivationCapabilityConfig
     | MemoryCapabilityConfig
-    | ModalityFilterCapabilityConfig,
+    | ModalityFilterCapabilityConfig
+    | VikingCapabilityConfig,
     Field(discriminator="type"),
 ]
 
@@ -293,6 +433,43 @@ def is_known_capability_type(raw_type: str) -> bool:
         ``True`` if it's a known short name (``"loop_detection"``, etc.).
     """
     return raw_type in KNOWN_CAPABILITY_TYPES
+
+
+def build_config_capabilities(capabilities: list[Any]) -> list[Any]:
+    """Build capability instances from a config capabilities list.
+
+    Handles three item types:
+    - ``GenericCapabilityConfig`` / ``EntryPointCapabilityConfig`` → ``.build()``
+    - Other Pydantic ``BaseModel`` (typed built-in configs) → ``build_capability()``
+    - Pre-instantiated objects → used as-is
+
+    This is the single canonical builder used by:
+    - ``NativeAgent.__init__()`` for eager cap building
+    - ``AgentFactory._compile_agent_capabilities()`` step 3b
+    - ``AgentFactory.register_config_capabilities()`` for pool-init registration
+
+    Args:
+        capabilities: List from a ``NativeAgentConfig.capabilities`` field.
+            Items may be ``None`` (skipped), config models, or pre-instantiated
+            ``AbstractCapability`` instances.
+
+    Returns:
+        List of instantiated capability objects.
+    """
+    from pydantic import BaseModel
+
+    built: list[Any] = []
+    for cap in capabilities:
+        if cap is None:
+            continue
+        if isinstance(cap, BaseModel):
+            from typing import cast as _cast
+
+            built.append(build_capability(_cast("CapabilityConfig", cap)))
+        else:
+            # Pre-instantiated AbstractCapability
+            built.append(cap)
+    return built
 
 
 def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
@@ -331,6 +508,8 @@ def build_capability(config: CapabilityConfig) -> Any:  # noqa: PLR0911, RET503
             return _import_and_instantiate(IMPORT_MAP["memory"], config)
         case ModalityFilterCapabilityConfig():
             return _import_and_instantiate(IMPORT_MAP["modality_filter"], config)
+        case VikingCapabilityConfig():
+            return _import_and_instantiate(IMPORT_MAP["viking"], config)
         case _ as unreachable:
             from typing import assert_never
 
