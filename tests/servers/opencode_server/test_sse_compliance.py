@@ -269,7 +269,7 @@ async def test_tui_filter_all_session_events_pass() -> None:
     session_events: list[Event] = [
         SessionStatusEvent.create(session_id="s1", status_type="busy"),
         SessionCompactedEvent.create(session_id="s1"),
-        SessionDeletedEvent.create(session_id="s1"),
+        SessionDeletedEvent.create(session=_make_session("s1")),
         TodoUpdatedEvent.create(session_id="s1", todos=[]),
         PartDeltaEvent.create(session_id="s1", message_id="m1", part_id="p1", delta="x"),
     ]
@@ -471,6 +471,28 @@ async def test_session_id_in_payload_session_created() -> None:
     result = _serialize_event(event, wrap_payload=False)
     data = json.loads(result)
     assert data["sessionId"] == "top3"
+
+
+@pytest.mark.anyio
+async def test_session_deleted_event_carries_info() -> None:
+    """SessionDeletedEvent carries full ``info`` for OpenCode TUI clients.
+
+    Clients read ``properties.info.id`` to hide deleted sessions.
+
+    Regression test: the event previously only carried ``sessionID`` with no
+    ``info`` field, so the OpenCode TUI's ``event.properties.info.id`` access
+    threw and deleted sessions stayed visible in the session list.
+    """
+    session = _make_session("del1")
+    event = SessionDeletedEvent.create(session=session)
+    # model-level: properties expose both sessionID and info.id
+    assert event.properties.session_id == "del1"
+    assert event.properties.info.id == "del1"
+    # wire-level: serialized payload keeps info.id reachable for the TUI
+    data = json.loads(_serialize_event(event, wrap_payload=False))
+    assert data["type"] == "session.deleted"
+    assert data["properties"]["sessionID"] == "del1"
+    assert data["properties"]["info"]["id"] == "del1"
 
 
 @pytest.mark.anyio
@@ -949,11 +971,11 @@ def test_session_id_consistency_command_executed() -> None:
 
 # Re-use the same event factories from test_global_event.py
 _ALL_HANDLED_EVENTS_WITH_SID: list[tuple[str, Event]] = [
-    ("session.deleted", SessionDeletedEvent.create(session_id="ex1")),
+    ("session.deleted", SessionDeletedEvent.create(session=_make_session("ex1"))),
     ("session.status", SessionStatusEvent.create(session_id="ex2", status_type="busy")),
     ("session.idle", SessionCompactedEvent.create(session_id="ex3")),
     ("session.compacted", SessionCompactedEvent.create(session_id="ex4")),
-    ("message.removed", SessionDeletedEvent.create(session_id="ex5")),
+    ("message.removed", SessionDeletedEvent.create(session=_make_session("ex5"))),
     (
         "message.part.delta",
         PartDeltaEvent.create(session_id="ex6", message_id="m1", part_id="p1", delta="x"),
