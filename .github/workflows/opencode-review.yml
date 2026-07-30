@@ -5,7 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 # Non-blocking: posts a review comment, does not block merge
-# Fork PRs need a PAT because GITHUB_TOKEN is read-only for fork sources
+# Fork PRs are skipped — they cannot access repo secrets (DEEPSEEK_API_KEY, REVIEW_GITHUB_TOKEN)
 permissions:
   contents: read
   pull-requests: write
@@ -17,8 +17,8 @@ concurrency:
 
 jobs:
   review:
-    # Skip draft PRs — only review when marked ready
-    if: github.event.pull_request.draft == false
+    # Skip draft PRs and fork PRs — fork PRs cannot access repo secrets
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
 
     steps:
