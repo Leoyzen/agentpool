@@ -320,6 +320,13 @@ class NativeTurn(HookAwareTurn, Turn):
                                 self._agent._iteration_task = iteration_task
                                 node = await iteration_task
                                 current_node = node
+
+                                # Repair duplicated tool call args before CallToolsNode
+                                # validates and executes them. vLLM's glm47 parser can
+                                # emit args twice in streaming mode (vllm#47504).
+                                if isinstance(node, CallToolsNode):
+                                    sanitize_tool_call_args_in_messages([node.model_response])
+
                                 logger.info(
                                     "agent_run.next() completed",
                                     next_node_type=type(node).__name__,
