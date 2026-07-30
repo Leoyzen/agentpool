@@ -17,6 +17,7 @@ on:
 # - issue_comment: manual trigger via /oc or /opencode comment on any PR
 # - workflow_dispatch: manual trigger from Actions UI
 permissions:
+  id-token: write
   contents: read
   pull-requests: write
   issues: write
