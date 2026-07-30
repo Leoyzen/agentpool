@@ -20,16 +20,16 @@ This RFC proposes migrating the ACP server from a single shared `default_agent` 
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -130,7 +130,7 @@ When multiple ACP clients connect to the same `agentpool serve-acp` server, all 
 
 ### Non-Goals (Out of Scope)
 
-1. **Not**: Refactoring `BaseAgent` internals (that's [RFC-0024](./RFC-0024-agent-stateless-refactor.md))
+1. **Not**: Refactoring `BaseAgent` internals (that's [RFC-0024](../draft/RFC-0024-agent-stateless-refactor.md))
 2. **Not**: Changing the OpenCode server's per-session agent model
 3. **Not**: Implementing session cleanup/eviction policies (can be added independently)
 4. **Not**: MCP server state sharing optimization (each session's agent spawns its own MCP subprocesses)
@@ -292,7 +292,7 @@ Option 1 is the minimal, proven path. It mirrors RFC-0026's successful OpenCode 
 
 ### Accepted Trade-offs
 
-1. **MCP subprocess per session**: Acceptable for 2–5 concurrent users. Same trade-off accepted in RFC-0026. If this becomes a bottleneck, [RFC-0025](./RFC-0025-shared-agent-architecture.md) addresses it.
+1. **MCP subprocess per session**: Acceptable for 2–5 concurrent users. Same trade-off accepted in RFC-0026. If this becomes a bottleneck, [RFC-0025](../draft/RFC-0025-shared-agent-architecture.md) addresses it.
 2. **`swap_pool()` must close all sessions**: Before swapping pools, all per-session agents must be cleaned up. This is correct behavior — pool swap should not leak agent instances.
 3. **No session cleanup on close**: Acceptable because ACP sessions are typically long-lived. Can be added independently.
 

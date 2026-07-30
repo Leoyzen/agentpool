@@ -29,17 +29,17 @@ This is a **baseline architecture RFC**: it does not design any single layer in 
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -2214,7 +2214,7 @@ Each phase is independently deployable:
 
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md) — Six pluggable dimensions within RunLoop
 - [RFC-0041: Run vs Turn Separation](./RFC-0041-loop-run-separation.md) — Phase 1 prerequisite
-- [Lifecycle Analysis](../../design/lifecycle-analysis.md) — Cross-framework research
+- [Lifecycle Analysis](../../adr/lifecycle-analysis.md) — Cross-framework research
 - [pydantic-ai Documentation](https://ai.pydantic.dev/) — Capability/Toolset system
 - [K8s Controller Pattern](https://kubernetes.io/docs/concepts/architecture/controller/) — CRD → Controller analogy
 - [Akka Persistence](https://doc.akka.io/docs/akka/current/typed/persistence.html) — Journal + SnapshotStore model

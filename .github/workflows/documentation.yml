@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
@@ -38,12 +39,9 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --all-extras
-      - name: Build
-        run: uv run zensical build
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      - name: Reorder navigation
-        run: uv run python scripts/reorder_nav.py
+      # NOTE: GitHub Pages must be enabled in repo Settings → Pages → Source: GitHub Actions
+      - name: Build site
+        run: uv run --group docs zensical build
       - name: Generate JSON Schema HTML documentation
         run: |
           mkdir -p site/schema

@@ -24,17 +24,17 @@ This RFC proposes aligning AgentPool's ACP slash command advertisement with the 
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
 - [Review Findings](#review-findings)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -599,8 +599,8 @@ Revert by restoring:
 ### Related Documents
 
 - [ACP Slash Commands Protocol Spec](../../agent-client-protocol/docs/protocol/slash-commands.mdx)
-- [RFC-0016: Skill Slash Commands](./draft/RFC-0016-skill-slash-commands.md)
-- [RFC-0031: ACP Server Per-Session Agent Isolation](./RFC-0031-acp-per-session-agent-isolation.md)
+- [RFC-0016: Skill Slash Commands](./RFC-0016-skill-slash-commands.md)
+- [RFC-0031: ACP Server Per-Session Agent Isolation](../implemented/RFC-0031-acp-per-session-agent-isolation.md)
 
 ### Code References
 

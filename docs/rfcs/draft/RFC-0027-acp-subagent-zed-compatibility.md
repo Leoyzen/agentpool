@@ -1181,7 +1181,7 @@ Phase 0 与 Phase 1 可并行执行。Phase 0 仅阻塞 Phase 2（需要传输�
 
 ### 调研文档
 
-- [Zed ACP Subagent 功能调研报告](../../../xeno-agent/docs/survey/zed/acp-subagent-survey.md) — 完整的 Zed subagent 实现分析和 AgentPool 差距对比
+- Zed ACP Subagent 功能调研报告 — 完整的 Zed subagent 实现分析和 AgentPool 差距对比
 
 ### Zed 源码
 

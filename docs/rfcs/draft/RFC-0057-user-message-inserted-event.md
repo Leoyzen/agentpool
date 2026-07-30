@@ -33,17 +33,17 @@ This RFC proposes adding a first-class `UserMessageInsertedEvent` to `RichAgentS
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -998,13 +998,13 @@ TBD
 
 ### Related Documents
 
-- [OpenSpec Change: steer-followup-user-message-display](../../openspec/changes/steer-followup-user-message-display/)
-- [RFC-0056: SystemNotificationEvent](./draft/RFC-0056-system-notification-event.md) — complementary future work (NOT a dependency)
-- [RFC-0037: Unify Steer and Followup](./draft/RFC-0037-unify-steer-followup.md) — steer/followup sync constraints
-- [RFC-0042: Unified Lifecycle Architecture](./draft/RFC-0042-unified-lifecycle-architecture.md) — CommChannel/EventBus foundation
-- [Spec: unified-event-routing](../../openspec/specs/unified-event-routing/spec.md) — event routing rules
-- [Spec: steer-followup-api](../../openspec/specs/steer-followup-api/spec.md) — steer/followup API
-- [Spec: acp-server](../../openspec/specs/acp-server/spec.md) — ACP server behavior
+- OpenSpec Change: steer-followup-user-message-display
+- RFC-0056: SystemNotificationEvent — complementary future work (NOT a dependency)
+- [RFC-0037: Unify Steer and Followup](../draft/RFC-0037-unify-steer-followup.md) — steer/followup sync constraints
+- [RFC-0042: Unified Lifecycle Architecture](../draft/RFC-0042-unified-lifecycle-architecture.md) — CommChannel/EventBus foundation
+- Spec: unified-event-routing — event routing rules
+- Spec: steer-followup-api — steer/followup API
+- Spec: acp-server — ACP server behavior
 
 ### External Resources
 

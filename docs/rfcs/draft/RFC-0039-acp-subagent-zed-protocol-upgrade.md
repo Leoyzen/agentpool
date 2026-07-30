@@ -974,7 +974,7 @@ Phase 2 和 Phase 3 可并行执行，均依赖 Phase 1。
 
 ### 调研文档
 
-- [Zed ACP Subagent 功能调研报告](../../../xeno-agent/docs/survey/zed/acp-subagent-survey.md) — 完整的 Zed subagent 实现分析、AgentPool 差距对比和适配方案（2026-06-26 更新）
+- Zed ACP Subagent 功能调研报告 — 完整的 Zed subagent 实现分析、AgentPool 差距对比和适配方案（2026-06-26 更新）
 
 ### Oracle 评估
 

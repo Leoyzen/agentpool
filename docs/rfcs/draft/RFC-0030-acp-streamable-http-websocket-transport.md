@@ -20,17 +20,17 @@ ACP agents in AgentPool currently communicate over stdio or a bare WebSocket ser
 
 ## Table of Contents
 
-1. [Background & Context](#background--context)
+1. Background & Context
 2. [Problem Statement](#problem-statement)
-3. [Goals & Non-Goals](#goals--non-goals)
+3. Goals & Non-Goals
 4. [Evaluation Criteria](#evaluation-criteria)
 5. [Options Analysis](#options-analysis)
 6. [Recommendation](#recommendation)
 7. [Technical Design](#technical-design)
-8. [Security Considerations](#security-considerations)
-9. [Implementation Plan](#implementation-plan)
+8. Security Considerations
+9. Implementation Plan
 10. [Open Questions](#open-questions)
-11. [Decision Record](#decision-record)
+11. Decision Record
 12. [References](#references)
 
 ## Background & Context

@@ -23,18 +23,18 @@ The integration aims to provide a clean pass-through to pydantic-ai's native his
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Testing Requirements](#testing-requirements)
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -849,15 +849,15 @@ def context_aware_sync(
 
 ### Related Documents
 
-- [RFC-0002: Extended Tool Definition](../accepted/RFC-0002-extended-tool-definition.md)
-- [pydantic-ai Documentation - History Processors](../../../pydantic-ai/docs/message-history.md)
-- [pydantic-ai Test Suite](../../../pydantic-ai/tests/test_history_processor.py)
+- [RFC-0002: Extended Tool Definition](./RFC-0002-extended-tool-definition.md)
+- pydantic-ai Documentation - History Processors
+- pydantic-ai Test Suite
 
 ### External Resources
 
 - [pydantic-ai History Processors Guide](https://ai.pydantic.dev/history-processors/)
 - [pydantic-ai RunContext API](https://ai.pydantic.dev/run-context/)
-- [AgentPool Configuration Docs](https://phil65.github.io/agentpool/YAML%20Configuration/session_configuration/)
+- [AgentPool Configuration Docs](https://million-mo.github.io/agentpool/YAML%20Configuration/session_configuration/)
 
 ### Appendix
 
