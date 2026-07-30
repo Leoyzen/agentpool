@@ -1,9 +1,9 @@
 site_name: "AgentPool"
 site_description: "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
-repo_url: "https://github.com/Million-mo/agentpool/"
-site_url: https://million-mo.github.io/agentpool/
-site_author: "Million-mo"
-copyright: Copyright &copy; 2025 Million-mo (forked from phil65/agentpool)
+repo_url: "https://github.com/Leoyzen/agentpool/"
+site_url: https://leoyzen.github.io/agentpool/
+site_author: "Leoyzen"
+copyright: Copyright &copy; 2025 Leoyzen (forked from phil65/agentpool)
 edit_uri: edit/main/docs/
 
 theme:
@@ -131,7 +131,7 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/Million-mo
+      link: https://github.com/Leoyzen
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/agentpool/
 
