@@ -75,6 +75,7 @@ def _make_state(
     session_pool.sessions.store = store
     state.pool = Mock()
     state.pool.session_pool = session_pool
+    state.pool_or_none = state.pool
 
     # Session controller
     session_controller = Mock()

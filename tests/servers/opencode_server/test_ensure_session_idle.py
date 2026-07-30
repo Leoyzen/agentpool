@@ -57,6 +57,7 @@ def _make_state(
     pool = Mock()
     pool.session_pool = session_pool
     state.pool = pool
+    state.pool_or_none = pool
 
     return state  # type: ignore[return-value]
 
@@ -211,6 +212,7 @@ async def test_ensure_session_idle_session_not_found() -> None:
     pool = Mock()
     pool.session_pool = Mock()
     state.pool = pool
+    state.pool_or_none = pool
 
     await _ensure_session_idle(state, "sess-missing")  # type: ignore[arg-type]
 

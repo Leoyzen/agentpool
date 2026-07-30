@@ -137,6 +137,7 @@ def _make_mock_state(
     pool_mock = Mock()
     pool_mock.session_pool = None
     state.pool = pool_mock
+    state.pool_or_none = pool_mock
     return state
 
 
@@ -266,6 +267,7 @@ class TestSoftHideEmptyMessages:
         pool_mock = Mock()
         pool_mock.session_pool = None
         state.pool = pool_mock
+        state.pool_or_none = pool_mock
 
         result = await get_messages_for_session(state, session_id)
 
@@ -387,6 +389,7 @@ class TestSoftHideSessionPool:
         pool_mock.session_pool.sessions = Mock()
         pool_mock.session_pool.sessions.get_session_agent = Mock(return_value=None)
         state.pool = pool_mock
+        state.pool_or_none = pool_mock
 
         result = await get_messages_for_session(state, session_id)
 
@@ -438,6 +441,7 @@ class TestSoftHideSessionPool:
         pool_mock.session_pool.sessions = Mock()
         pool_mock.session_pool.sessions.get_session_agent = Mock(return_value=None)
         state.pool = pool_mock
+        state.pool_or_none = pool_mock
 
         result = await get_messages_for_session(state, session_id)
 

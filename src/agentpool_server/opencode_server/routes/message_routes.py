@@ -111,7 +111,7 @@ async def _ensure_assistant_in_state(
 
 def _session_disables_title_generation(state: ServerState, session_id: str) -> bool:
     """Return whether SessionPool metadata disables title generation."""
-    session_pool = state.pool.session_pool if state.pool else None
+    session_pool = state.pool_or_none.session_pool if state.pool_or_none else None
     if session_pool is None:
         return False
 
@@ -206,7 +206,7 @@ async def _maybe_generate_title(
         return
 
     # Check if storage manager has title generation configured
-    storage = state.pool.storage if state.pool else None
+    storage = state.pool_or_none.storage if state.pool_or_none else None
     if storage is None:
         return
 
@@ -562,13 +562,13 @@ async def _route_message_locked(  # noqa: PLR0915
     # Uses SessionPool's get_or_create_session_agent to create per-session
     # agent instances.  Each delegate agent name gets a unique sub-session
     # ID derived from the main session ID, ensuring per-agent isolation.
-    if state.pool is not None and agent_name in state.pool.manifest.agents:
+    if state.pool_or_none is not None and agent_name in state.pool_or_none.manifest.agents:
         # Only delegate to a different agent from the pool — if the request
         # names the same agent as the session's default, the per-session
         # instance is already the right one.
         current_agent_name = getattr(state.agent, "name", None)
         if agent_name != current_agent_name:
-            session_pool = state.pool.session_pool
+            session_pool = state.pool_or_none.session_pool
             if session_pool is not None:
                 await session_pool.sessions.get_or_create_session_agent(
                     f"{session_id}-agent-{agent_name}", agent_name
@@ -633,7 +633,7 @@ async def _route_message_locked(  # noqa: PLR0915
             # Check 1: Is model_id a variant name in manifest?
             # Check this FIRST to avoid slow tokonomics network fetch when
             # the model is already configured locally.
-            if state.pool and model_id in state.pool.manifest.model_variants:
+            if state.pool_or_none and model_id in state.pool_or_none.manifest.model_variants:
                 is_valid = True
                 logger.info("Model found as manifest variant", model_id=model_id)
             # Check 2: Is it in tokonomics models? (network fetch — only if
@@ -665,10 +665,10 @@ async def _route_message_locked(  # noqa: PLR0915
                     model_id=model_id,
                     provider_id=provider_id,
                 )
-                if state.pool:
+                if state.pool_or_none:
                     logger.warning(
                         "Available manifest variants",
-                        variants=list(state.pool.manifest.model_variants.keys()),
+                        variants=list(state.pool_or_none.manifest.model_variants.keys()),
                     )
         except Exception as e:  # noqa: BLE001
             # Broad catch: agents differ on how they signal
