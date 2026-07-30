@@ -70,19 +70,19 @@ class TestElicitationTaskIsolation:
 
         async def task_fn_a():
             started_a.set()
-            await asyncio.sleep(100)
+            await asyncio.Event().wait()
 
         async def task_fn_b():
             started_b.set()
-            await asyncio.sleep(100)
+            await asyncio.Event().wait()
 
         task_a = asyncio.ensure_future(task_fn_a())
         task_b = asyncio.ensure_future(task_fn_b())
         handler._elicitation_tasks.setdefault("session_a", set()).add(task_a)
         handler._elicitation_tasks.setdefault("session_b", set()).add(task_b)
 
-        await asyncio.wait_for(started_a.wait(), timeout=1.0)
-        await asyncio.wait_for(started_b.wait(), timeout=1.0)
+        await asyncio.wait_for(started_a.wait(), timeout=5.0)
+        await asyncio.wait_for(started_b.wait(), timeout=5.0)
 
         # Cancel only session_a's tasks (simulating _after_consumer_loop)
         session_tasks = handler._elicitation_tasks.pop("session_a", None)
@@ -91,8 +91,9 @@ class TestElicitationTaskIsolation:
             if not t.done():
                 t.cancel()
 
-        # Give event loop time to process cancellation
-        await asyncio.sleep(0.05)
+        # Await the cancelled task to ensure cancellation is fully processed
+        with contextlib.suppress(asyncio.CancelledError):
+            await task_a
 
         assert task_a.cancelled()
         assert not task_b.cancelled()
@@ -102,6 +103,7 @@ class TestElicitationTaskIsolation:
         assert "session_a" not in handler._elicitation_tasks
         assert "session_b" in handler._elicitation_tasks
 
+        task_b.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task_b
 
@@ -110,7 +112,7 @@ class TestElicitationTaskIsolation:
         handler = _make_handler()
 
         async def long_running():
-            await asyncio.sleep(100)
+            await asyncio.Event().wait()
 
         task_a = asyncio.ensure_future(long_running())
         task_b = asyncio.ensure_future(long_running())
@@ -126,7 +128,8 @@ class TestElicitationTaskIsolation:
             if not t.done():
                 t.cancel()
 
-        await asyncio.sleep(0.05)
+        with contextlib.suppress(asyncio.CancelledError):
+            await task_b
 
         assert not task_a.cancelled()
         assert task_b.cancelled()
