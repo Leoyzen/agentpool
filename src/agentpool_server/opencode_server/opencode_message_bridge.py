@@ -118,7 +118,8 @@ async def get_messages_for_session(
     if prefer_in_memory and messages:
         return _apply_revert_filter(cached_session, messages)
 
-    session_pool = getattr(state.pool, "session_pool", None)
+    pool = state.pool_or_none
+    session_pool = getattr(pool, "session_pool", None) if pool is not None else None
     if session_pool is not None:
         try:
             sp_messages = await session_pool.get_messages(session_id)
@@ -163,7 +164,7 @@ async def append_message_to_session(
         session_id: The session ID to append to.
         msg: The OpenCode message to append.
     """
-    pool = state.pool
+    pool = state.pool_or_none
     session_pool = getattr(pool, "session_pool", None) if pool is not None else None
     if session_pool is not None:
         chat_msg = opencode_to_chat_message(msg, session_id=session_id)
@@ -298,7 +299,7 @@ def _reconstruct_tool_parts_from_checkpoint(
     # session state instead of hardcoding "agentpool". Falls back to
     # "agentpool" when the session state is unavailable.
     agent_name = "agentpool"
-    pool = state.pool
+    pool = state.pool_or_none
     session_pool = pool.session_pool if pool is not None else None
     if session_pool is not None:
         session_state = session_pool.sessions.get_session(session_id)

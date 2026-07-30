@@ -289,7 +289,9 @@ async def _execute_slashed_command(  # noqa: PLR0915
                 "请使用已加载的 skill context 来回答用户的请求。"
             )
 
-            session_pool = state.pool.session_pool if state.pool is not None else None
+            session_pool = (
+                state.pool_or_none.session_pool if state.pool_or_none is not None else None
+            )
             if session_pool is not None:
                 input_provider = state.ensure_input_provider(session_id)
                 iterator = session_pool.run_stream(
@@ -471,7 +473,7 @@ async def _execute_skill_command(  # noqa: PLR0915
                 working_dir=state.working_dir,
             )
 
-            session_pool = state.pool.session_pool if state.pool else None
+            session_pool = state.pool_or_none.session_pool if state.pool_or_none else None
             if session_pool is not None:
                 iterator = session_pool.run_stream(
                     session_id,
@@ -1314,7 +1316,7 @@ async def init_session(  # noqa: D417,PLR0915
 
     init_prompt = "\n".join(prompt_parts)
 
-    session_pool = state.pool.session_pool if state.pool is not None else None
+    session_pool = state.pool_or_none.session_pool if state.pool_or_none is not None else None
     if session_pool is not None:
         # Get or create agent and optionally set model before fire-and-forget
         agent = state.agent
@@ -2230,7 +2232,9 @@ async def execute_command(  # noqa: PLR0915
                                     prompt_texts.append(item)
                 prompt_text = "\n".join(prompt_texts)
 
-                session_pool = state.pool.session_pool if state.pool is not None else None
+                session_pool = (
+                    state.pool_or_none.session_pool if state.pool_or_none is not None else None
+                )
                 if session_pool is not None:
                     input_provider = state.ensure_input_provider(session_id)
                     message_id = await session_pool.send_message(

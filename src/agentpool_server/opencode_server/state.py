@@ -259,16 +259,29 @@ class ServerState:
         return isinstance(self.fs, LocalFileSystem)
 
     @property
-    def pool(self) -> AgentPool[Any] | None:
-        """Get the agent pool, or ``None`` if not set.
+    def pool(self) -> AgentPool[Any]:
+        """Get the agent pool.
 
         Returns the cached pool reference that was resolved from
         ``self.agent.host_context`` during ``__post_init__``.  This avoids
         depending on the shared agent for non-session-scoped access.
 
-        Callers that require a non-None pool should check the return value
-        explicitly.  In production the pool is always set; in test
-        environments it may be ``None``.
+        Raises:
+            AttributeError: If the pool was not set during ``__post_init__``
+                (e.g. in test environments without a real AgentPool).
+        """
+        if self._pool is None:
+            msg = "ServerState has no agent_pool set"
+            raise AttributeError(msg)
+        return self._pool
+
+    @property
+    def pool_or_none(self) -> AgentPool[Any] | None:
+        """Get the agent pool, or ``None`` if not set.
+
+        Use this in code paths that must gracefully handle the absence of
+        a pool (e.g. test fixtures, optional features).  Production route
+        handlers should use :attr:`pool` instead.
         """
         return self._pool
 
