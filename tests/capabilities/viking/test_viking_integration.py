@@ -18,6 +18,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     SystemPromptPart,
     TextPart,
+    ToolReturn,
     UserPromptPart,
 )
 from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
@@ -378,8 +379,8 @@ async def test_network_error_graceful() -> None:
     ctx.deps.session_id = "test"
 
     result = await search_tool(ctx, query="test")
-    assert "viking_search error: network down" in result
-    assert isinstance(result, str)
+    assert "viking_search error: network down" in result.return_value
+    assert isinstance(result, ToolReturn)
 
 
 @pytest.mark.asyncio
@@ -400,7 +401,7 @@ async def test_invalid_uri_graceful() -> None:
     ctx.deps.session_id = "test"
 
     result = await read_tool(ctx, uris="not-a-valid-uri")
-    assert "viking_read error: invalid URI format" in result
+    assert "viking_read error: invalid URI format" in result.return_value
 
 
 @pytest.mark.asyncio
@@ -421,7 +422,7 @@ async def test_permission_error_graceful() -> None:
     ctx.deps.session_id = "test"
 
     result = await write_tool(ctx, uri="viking://protected/doc.md", content="data")
-    assert "viking_write error: access denied" in result
+    assert "viking_write error: access denied" in result.return_value
 
 
 @pytest.mark.asyncio
@@ -442,7 +443,7 @@ async def test_timeout_error_graceful() -> None:
     ctx.deps.session_id = "test"
 
     result = await search_tool(ctx, query="slow query")
-    assert "viking_search error: request timed out" in result
+    assert "viking_search error: request timed out" in result.return_value
 
 
 @pytest.mark.asyncio
@@ -463,7 +464,7 @@ async def test_generic_exception_graceful() -> None:
     ctx.deps.session_id = "test"
 
     result = await ls_tool(ctx, uri="viking://broken/")
-    assert "viking_ls error: unexpected error" in result
+    assert "viking_ls error: unexpected error" in result.return_value
 
 
 @pytest.mark.asyncio
@@ -489,7 +490,7 @@ async def test_build_capability_from_config_and_use() -> None:
     ctx.deps.session_id = "session-1"
 
     result = await search_tool(ctx, query="find me", limit=5)
-    assert "viking://found.md" in result
+    assert "viking://found.md" in result.return_value
     mock_client.search.assert_called_once()
 
 

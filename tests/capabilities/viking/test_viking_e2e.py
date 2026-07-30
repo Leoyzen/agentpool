@@ -27,12 +27,12 @@ Design principles:
 from __future__ import annotations
 
 from contextlib import suppress
-import json
 import pathlib
 import tempfile
 from typing import TYPE_CHECKING, Any
 import uuid
 
+from pydantic_ai.messages import ToolReturn
 import pytest
 
 from agentpool.capabilities.viking import VikingCapability
@@ -73,7 +73,7 @@ async def viking_cap(allow_model_requests: None) -> AsyncIterator[VikingCapabili
     Depends on ``allow_model_requests`` because the Viking SDK uses httpx
     internally, which is blocked by the ``ALLOW_MODEL_REQUESTS`` gate.
     """
-    cap = VikingCapability(mode="all", enable_memory=True, enable_link=True)
+    cap = VikingCapability(mode="all", enable_memory=True, enable_link=True, enable_forget=True)
     try:
         await cap.__aenter__()
     except Exception:  # noqa: BLE001
@@ -86,14 +86,14 @@ async def viking_cap(allow_model_requests: None) -> AsyncIterator[VikingCapabili
 async def test_dir(viking_cap: VikingCapability) -> AsyncIterator[str]:
     """Create a test directory and clean it up after.
 
-    Uses the resolved user's memories path (e.g.
+    Uses the resolved identity's memories path (e.g.
     ``viking://user/yuchen.liu/memories/e2e_abc123/``) to ensure
-    write permissions.
+    write permissions. Relies on ``viking_cap`` fixture having already
+    triggered identity resolution via ``__aenter__()``.
     """
     client = viking_cap._client
     assert client is not None
-    user = viking_cap.user or "default"
-    base = f"viking://user/{user}/memories/"
+    base = viking_cap._resolve_memories_uri()
     dir_name = f"e2e_{_random_name()}"
     dir_uri = f"{base}{dir_name}/"
     await client.mkdir(dir_uri, description="E2E test directory")
@@ -128,8 +128,7 @@ async def skills_dir(viking_cap: VikingCapability) -> AsyncIterator[tuple[str, s
     """
     client = viking_cap._client
     assert client is not None
-    user = viking_cap.user or "default"
-    base = f"viking://user/{user}/memories/"
+    base = viking_cap._resolve_memories_uri()
     skills_uri = f"{base}e2e_skills_{_random_name()}/"
     skill_name = "test_skill"
     await client.mkdir(skills_uri, description="Test skills")
@@ -166,25 +165,25 @@ async def test_retrieve_workflow(
 
     # ls
     ls_result = await viking_tools["viking_ls"](mock_ctx, uri=test_dir)
-    assert "guide.md" in ls_result
+    assert "guide.md" in ls_result.return_value
 
     # read
     read_result = await viking_tools["viking_read"](mock_ctx, uris=f"{test_dir}guide.md")
-    assert "Code Guide" in read_result
+    assert "Code Guide" in read_result.return_value
 
     # grep
     grep_result = await viking_tools["viking_grep"](
         mock_ctx, uri=f"{test_dir}guide.md", pattern="function"
     )
-    assert "hello" in grep_result or "world" in grep_result
+    assert "hello" in grep_result.return_value or "world" in grep_result.return_value
 
     # glob
     glob_result = await viking_tools["viking_glob"](mock_ctx, pattern="**/guide.md", uri=test_dir)
-    if "No URIs found." in glob_result:
+    if "No files found" in glob_result.return_value:
         # Glob may not find files if not indexed yet — verify via ls
-        assert "guide.md" in ls_result
+        assert "guide.md" in ls_result.return_value
     else:
-        assert "guide" in glob_result
+        assert "guide" in glob_result.return_value
 
 
 async def test_search_find(
@@ -212,9 +211,9 @@ async def test_search_find(
         target_uri=test_dir,
         limit=5,
     )
-    assert "error" not in search_result.lower()
-    parsed = json.loads(search_result)
-    assert isinstance(parsed, list | dict)
+    assert "error" not in search_result.return_value.lower()
+    # Results are now formatted text, not JSON
+    assert isinstance(search_result.return_value, str)
 
     # find
     find_result = await viking_tools["viking_find"](
@@ -223,9 +222,9 @@ async def test_search_find(
         target_uri=test_dir,
         limit=5,
     )
-    assert "error" not in find_result.lower()
-    parsed = json.loads(find_result)
-    assert isinstance(parsed, list | dict)
+    assert "error" not in find_result.return_value.lower()
+    # Results are now formatted text, not JSON
+    assert isinstance(find_result.return_value, str)
 
 
 async def test_recall(viking_tools: dict[str, Any], mock_ctx: Any) -> None:
@@ -235,10 +234,11 @@ async def test_recall(viking_tools: dict[str, Any], mock_ctx: Any) -> None:
         query="test query for recall",
         quotas={"memory": 3, "resource": 3, "skill": 3},
     )
-    assert "error" not in result.lower()
-    assert isinstance(result, str)
-    if result.strip():
-        assert "===" in result or "No" in result or len(result) > 0
+    assert "error" not in result.return_value.lower()
+    assert isinstance(result, ToolReturn)
+    if result.return_value.strip():
+        assert "===" in result.return_value or "No" in result.return_value
+        assert len(result.return_value) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -262,20 +262,20 @@ async def test_crud_lifecycle(
     write_result = await viking_tools["viking_write"](
         mock_ctx, uri=uri, content="line1\nold_text\nline3\n"
     )
-    assert "error" not in write_result.lower()
+    assert "error" not in write_result.return_value.lower()
 
     # edit
     edit_result = await viking_tools["viking_edit"](
         mock_ctx, uri=uri, old_string="old_text", new_string="new_text"
     )
-    assert "error" not in edit_result.lower()
+    assert "error" not in edit_result.return_value.lower()
     content = await client.read(uri)
     assert "new_text" in content
     assert "old_text" not in content
 
     # forget
     forget_result = await viking_tools["viking_forget"](mock_ctx, uri=uri)
-    assert "error" not in forget_result.lower()
+    assert "error" not in forget_result.return_value.lower()
     entries = await client.ls(test_dir)
     names = [e.get("name") for e in entries if isinstance(e, dict)]
     assert "crud.md" not in names
@@ -293,7 +293,7 @@ async def test_mkdir(
 
     sub_dir = f"{test_dir}subdir_{_random_name()}/"
     result = await viking_tools["viking_mkdir"](mock_ctx, uri=sub_dir, description="Test subdir")
-    assert "error" not in result.lower()
+    assert "error" not in result.return_value.lower()
 
     entries = await client.ls(test_dir)
     names = [e.get("name") for e in entries if isinstance(e, dict)]
@@ -307,9 +307,9 @@ async def test_remember(viking_tools: dict[str, Any], mock_ctx: Any) -> None:
         {"role": "assistant", "content": "Hi! I received your message."},
     ]
     result = await viking_tools["viking_remember"](mock_ctx, messages=messages)
-    assert "error" not in result.lower()
-    assert "Remembered" in result
-    assert "2" in result
+    assert "error" not in result.return_value.lower()
+    assert "Remembered" in result.return_value
+    assert "2" in result.return_value
 
 
 async def test_add_resource(viking_tools: dict[str, Any], mock_ctx: Any) -> None:
@@ -324,8 +324,8 @@ async def test_add_resource(viking_tools: dict[str, Any], mock_ctx: Any) -> None
             path=str(tmp_path),
             to=target_uri,
         )
-        assert "Added resource" in result
-        assert "viking_add_resource error:" not in result
+        assert "Added resource" in result.return_value
+        assert "viking_add_resource error:" not in result.return_value
     finally:
         with suppress(Exception):
             tmp_path.unlink()
@@ -354,7 +354,7 @@ async def test_link(
     link_result = await viking_tools["viking_link"](
         mock_ctx, from_uri=uri_a, to_uris=uri_b, reason="test link"
     )
-    assert "error" not in link_result.lower()
+    assert "error" not in link_result.return_value.lower()
 
 
 async def test_set_tags(
@@ -383,8 +383,8 @@ async def test_set_tags(
     tags_result = await viking_tools["viking_set_tags"](
         mock_ctx, uri=uri, tags=["category=test", "priority=high"]
     )
-    if "error" in tags_result.lower():
-        pytest.xfail(f"viking_set_tags failed — file not yet indexed by Qdrant: {tags_result}")
+    if "error" in tags_result.return_value.lower():
+        pytest.xfail(f"viking_set_tags failed — file not yet indexed: {tags_result.return_value}")
 
 
 # ---------------------------------------------------------------------------

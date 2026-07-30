@@ -293,6 +293,9 @@ class VikingCapability(AbstractCapability[Any]):
         if self._client is not None:
             try:
                 resp = await self._client._request("GET", "/health")
+                # _request returns httpx.Response; parse JSON body
+                if hasattr(resp, "json"):
+                    resp = resp.json()
                 if isinstance(resp, dict):
                     account_id = str(resp.get("account_id") or "")
                     user_id = str(resp.get("user_id") or "")
