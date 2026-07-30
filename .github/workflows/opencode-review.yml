@@ -1,36 +1,53 @@
 name: OpenCode PR Review
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+        type: string
 
 # Non-blocking: posts a review comment, does not block merge
-# Uses pull_request_target so fork PRs also trigger review with access to repo secrets.
-# The workflow runs in the base repo's security context, but we explicitly checkout
-# the PR head SHA to ensure we review the PR's actual code, not the base branch.
+# - pull_request: auto-triggers for same-repo PRs (fork PRs lack secret access)
+# - issue_comment: manual trigger via /oc or /opencode comment on any PR
+# - workflow_dispatch: manual trigger from Actions UI
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
 concurrency:
-  group: opencode-review-${{ github.event.pull_request.number }}
+  group: opencode-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    # Skip draft PRs only — fork PRs are supported via pull_request_target
-    if: github.event.pull_request.draft == false
+    if: |
+      (
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false
+      ) || (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.issue.pull_request_url, 'pull') && (
+          contains(github.event.comment.body, '/oc') ||
+          contains(github.event.comment.body, '/opencode')
+        )
+      ) || (
+        github.event_name == 'workflow_dispatch'
+      )
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout PR head
+      - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-          allow-unsafe-pr-checkout: true
 
       - name: Run OpenCode review
         uses: anomalyco/opencode/github@latest
@@ -38,7 +55,6 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.REVIEW_GITHUB_TOKEN }}
         with:
-          # Use the orchestrator agent that delegates to review-code and review-docs
           agent: review-lead
           model: deepseek/deepseek-v4-flash
           use_github_token: true
@@ -47,13 +63,7 @@ jobs:
             conventions, then analyze the diff and delegate to your specialist
             subagents as appropriate. Post your synthesized review as a comment.
 
-            Context:
-            - Branch: ${{ github.event.pull_request.head.ref }}
-            - Title: ${{ github.event.pull_request.title }}
-            - Changed files: review the git diff for this PR
-
             Focus areas:
             - Code: type safety, testing, telemetry, architecture consistency
             - Docs: AGENTS.md context loading table, subsystem AGENTS.md,
               docs/explanation/ coverage, link integrity
-
