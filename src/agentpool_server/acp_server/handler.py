@@ -423,23 +423,25 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
-        """Clean up per-session converter, parent-child tracking, and tasks.
+        """Clean up per-session converter and parent-child tracking.
+
+        IMPORTANT: Do NOT cancel elicitation tasks here. Elicitation tasks
+        outlive the consumer loop by design — the consumer loop exits when
+        the agent turn ends (tool is deferred), but the elicitation task is
+        still waiting for the user's response. Cancelling it here would
+        prevent ``resume_session`` from ever being called, leaving the
+        client with no后续 events after submitting an elicitation response.
+
+        The elicitation task itself calls ``start_event_consumer`` before
+        ``resume_session``, so a fresh consumer is started when the session
+        resumes. Elicitation tasks are cleaned up in ``close_session`` when
+        the session is explicitly torn down.
 
         Args:
             session_id: The session whose consumer has stopped.
         """
         self._converters.pop(session_id, None)
         self._parent_of.pop(session_id, None)
-        # Cancel only the pending elicitation tasks for THIS session.
-        # These are background tasks that send elicitation/create requests
-        # to the client — if the consumer is stopping, they're orphaned.
-        # Only cancel tasks for the session being cleaned up, not tasks
-        # belonging to other sessions (prevents cross-session interference).
-        session_tasks = self._elicitation_tasks.pop(session_id, None)
-        if session_tasks is not None:
-            for task in session_tasks:
-                if not task.done():
-                    task.cancel()
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.
