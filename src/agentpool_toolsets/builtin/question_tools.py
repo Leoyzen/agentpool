@@ -308,7 +308,7 @@ class QuestionTools(FunctionToolsetCapability):
     async def question_for_user(  # noqa: D417
         self,
         ctx: AgentContext,
-        questionnaire: str,
+        questions: str,
     ) -> ToolResult:
         """Present a questionnaire to the user and collect responses.
 
@@ -316,26 +316,29 @@ class QuestionTools(FunctionToolsetCapability):
         and returns the user's answers.
 
         XML Format (use SINGLE QUOTES for attributes to avoid JSON escaping issues):
-            <question header='...' type='enum|multi|input' required='true'>
-                <text>Question text</text>
-                <suggest type='choice'>Option 1</suggest>
-                <suggest type='choice'>Option 2</suggest>
-            </question>
+            <questions>
+                <question header='...' type='enum|multi|input' required='true'>
+                    <text>Question text</text>
+                    <suggest type='choice'>Option 1</suggest>
+                    <suggest type='choice'>Option 2</suggest>
+                </question>
+            </questions>
 
         Args:
-            questionnaire: XML string containing one or more <question> tags.
+            questions: XML string with a <questions> root element containing
+                one or more <question> tags.
         """
         try:
-            questions = parse_questionnaire(questionnaire)
+            parsed = parse_questionnaire(questions)
         except Exception as e:
             raise ModelRetry(f"Error parsing questionnaire: {e!s}") from e
-        schema = _build_acp_schema(questions)
+        schema = _build_acp_schema(parsed)
         message = "Please answer the following questions:"
-        if questions:
-            message = questions[0].header
+        if parsed:
+            message = parsed[0].header
         params = ElicitRequestFormParams(message=message, requestedSchema=schema)
         result = await ctx.handle_elicitation(params)
-        return _format_question_response(questions, result)
+        return _format_question_response(parsed, result)
 
     async def ask_followup_question(  # noqa: D417
         self,
