@@ -5,11 +5,11 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 # Non-blocking: posts a review comment, does not block merge
+# Fork PRs need a PAT because GITHUB_TOKEN is read-only for fork sources
 permissions:
   contents: read
   pull-requests: write
   issues: write
-  id-token: write
 
 concurrency:
   group: opencode-review-${{ github.event.pull_request.number }}
@@ -32,7 +32,7 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.REVIEW_GITHUB_TOKEN }}
         with:
           # Use the orchestrator agent that delegates to review-code and review-docs
           agent: review-lead
