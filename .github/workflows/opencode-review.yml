@@ -14,7 +14,7 @@ on:
 
 # Non-blocking: posts a review comment, does not block merge
 # - pull_request: auto-triggers for same-repo PRs (fork PRs lack secret access)
-# - issue_comment: manual trigger via /oc or /opencode comment on any PR
+# - issue_comment: manual trigger via /oc or /opencode on any PR or issue
 # - workflow_dispatch: manual trigger from Actions UI
 permissions:
   id-token: write
@@ -34,7 +34,6 @@ jobs:
         github.event.pull_request.draft == false
       ) || (
         github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request != null &&
         github.event.comment.user.type != 'Bot' && (
           contains(github.event.comment.body, '/oc') ||
           contains(github.event.comment.body, '/opencode')
