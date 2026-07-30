@@ -33,7 +33,7 @@ jobs:
         github.event.pull_request.draft == false
       ) || (
         github.event_name == 'issue_comment' &&
-        contains(github.event.issue.pull_request_url, 'pull') && (
+        github.event.issue.pull_request != null && (
           contains(github.event.comment.body, '/oc') ||
           contains(github.event.comment.body, '/opencode')
         )
