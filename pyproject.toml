@@ -85,11 +85,11 @@ dependencies = [
 ]
 
 [project.urls]
-"Code coverage" = "https://app.codecov.io/gh/phil65/agentwolf"
-Discussions = "https://github.com/phil65/agentwolf/discussions"
-Documentation = "https://phil65.github.io/agentwolf/"
-Issues = "https://github.com/phil65/agentwolf/issues"
-Source = "https://github.com/phil65/agentwolf"
+"Code coverage" = "https://app.codecov.io/gh/Leoyzen/agentwolf"
+Discussions = "https://github.com/Leoyzen/agentwolf/discussions"
+Documentation = "https://leoyzen.github.io/agentwolf/"
+Issues = "https://github.com/Leoyzen/agentwolf/issues"
+Source = "https://github.com/Leoyzen/agentwolf"
 
 [project.scripts]
 acp-bridge = "acp.bridge.__main__:main"
@@ -351,6 +351,43 @@ forbidden_modules = ["agentwolf_server", "agentwolf_commands", "agentwolf_cli"]
 # until the downstream agentwolf.common_types -> agentwolf_server chain is fixed
 # (see OpenSpec thin-wrapper-refactor Phase 7 tasks).
 allow_indirect_imports = true
+
+# Override mknodes metadata: it declares a dependency on the legacy `agentpool`
+# PyPI package, which pulls in outdated code that conflicts with the renamed
+# `agentwolf` project. Redirect that dependency to `agentwolf` so uv resolves
+# the local workspace instead of downloading the stale PyPI release.
+[[tool.uv.dependency-metadata]]
+name = "mknodes"
+version = "2.2.14"
+requires-dist = [
+    "agentwolf",
+    "anybadge",
+    "anyenv[httpx]",
+    "clinspector",
+    "coloraide",
+    "epregistry",
+    "fieldz",
+    "fsspec",
+    "git-changelog",
+    "githarbor",
+    "gitpython",
+    "griffelib",
+    "jinja2",
+    "jinjarope[icons]",
+    "mkdocstrings[python]",
+    "natsort",
+    "pipdeptree",
+    "pydantic",
+    "pytest-asyncio",
+    "python-dotenv",
+    "setuptools",
+    "tomli-w",
+    "typer",
+    "universal-pathlib",
+    "upathtools[httpx]",
+    "yamling",
+    "zensical",
+]
 
 # [tool.uv.sources]
 # exxec = { path = "../exxec", editable = true }
