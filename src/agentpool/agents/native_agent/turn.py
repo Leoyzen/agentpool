@@ -36,6 +36,7 @@ from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.event_mapper import (
     EventMapper,
     normalize_thinking_parts_in_messages,
+    sanitize_tool_call_args_in_messages,
 )
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
@@ -137,10 +138,6 @@ class NativeTurn(HookAwareTurn, Turn):
         Also repairs duplicated tool call arguments caused by streaming bugs
         in inference backends (vLLM glm47 parser, SGLang GLM detectors).
         """
-        from agentpool.orchestrator.event_mapper import (
-            sanitize_tool_call_args_in_messages,
-        )
-
         normalize_thinking_parts_in_messages(messages)
         sanitize_tool_call_args_in_messages(messages)
         self._message_history = messages
