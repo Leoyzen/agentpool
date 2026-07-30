@@ -11,59 +11,125 @@ from typing import Any
 
 
 def format_search_results(results: dict[str, Any] | list[Any]) -> str:
-    """Format SDK search/find results as a readable string.
+    r"""Format SDK search/find results matching official MCP output.
+
+    Groups hits by context type (memory, resource, skill) and formats
+    each as ``- [type score%] viking://uri\n    abstract``, matching
+    the official OpenViking MCP endpoint layout.
 
     Args:
-        results: A dict (with ``hits``, ``results``, or Viking's grouped keys
-            like ``memories``/``resources``/``skills``) or a list of hits.
+        results: A dict (with Viking's grouped keys ``memories``/
+            ``resources``/``skills``, or flat ``hits``/``results``) or
+            a list of hits.
 
     Returns:
-        A formatted multi-line string. Each hit shows URI, score (if present),
-        the L0 abstract (if present), and a snippet of content.
+        A formatted multi-line string with a header, grouped hits, and
+        a footer prompting the user to use the read tool.
     """
+    # Map SDK plural keys to singular display names
+    _ctx_map = {
+        "memories": "memory",
+        "resources": "resource",
+        "skills": "skill",
+    }
+
+    groups: list[tuple[str, list[Any]]] = []
+
     if isinstance(results, dict):
-        # Viking find()/search() returns results grouped by context type
-        hits: list[Any] = (
-            results.get("hits")
-            or results.get("results")
-            or (
-                results.get("memories", [])
-                + results.get("resources", [])
-                + results.get("skills", [])
-            )
-        )
-    else:
-        hits = results
+        for plural, singular in _ctx_map.items():
+            hits = results.get(plural)
+            if hits and isinstance(hits, list):
+                groups.append((singular, hits))
+        # Fallback: flat hits/results list
+        if not groups:
+            flat = results.get("hits") or results.get("results")
+            if flat and isinstance(flat, list):
+                groups.append(("result", flat))
+    elif isinstance(results, list):
+        if results:
+            groups.append(("result", results))
 
-    if not hits:
-        return "No results found."
+    total = sum(len(hits) for _, hits in groups)
+    if total == 0:
+        return "No matching context found."
 
-    lines: list[str] = []
-    _snippet_limit = 500
-    for i, hit in enumerate(hits, 1):
-        if isinstance(hit, dict):
-            uri = hit.get("uri", hit.get("path", "?"))
-            score = hit.get("score", hit.get("similarity"))
-            abstract = hit.get("abstract", "")
-            content = hit.get("content", hit.get("text", hit.get("snippet", "")))
-            header = f"{i}. {uri}"
-            if score is not None:
-                header += (
-                    f" (score: {score:.4f})" if isinstance(score, float) else f" (score: {score})"
-                )
-            lines.append(header)
-            if abstract:
-                ab = str(abstract)
-                if len(ab) > _snippet_limit:
-                    ab = ab[:_snippet_limit] + "..."
-                lines.append(f"   abstract: {ab}")
-            if content:
-                snippet = str(content)
-                if len(snippet) > _snippet_limit:
-                    snippet = snippet[:_snippet_limit] + "..."
-                lines.append(f"   {snippet}")
-        else:
-            lines.append(f"{i}. {hit}")
+    lines = [f"Found {total} item(s):", ""]
+    for ctx_type, hits in groups:
+        for hit in hits:
+            if isinstance(hit, dict):
+                uri = hit.get("uri", hit.get("path", "?"))
+                score = hit.get("score", hit.get("similarity", 0.0))
+                abstract = hit.get("abstract", "") or hit.get("overview", "") or "(no abstract)"
+                score_pct = f"{score * 100:.0f}%" if isinstance(score, (int, float)) else str(score)
+                ab = str(abstract).strip()
+                lines.append(f"- [{ctx_type} {score_pct}] {uri}")
+                lines.append(f"    {ab}")
+            else:
+                lines.append(f"- [{ctx_type}] {hit}")
+    lines.append("")
+    lines.append("Use the read tool to expand a URI.")
+    return "\n".join(lines)
+
+
+def format_grep_results(
+    matches: list[dict[str, Any]],
+    patterns: list[str],
+) -> str:
+    """Format grep matches matching official MCP output.
+
+    Groups matches by URI and formats each as:
+    ``L{line} [{pattern}]: {content}``.
+
+    Args:
+        matches: List of match dicts with ``uri``, ``line``, ``content``,
+            and ``pattern`` keys.
+        patterns: The list of patterns that were searched.
+
+    Returns:
+        A formatted multi-line string with a header and grouped matches.
+    """
+    if not matches:
+        return f"No matches found for pattern(s): {', '.join(patterns)}"
+
+    merged: dict[str, list[tuple[Any, str, str]]] = {}
+    total = 0
+    for m in matches:
+        m_uri = m.get("uri", "?")
+        m_line = m.get("line", "?")
+        m_content = m.get("content", m.get("text", ""))
+        m_pattern = m.get("pattern", patterns[0] if patterns else "")
+        merged.setdefault(m_uri, []).append((m_line, m_content, m_pattern))
+        total += 1
+
+    lines = [
+        f"Found {total} match(es) across {len(patterns)} pattern(s):",
+    ]
+    for m_uri, hits in merged.items():
+        hits.sort(key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0)
+        lines.append(f"\n{m_uri}")
+        for line_no, content, p in hits:
+            lines.append(f"  L{line_no} [{p}]: {content}")
+    return "\n".join(lines)
+
+
+def format_glob_results(uris: list[str], pattern: str) -> str:
+    """Format glob results matching official MCP output.
+
+    Args:
+        uris: List of matching URI strings.
+        pattern: The glob pattern that was searched.
+
+    Returns:
+        A formatted multi-line string with a header and URI list.
+    """
+    if not uris:
+        return f"No files found matching: {pattern}"
+
+    lines = [f"Found {len(uris)} file(s):"]
+    for u in uris:
+        # Matches may be plain URI strings or dicts with "uri" key
+        uri = u.get("uri", str(u)) if isinstance(u, dict) else str(u)
+        lines.append(f"  {uri}")
     return "\n".join(lines)
 
 

@@ -379,7 +379,7 @@ class TestRetrieveTools:
         search_tool = _get_tool(tools, "viking_search")
 
         ctx = _make_ctx(session_id="sess-123")
-        result = await search_tool(ctx, query="test query", limit=5, min_score=0.5, level="L1")
+        result = await search_tool(ctx, query="test query", limit=5, min_score=0.5, level=[1])
 
         mock_client.search.assert_called_once()
         call_kwargs = mock_client.search.call_args.kwargs
@@ -387,9 +387,9 @@ class TestRetrieveTools:
         assert call_args[0] == "test query"
         assert call_kwargs["limit"] == 5
         assert call_kwargs["score_threshold"] == 0.5
-        assert call_kwargs["filter"] == {"level": "L1"}
+        assert call_kwargs["filter"] == {"level": [1]}
         assert call_kwargs["session_id"] == "sess-123"
-        assert "viking://doc.md" in result
+        assert "viking://doc.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_search_no_level(
@@ -429,7 +429,7 @@ class TestRetrieveTools:
         find_tool = _get_tool(tools, "viking_find")
 
         ctx = _make_ctx(session_id="sess-123")
-        result = await find_tool(ctx, query="find query", limit=3, min_score=0.2, level="L0")
+        result = await find_tool(ctx, query="find query", limit=3, min_score=0.2, level=[0])
 
         mock_client.find.assert_called_once()
         call_kwargs = mock_client.find.call_args.kwargs
@@ -437,9 +437,9 @@ class TestRetrieveTools:
         assert call_args[0] == "find query"
         assert call_kwargs["limit"] == 3
         assert call_kwargs["score_threshold"] == 0.2
-        assert call_kwargs["filter"] == {"level": "L0"}
+        assert call_kwargs["filter"] == {"level": [0]}
         assert "session_id" not in call_kwargs
-        assert "viking://doc.md" in result
+        assert "viking://doc.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_recall(
@@ -462,8 +462,8 @@ class TestRetrieveTools:
         assert "skill" in context_types
         for call in mock_client.find.call_args_list:
             assert call.kwargs["query"] == "remember when"
-        assert "=== memory ===" in result
-        assert "=== resource ===" in result
+        assert "=== memory ===" in result.return_value
+        assert "=== resource ===" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_recall_custom_quotas(
@@ -482,14 +482,14 @@ class TestRetrieveTools:
         quotas_used = [c.kwargs["limit"] for c in mock_client.find.call_args_list]
         assert 2 in quotas_used
         assert 3 in quotas_used
-        assert "=== memory ===" in result
-        assert "=== resource ===" in result
+        assert "=== memory ===" in result.return_value
+        assert "=== resource ===" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_grep(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
         """viking_grep passes uri, pattern, case_insensitive correctly."""
         mock_client.grep = AsyncMock(
-            return_value={"matches": [{"line": 10, "text": "matched line"}]}
+            return_value={"matches": [{"line": 10, "content": "matched line"}]}
         )
         tools = build_tools(viking_cap)
         grep_tool = _get_tool(tools, "viking_grep")
@@ -503,7 +503,8 @@ class TestRetrieveTools:
         assert call_args[0] == "viking://doc.md"
         assert call_args[1] == "hello"
         assert call_kwargs["case_insensitive"] is True
-        assert "10: matched line" in result
+        assert "L10" in result.return_value
+        assert "matched line" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_grep_no_matches(
@@ -516,7 +517,7 @@ class TestRetrieveTools:
 
         ctx = _make_ctx()
         result = await grep_tool(ctx, uri="viking://doc.md", pattern="nothing")
-        assert result == "No matches found."
+        assert "No matches found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_glob(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -535,8 +536,8 @@ class TestRetrieveTools:
         call_kwargs = mock_client.glob.call_args.kwargs
         assert call_args[0] == "**/*.md"
         assert call_kwargs["uri"] == "viking://user/"
-        assert "viking://doc1.md" in result
-        assert "viking://doc2.md" in result
+        assert "viking://doc1.md" in result.return_value
+        assert "viking://doc2.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_glob_no_results(
@@ -549,7 +550,7 @@ class TestRetrieveTools:
 
         ctx = _make_ctx()
         result = await glob_tool(ctx, pattern="**/*.txt")
-        assert result == "No URIs found."
+        assert "No files found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_ls(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -571,8 +572,8 @@ class TestRetrieveTools:
         call_kwargs = mock_client.ls.call_args.kwargs
         assert call_args[0] == "viking://user/alice/"
         assert call_kwargs["recursive"] is True
-        assert "[dir] folder1" in result
-        assert "[file] file1.md" in result
+        assert "[dir] folder1" in result.return_value
+        assert "[file] file1.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_ls_empty(
@@ -585,7 +586,7 @@ class TestRetrieveTools:
 
         ctx = _make_ctx()
         result = await ls_tool(ctx, uri="viking://empty/")
-        assert result == "(empty)"
+        assert result.return_value == "(empty)"
 
     @pytest.mark.asyncio
     async def test_viking_read_single_uri(
@@ -605,7 +606,7 @@ class TestRetrieveTools:
         assert call_args[0] == "viking://doc.md"
         assert call_kwargs["offset"] == 0
         assert call_kwargs["limit"] == -1
-        assert "1\u2502 line1" in result
+        assert "1\u2502 line1" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_line_to_offset_conversion(
@@ -634,8 +635,8 @@ class TestRetrieveTools:
         result = await read_tool(ctx, uris=["viking://a.md", "viking://b.md"])
 
         assert mock_client.read.call_count == 2
-        assert "=== viking://a.md ===" in result
-        assert "=== viking://b.md ===" in result
+        assert "=== viking://a.md ===" in result.return_value
+        assert "=== viking://b.md ===" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_multi_uri_no_header_for_single(
@@ -649,7 +650,7 @@ class TestRetrieveTools:
         ctx = _make_ctx()
         result = await read_tool(ctx, uris="viking://single.md")
 
-        assert "===" not in result
+        assert "===" not in result.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -688,8 +689,8 @@ class TestWriteTools:
         assert mock_client.add_message.call_args_list[1].args[2] == "Hi there"
         assert mock_client.commit_session.call_args.args[0] == create_sid
 
-        assert "Remembered 2 messages" in result
-        assert create_sid in result
+        assert "Remembered 2 messages" in result.return_value
+        assert create_sid in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_write_default_mode(
@@ -708,7 +709,7 @@ class TestWriteTools:
         assert call_args[0] == "viking://new.md"
         assert call_args[1] == "hello world"
         assert call_kwargs["mode"] == "create"
-        assert "Wrote" in result
+        assert "Wrote" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_write_replace_mode(
@@ -739,7 +740,7 @@ class TestWriteTools:
         mock_client.write.assert_called_once()
         written_content = mock_client.write.call_args.args[1]
         assert written_content == "hi world"
-        assert "Replaced 1 occurrence" in result
+        assert "Replaced 1 occurrence" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_edit_multiple_matches_error(
@@ -756,8 +757,8 @@ class TestWriteTools:
         )
 
         mock_client.write.assert_not_called()
-        assert "error" in result.lower()
-        assert "2 times" in result
+        assert "error" in result.return_value.lower()
+        assert "2 times" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_edit_replace_all(
@@ -776,7 +777,7 @@ class TestWriteTools:
         mock_client.write.assert_called_once()
         written_content = mock_client.write.call_args.args[1]
         assert written_content == "hi world hi"
-        assert "Replaced 2 occurrence" in result
+        assert "Replaced 2 occurrence" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_edit_no_matches_error(
@@ -793,8 +794,8 @@ class TestWriteTools:
         )
 
         mock_client.write.assert_not_called()
-        assert "error" in result.lower()
-        assert "not found" in result
+        assert "error" in result.return_value.lower()
+        assert "not found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_mkdir(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -810,7 +811,7 @@ class TestWriteTools:
         call_kwargs = mock_client.mkdir.call_args.kwargs
         assert call_args[0] == "viking://new/dir/"
         assert call_kwargs["description"] == "My directory"
-        assert "Created directory" in result
+        assert "Created directory" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_mkdir_no_description(
@@ -824,7 +825,7 @@ class TestWriteTools:
         result = await mkdir_tool(ctx, uri="viking://new/dir/")
 
         assert mock_client.mkdir.call_args.kwargs["description"] is None
-        assert "Created directory" in result
+        assert "Created directory" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_add_resource(
@@ -854,7 +855,7 @@ class TestWriteTools:
         # processing_mode is NOT passed to SDK (not a supported kwarg)
         assert "processing_mode" not in call_kwargs
         assert call_kwargs["watch_interval"] == 5.0
-        assert "Added resource" in result
+        assert "Added resource" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_forget(
@@ -872,7 +873,7 @@ class TestWriteTools:
         call_kwargs = mock_client.rm.call_args.kwargs
         assert call_args[0] == "viking://doc.md"
         assert call_kwargs["recursive"] is True
-        assert "Removed" in result
+        assert "Removed" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_forget_non_recursive(
@@ -915,9 +916,9 @@ class TestGraphTools:
         assert call_args[0] == "viking://a.md"
         assert call_args[1] == "viking://b.md"
         assert call_kwargs["reason"] == "depends-on"
-        assert "Linked" in result
-        assert "viking://a.md" in result
-        assert "viking://b.md" in result
+        assert "Linked" in result.return_value
+        assert "viking://a.md" in result.return_value
+        assert "viking://b.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_link_multiple_targets(
@@ -939,8 +940,8 @@ class TestGraphTools:
         call_args = mock_client.link.call_args.args
         assert call_args[0] == "viking://a.md"
         assert call_args[1] == ["viking://b.md", "viking://c.md"]
-        assert "viking://b.md" in result
-        assert "viking://c.md" in result
+        assert "viking://b.md" in result.return_value
+        assert "viking://c.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_set_tags(
@@ -961,7 +962,7 @@ class TestGraphTools:
         assert call_args[0] == "viking://doc.md"
         assert call_args[1] == ["status=active", "priority=high"]
         assert call_kwargs["recursive"] is True
-        assert "Set 2 tag" in result
+        assert "Set 2 tag" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_set_tags_non_recursive(
@@ -1025,7 +1026,7 @@ class TestVikingReadPagination:
         ctx = _make_ctx()
         result = await read_tool(ctx, uris="viking://doc.md", line=1)
 
-        lines = result.split("\n")
+        lines = result.return_value.split("\n")
         assert len(lines) == 3
         assert "1" in lines[0]
         assert "first" in lines[0]
@@ -1049,7 +1050,7 @@ class TestVikingReadPagination:
 
         assert mock_client.read.call_count == 3
         for uri in uris:
-            assert f"=== {uri} ===" in result
+            assert f"=== {uri} ===" in result.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -1093,7 +1094,7 @@ class TestVikingEditEdgeCases:
         result = await edit_tool(ctx, uri="viking://missing.md", old_string="old", new_string="new")
 
         mock_client.write.assert_not_called()
-        assert "viking_edit error" in result
+        assert "viking_edit error" in result.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -1132,10 +1133,10 @@ class TestVikingRecallDetailed:
         ctx = _make_ctx()
         result = await recall_tool(ctx, query="test", max_chars=10000)
 
-        assert "=== memory ===" in result
-        assert "=== resource ===" in result
-        assert "=== skill ===" in result
-        assert result.count("viking://mem.md") == 3
+        assert "=== memory ===" in result.return_value
+        assert "=== resource ===" in result.return_value
+        assert "=== skill ===" in result.return_value
+        assert result.return_value.count("viking://mem.md") == 3
 
     @pytest.mark.asyncio
     async def test_truncation(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1150,8 +1151,8 @@ class TestVikingRecallDetailed:
         ctx = _make_ctx()
         result = await recall_tool(ctx, query="test", max_chars=100)
 
-        assert len(result) <= 200
-        assert "truncated" in result
+        assert len(result.return_value) <= 200
+        assert "truncated" in result.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -1187,7 +1188,7 @@ class TestVikingRememberDetailed:
             assert call.args[0] == session_id
         assert mock_client.commit_session.call_args.args[0] == session_id
 
-        assert "Remembered 3 messages" in result
+        assert "Remembered 3 messages" in result.return_value
 
     @pytest.mark.asyncio
     async def test_remember_single_message(
@@ -1201,7 +1202,7 @@ class TestVikingRememberDetailed:
         result = await remember_tool(ctx, messages=[{"role": "user", "content": "Hi"}])
 
         assert mock_client.add_message.call_count == 1
-        assert "Remembered 1 messages" in result
+        assert "Remembered 1 messages" in result.return_value
 
     @pytest.mark.asyncio
     async def test_remember_empty_messages(
@@ -1217,7 +1218,7 @@ class TestVikingRememberDetailed:
         mock_client.create_session.assert_called_once()
         mock_client.add_message.assert_not_called()
         mock_client.commit_session.assert_called_once()
-        assert "Remembered 0 messages" in result
+        assert "Remembered 0 messages" in result.return_value
 
 
 # ---------------------------------------------------------------------------
@@ -1234,7 +1235,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_search")(ctx, query="test")
-        assert "viking_search error: connection failed" in result
+        assert "viking_search error: connection failed" in result.return_value
 
     @pytest.mark.asyncio
     async def test_find_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1242,7 +1243,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_find")(ctx, query="test")
-        assert "viking_find error: timeout" in result
+        assert "viking_find error: timeout" in result.return_value
 
     @pytest.mark.asyncio
     async def test_recall_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1250,15 +1251,17 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_recall")(ctx, query="test")
-        assert "viking_recall error: server error" in result
+        assert "viking_recall error: server error" in result.return_value
 
     @pytest.mark.asyncio
     async def test_grep_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
+        """viking_grep catches per-pattern errors and returns no matches."""
         mock_client.grep = AsyncMock(side_effect=RuntimeError("bad pattern"))
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_grep")(ctx, uri="viking://doc.md", pattern="test")
-        assert "viking_grep error: bad pattern" in result
+        # With multi-pattern support, individual grep errors are caught silently
+        assert "No matches found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_glob_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1266,7 +1269,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_glob")(ctx, pattern="**/*.md")
-        assert "viking_glob error: error" in result
+        assert "viking_glob error: error" in result.return_value
 
     @pytest.mark.asyncio
     async def test_ls_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1274,7 +1277,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_ls")(ctx, uri="viking://missing/")
-        assert "viking_ls error: not found" in result
+        assert "viking_ls error: not found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_read_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1282,7 +1285,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_read")(ctx, uris="viking://secret.md")
-        assert "viking_read error: permission denied" in result
+        assert "viking_read error: permission denied" in result.return_value
 
     @pytest.mark.asyncio
     async def test_remember_error(
@@ -1294,7 +1297,7 @@ class TestErrorHandling:
         result = await _get_tool(tools, "viking_remember")(
             ctx, messages=[{"role": "user", "content": "hi"}]
         )
-        assert "viking_remember error: quota exceeded" in result
+        assert "viking_remember error: quota exceeded" in result.return_value
 
     @pytest.mark.asyncio
     async def test_write_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1302,7 +1305,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_write")(ctx, uri="viking://doc.md", content="data")
-        assert "viking_write error: disk full" in result
+        assert "viking_write error: disk full" in result.return_value
 
     @pytest.mark.asyncio
     async def test_edit_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1312,7 +1315,7 @@ class TestErrorHandling:
         result = await _get_tool(tools, "viking_edit")(
             ctx, uri="viking://doc.md", old_string="a", new_string="b"
         )
-        assert "viking_edit error: network error" in result
+        assert "viking_edit error: network error" in result.return_value
 
     @pytest.mark.asyncio
     async def test_mkdir_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1320,7 +1323,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_mkdir")(ctx, uri="viking://exists/")
-        assert "viking_mkdir error: exists" in result
+        assert "viking_mkdir error: exists" in result.return_value
 
     @pytest.mark.asyncio
     async def test_add_resource_error(
@@ -1330,7 +1333,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_add_resource")(ctx, path="/bad/path")
-        assert "viking_add_resource error: invalid path" in result
+        assert "viking_add_resource error: invalid path" in result.return_value
 
     @pytest.mark.asyncio
     async def test_forget_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1338,7 +1341,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_forget")(ctx, uri="viking://protected.md")
-        assert "viking_forget error: protected" in result
+        assert "viking_forget error: protected" in result.return_value
 
     @pytest.mark.asyncio
     async def test_link_error(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
@@ -1348,7 +1351,7 @@ class TestErrorHandling:
         result = await _get_tool(tools, "viking_link")(
             ctx, from_uri="viking://a.md", to_uris="viking://b.md"
         )
-        assert "viking_link error: cycle detected" in result
+        assert "viking_link error: cycle detected" in result.return_value
 
     @pytest.mark.asyncio
     async def test_set_tags_error(
@@ -1358,7 +1361,7 @@ class TestErrorHandling:
         tools = build_tools(viking_cap)
         ctx = _make_ctx()
         result = await _get_tool(tools, "viking_set_tags")(ctx, uri="viking://doc.md", tags=["bad"])
-        assert "viking_set_tags error: invalid tag" in result
+        assert "viking_set_tags error: invalid tag" in result.return_value
 
     @pytest.mark.asyncio
     async def test_ensure_client_lazy_init(self) -> None:
@@ -1798,8 +1801,8 @@ class TestUtils:
         results = {"hits": [{"uri": "viking://doc.md", "score": 0.9, "content": "hello"}]}
         formatted = format_search_results(results)
         assert "viking://doc.md" in formatted
-        assert "0.9000" in formatted
-        assert "hello" in formatted
+        assert "90%" in formatted
+        assert "Found 1 item(s):" in formatted
 
     def test_format_search_results_dict_with_results(self) -> None:
         results = {"results": [{"uri": "viking://doc.md"}]}
@@ -1812,8 +1815,8 @@ class TestUtils:
         assert "viking://doc.md" in formatted
 
     def test_format_search_results_empty(self) -> None:
-        assert format_search_results([]) == "No results found."
-        assert format_search_results({}) == "No results found."
+        assert format_search_results([]) == "No matching context found."
+        assert format_search_results({}) == "No matching context found."
 
     def test_format_ls_entries_with_markers(self) -> None:
         entries = [
@@ -2312,9 +2315,9 @@ class TestTieredLoadingVikingRead:
 
         mock_client.abstract.assert_called_once_with("viking://doc.md")
         mock_client.read.assert_not_called()
-        assert "Short summary" in result
+        assert "Short summary" in result.return_value
         # Abstracts don't get line numbers
-        assert "\u2502" not in result
+        assert "\u2502" not in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_level_overview(
@@ -2330,9 +2333,9 @@ class TestTieredLoadingVikingRead:
 
         mock_client.overview.assert_called_once_with("viking://doc.md")
         mock_client.read.assert_not_called()
-        assert "Overview content" in result
+        assert "Overview content" in result.return_value
         # Overviews don't get line numbers
-        assert "\u2502" not in result
+        assert "\u2502" not in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_level_read_default(
@@ -2350,7 +2353,7 @@ class TestTieredLoadingVikingRead:
         mock_client.abstract.assert_not_called()
         mock_client.overview.assert_not_called()
         # Read level gets line numbers
-        assert "\u2502" in result
+        assert "\u2502" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_abstract_multi_uri(
@@ -2365,8 +2368,8 @@ class TestTieredLoadingVikingRead:
         result = await read_tool(ctx, uris=["viking://a.md", "viking://b.md"], level="abstract")
 
         assert mock_client.abstract.call_count == 2
-        assert "=== viking://a.md ===" in result
-        assert "=== viking://b.md ===" in result
+        assert "=== viking://a.md ===" in result.return_value
+        assert "=== viking://b.md ===" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_read_abstract_error(
@@ -2380,7 +2383,7 @@ class TestTieredLoadingVikingRead:
         ctx = _make_ctx()
         result = await read_tool(ctx, uris="viking://doc.md", level="abstract")
 
-        assert "viking_read error: not available" in result
+        assert "viking_read error: not available" in result.return_value
 
 
 class TestTieredLoadingReadResource:
@@ -2540,9 +2543,9 @@ class TestTieredLoadingVikingLs:
         result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
 
         mock_client.abstract.assert_called_once_with("viking://resources/chapters/")
-        assert "[dir] chapters" in result
-        assert "Knowledge base about machines" in result
-        assert "[file] file1.md" in result
+        assert "[dir] chapters" in result.return_value
+        assert "Knowledge base about machines" in result.return_value
+        assert "[file] file1.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_ls_show_abstract_no_dirs(
@@ -2562,7 +2565,7 @@ class TestTieredLoadingVikingLs:
         result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
 
         mock_client.abstract.assert_not_called()
-        assert "[file] file1.md" in result
+        assert "[file] file1.md" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_ls_show_abstract_error(
@@ -2582,7 +2585,7 @@ class TestTieredLoadingVikingLs:
         result = await ls_tool(ctx, uri="viking://resources/", show_abstract=True)
 
         # Still shows the directory without abstract
-        assert "[dir] chapters" in result
+        assert "[dir] chapters" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_ls_default_no_show_abstract(
@@ -2603,8 +2606,8 @@ class TestTieredLoadingVikingLs:
         result = await ls_tool(ctx, uri="viking://resources/")
 
         mock_client.abstract.assert_not_called()
-        assert "[dir] dir1" in result
-        assert "[file] file1.md" in result
+        assert "[dir] dir1" in result.return_value
+        assert "[file] file1.md" in result.return_value
 
 
 class TestTieredLoadingForRun:
@@ -2657,7 +2660,8 @@ class TestTieredLoadingFormatSearchResults:
         formatted = format_search_results(results)
         assert "viking://mem.md" in formatted
         assert "test abstract" in formatted
-        assert "0.9000" in formatted
+        assert "90%" in formatted
+        assert "[memory" in formatted
 
     def test_format_search_results_viking_resources(self) -> None:
         """format_search_results handles resources key."""
@@ -2686,7 +2690,7 @@ class TestTieredLoadingFormatSearchResults:
         assert "viking://skill.md" in formatted
 
     def test_format_search_results_with_abstract_and_content(self) -> None:
-        """format_search_results shows both abstract and content when present."""
+        """format_search_results shows abstract when present."""
         results = {
             "hits": [
                 {
@@ -2699,14 +2703,14 @@ class TestTieredLoadingFormatSearchResults:
         }
         formatted = format_search_results(results)
         assert "viking://doc.md" in formatted
-        assert "abstract: L0 summary" in formatted
-        assert "Full content snippet" in formatted
+        assert "L0 summary" in formatted
+        assert "95%" in formatted
 
     def test_format_search_results_viking_empty_groups(self) -> None:
-        """format_search_results returns 'No results' when all groups are empty."""
+        """format_search_results returns 'No matching context' when all groups are empty."""
         results = {"memories": [], "resources": [], "skills": []}
         formatted = format_search_results(results)
-        assert formatted == "No results found."
+        assert formatted == "No matching context found."
 
 
 # ---------------------------------------------------------------------------
@@ -4241,7 +4245,7 @@ class TestCompaction:
         result = await expand_tool(ctx, uri="viking://user/alice/memories/compacted/abc.md")
 
         mock_client.read.assert_called_once_with("viking://user/alice/memories/compacted/abc.md")
-        assert result == "Archived conversation content"
+        assert result.return_value == "Archived conversation content"
 
     @pytest.mark.asyncio
     async def test_viking_expand_tool_error(self, mock_client: AsyncMock) -> None:
@@ -4259,7 +4263,7 @@ class TestCompaction:
         ctx = _make_ctx()
         result = await expand_tool(ctx, uri="viking://missing.md")
 
-        assert "viking_expand error: not found" in result
+        assert "viking_expand error: not found" in result.return_value
 
     @pytest.mark.asyncio
     async def test_viking_expand_tool_empty_content(self, mock_client: AsyncMock) -> None:
@@ -4277,7 +4281,7 @@ class TestCompaction:
         ctx = _make_ctx()
         result = await expand_tool(ctx, uri="viking://empty.md")
 
-        assert result == "No content found at URI."
+        assert result.return_value == "No content found at URI."
 
     def test_viking_expand_not_exposed_when_disabled(self) -> None:
         """viking_expand not in tools when compaction_expand_tool=False."""
