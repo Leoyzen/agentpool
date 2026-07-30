@@ -76,7 +76,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self._converters: dict[str, ACPEventConverter] = {}
         self._parent_of: dict[str, str] = {}
         self.acp_agent = acp_agent
-        self._elicitation_tasks: set[asyncio.Task[Any]] = set()
+        self._elicitation_tasks: dict[str, set[asyncio.Task[Any]]] = {}
 
     @property
     def event_bus(self) -> EventBus:
@@ -279,8 +279,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             task = asyncio.create_task(
                 self._handle_elicitation_deferred(effective_sid, envelope.event)
             )
-            self._elicitation_tasks.add(task)
-            task.add_done_callback(self._elicitation_tasks.discard)
+            self._elicitation_tasks.setdefault(effective_sid, set()).add(task)
+
+            def _discard_task(t: asyncio.Task[Any], sid: str = effective_sid) -> None:
+                self._elicitation_tasks.get(sid, set()).discard(t)
+
+            task.add_done_callback(_discard_task)
             return
 
         # Look up converter: try event's session first, fall back to consumer's session
@@ -426,12 +430,16 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         """
         self._converters.pop(session_id, None)
         self._parent_of.pop(session_id, None)
-        # Cancel any pending elicitation tasks for this session.
+        # Cancel only the pending elicitation tasks for THIS session.
         # These are background tasks that send elicitation/create requests
         # to the client — if the consumer is stopping, they're orphaned.
-        for task in self._elicitation_tasks:
-            if not task.done():
-                task.cancel()
+        # Only cancel tasks for the session being cleaned up, not tasks
+        # belonging to other sessions (prevents cross-session interference).
+        session_tasks = self._elicitation_tasks.pop(session_id, None)
+        if session_tasks is not None:
+            for task in session_tasks:
+                if not task.done():
+                    task.cancel()
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.
@@ -767,11 +775,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Cancel all child sessions first (depth-first, pop-before-recurse)
         await self._cancel_subagents(session_id)
 
-        # Cancel any pending elicitation tasks for this session.
-        for task in self._elicitation_tasks:
-            if not task.done():
-                task.cancel()
-        self._elicitation_tasks.clear()
+        # Cancel pending elicitation tasks for this session only.
+        session_tasks = self._elicitation_tasks.pop(session_id, None)
+        if session_tasks is not None:
+            for task in session_tasks:
+                if not task.done():
+                    task.cancel()
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
         await self.stop_event_consumer(session_id)
