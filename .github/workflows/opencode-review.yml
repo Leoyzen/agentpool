@@ -44,11 +44,26 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Determine PR ref
+        id: pr_ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR_NUMBER="${{ github.event.issue.number }}"
+            REF=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+            echo "ref=$REF" >> "$GITHUB_OUTPUT"
+            echo "Checked out PR #$PR_NUMBER at $REF"
+          else
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           persist-credentials: false
+          ref: ${{ steps.pr_ref.outputs.ref }}
 
       - name: Run OpenCode review
         uses: anomalyco/opencode/github@latest
