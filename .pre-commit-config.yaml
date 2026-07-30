@@ -50,7 +50,7 @@ repos:
         language: system
         types: [python]
         require_serial: true
-        pass_filenames: false
+        pass_filenames: true
       - id: ruff
         name: ruff
         entry: uv run ruff check
