@@ -1050,7 +1050,7 @@ async def delete_session(session_id: str, state: StateDep) -> bool:
     session_pool = state.pool.session_pool
     if session_pool is not None and session_pool.sessions.store is not None:
         await session_pool.sessions.store.delete_session(session_id)
-    await state.broadcast_event(SessionDeletedEvent.create(session_id))
+    await state.broadcast_event(SessionDeletedEvent.create(session))
     return True
 
 

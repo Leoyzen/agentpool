@@ -843,7 +843,7 @@ def _build_handled_event(event_type: type) -> Event:  # noqa: PLR0911
     """Build a handled event with session_id='abc' using the appropriate constructor."""
     sid = "abc"
     if event_type is SessionDeletedEvent:
-        return SessionDeletedEvent.create(session_id=sid)
+        return SessionDeletedEvent.create(session=_make_session(sid))
     if event_type is SessionStatusEvent:
         return SessionStatusEvent.create(session_id=sid, status_type="busy")
     if event_type is SessionIdleEvent:

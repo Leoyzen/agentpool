@@ -91,7 +91,15 @@ class SessionUpdatedEvent(OpenCodeBaseModel):
 
 
 class SessionDeletedProperties(SessionIdProperties):
-    """Properties for session deleted event."""
+    """Properties for session deleted event.
+
+    Carries the full session ``info`` so OpenCode TUI clients can read
+    ``properties.info.id`` to optimistically hide deleted sessions, matching
+    the upstream OpenCode ``session.deleted`` event schema which includes both
+    ``sessionID`` and ``info``.
+    """
+
+    info: Session
 
 
 class SessionDeletedEvent(OpenCodeBaseModel):
@@ -101,8 +109,8 @@ class SessionDeletedEvent(OpenCodeBaseModel):
     properties: SessionDeletedProperties
 
     @classmethod
-    def create(cls, session_id: str) -> Self:
-        return cls(properties=SessionDeletedProperties(session_id=session_id))
+    def create(cls, session: Session) -> Self:
+        return cls(properties=SessionDeletedProperties(session_id=session.id, info=session))
 
 
 class SessionStatusProperties(SessionIdProperties):
