@@ -259,16 +259,17 @@ class ServerState:
         return isinstance(self.fs, LocalFileSystem)
 
     @property
-    def pool(self) -> AgentPool[Any]:
-        """Get the agent pool.
+    def pool(self) -> AgentPool[Any] | None:
+        """Get the agent pool, or ``None`` if not set.
 
         Returns the cached pool reference that was resolved from
         ``self.agent.host_context`` during ``__post_init__``.  This avoids
         depending on the shared agent for non-session-scoped access.
+
+        Callers that require a non-None pool should check the return value
+        explicitly.  In production the pool is always set; in test
+        environments it may be ``None``.
         """
-        if self._pool is None:
-            msg = "Agent has no agent_pool set"
-            raise RuntimeError(msg)
         return self._pool
 
     def get_session_lock(self, session_id: str) -> asyncio.Lock:
