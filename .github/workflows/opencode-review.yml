@@ -30,6 +30,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+          allow-unsafe-pr-checkout: true
 
       - name: Run OpenCode review
         uses: anomalyco/opencode/github@latest
@@ -55,3 +56,4 @@ jobs:
             - Code: type safety, testing, telemetry, architecture consistency
             - Docs: AGENTS.md context loading table, subsystem AGENTS.md,
               docs/explanation/ coverage, link integrity
+
