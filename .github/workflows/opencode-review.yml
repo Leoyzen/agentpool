@@ -53,7 +53,6 @@ jobs:
         uses: anomalyco/opencode/github@latest
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.REVIEW_GITHUB_TOKEN }}
         with:
           agent: review-lead
           model: deepseek/deepseek-v4-flash
