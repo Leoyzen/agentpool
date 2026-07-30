@@ -1,11 +1,13 @@
 name: OpenCode PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
 
 # Non-blocking: posts a review comment, does not block merge
-# Fork PRs are skipped — they cannot access repo secrets (DEEPSEEK_API_KEY, REVIEW_GITHUB_TOKEN)
+# Uses pull_request_target so fork PRs also trigger review with access to repo secrets.
+# The workflow runs in the base repo's security context, but we explicitly checkout
+# the PR head SHA to ensure we review the PR's actual code, not the base branch.
 permissions:
   contents: read
   pull-requests: write
@@ -17,14 +19,15 @@ concurrency:
 
 jobs:
   review:
-    # Skip draft PRs and fork PRs — fork PRs cannot access repo secrets
-    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.fork == false
+    # Skip draft PRs only — fork PRs are supported via pull_request_target
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout PR head
         uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
 
