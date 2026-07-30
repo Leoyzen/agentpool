@@ -118,9 +118,28 @@ class Connection:
         if self._closed:
             return
         self._closed = True
-        await self._dispatcher.stop()
-        await self._sender.close()
+
+        # 1. Stop the receive loop FIRST — it's the producer that feeds the
+        #    queue.  Cancel before closing the queue to prevent
+        #    publish-on-closed-queue race (issue #320).
+        if not self._recv_task.done():
+            self._recv_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await self._recv_task
+
+        # 2. Close the dispatcher (closes the queue, waits for dispatcher loop).
+        #    Safe now — no new messages can arrive from the receive loop.
+        with contextlib.suppress(Exception):
+            await self._dispatcher.stop()
+
+        # 3. Close the sender (flushes pending sends, stops sender loop).
+        with contextlib.suppress(Exception):
+            await self._sender.close()
+
+        # 4. Final sweep — cancel any remaining handler tasks.
         await self._tasks.shutdown()
+
+        # 5. Reject all pending outgoing requests.
         self._state.reject_all_outgoing(ConnectionError("Connection closed"))
 
     async def __aenter__(self) -> Self:

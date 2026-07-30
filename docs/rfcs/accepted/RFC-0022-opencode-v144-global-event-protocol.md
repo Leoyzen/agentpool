@@ -25,17 +25,17 @@ This RFC proposes updating agentpool's `/global/event` SSE output to conform to 
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -682,8 +682,8 @@ None
 
 ### Related Documents
 
-- [RFC-0013: Subagent Event Unification](../accepted/RFC-0013-subagent-event-unification.md)
-- [RFC-0014: Spawn Session Events](../accepted/RFC-0014-spawn-session-events.md)
+- [RFC-0013: Subagent Event Unification](../implemented/RFC-0013-subagent-event-unification.md)
+- [RFC-0014: Spawn Session Events](../implemented/RFC-0014-spawn-session-events.md)
 
 ### External Resources
 

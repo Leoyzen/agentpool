@@ -590,17 +590,12 @@ class OpenCodeSessionRoutesMixin:
         Returns:
             The session status, or a default idle status if not found.
         """
-        from agentpool.lifecycle import RunState
-
         session = self.session_pool.sessions.get_session(session_id)
         if session is not None:
             run_id = session.current_run_id
             if run_id is not None:
                 run_handle = self.session_pool.sessions._runs.get(run_id)
-                if run_handle is not None and run_handle._run_state in (  # ty: ignore[unresolved-attribute]
-                    RunState.IDLE,
-                    RunState.RUNNING,
-                ):
+                if run_handle is not None and run_handle.is_running:
                     return SessionStatus(type="busy")
 
         return SessionStatus(type="idle")

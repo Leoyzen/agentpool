@@ -85,6 +85,9 @@ class TaskSupervisor:
         for task in tasks:
             task.cancel()
         for task in tasks:
-            with suppress(asyncio.CancelledError):
+            # Suppress ALL exceptions during teardown, not just CancelledError.
+            # A dying task may raise RuntimeError (e.g. publish-on-closed-queue)
+            # which would escape and prevent remaining tasks from being awaited.
+            with suppress(asyncio.CancelledError, Exception):
                 await task
         self._tasks.clear()

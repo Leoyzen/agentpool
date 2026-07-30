@@ -44,6 +44,9 @@ serve.toml
 # composio
 .composio.lock
 
+# uv lockfile (not version-controlled)
+uv.lock
+
 agentops.log
 
 acp_protocol/
@@ -68,3 +71,4 @@ test_configs/
 
 # openspec
 **/openspec/
+.worktrees/

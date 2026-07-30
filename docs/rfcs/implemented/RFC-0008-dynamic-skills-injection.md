@@ -28,15 +28,15 @@ This RFC proposes a new approach for automatic skills injection into agent syste
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
 - [Migration from RFC-0005](#migration-from-rfc-0005)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
 
 ---

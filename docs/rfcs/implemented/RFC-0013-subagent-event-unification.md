@@ -556,7 +556,7 @@ Per [Section 6.6 of the OpenCode Protocol](https://github.com/opencode/opencode/
 
 ## References
 
-- [OpenCode Attach Protocol Spec](./09-Attach远程协议详解.md) (original Chinese)
+- OpenCode Attach Protocol Spec (original Chinese)
 - [AgentPool Stream Adapter](./stream_adapter.py)
 - [AgentPool Subagent Tools](./subagent_tools.py)
 - [AgentPool Event Manager](./event_manager.py)

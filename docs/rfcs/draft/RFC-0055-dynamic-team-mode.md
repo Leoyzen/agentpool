@@ -34,17 +34,17 @@ The expected outcome is a minimal, capability-based extension that reuses existi
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -1410,9 +1410,9 @@ None. All reviewers converged on Option 2 after analysis of the BT precedent and
 
 ### Related Documents
 
-- [Multi-Agent Orchestration Survey](../../survey/multi-agent-orchestration/index.md)
-- [Survey: Comparison Matrix](../../survey/multi-agent-orchestration/comparison.md)
-- [Survey: Recommendations](../../survey/multi-agent-orchestration/recommendations.md)
+- Multi-Agent Orchestration Survey
+- Survey: Comparison Matrix
+- Survey: Recommendations
 - [GitHub Discussion #160: Team Agent 架构设计](https://github.com/Leoyzen/agentpool/discussions/160)
 - [Qwen Code Deep Dive (Discussion #160 comment)](https://github.com/Leoyzen/agentpool/discussions/160#discussioncomment-17637183)
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md)

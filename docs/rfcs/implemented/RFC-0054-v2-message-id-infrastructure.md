@@ -30,17 +30,17 @@ The upcoming ACP v2 protocol (RFD #1261 `session/inject`, message-id RFD, v2 pro
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Security Considerations](#security-considerations)
-- [Implementation Plan](#implementation-plan)
+- Security Considerations
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -832,7 +832,7 @@ All open questions have been resolved:
 
 ### Related Documents
 
-- [OpenSpec Change: v2-message-id-infrastructure](../../openspec/changes/v2-message-id-infrastructure/)
+- OpenSpec Change: v2-message-id-infrastructure
 - [RFC-0050: AgentWolf v1 Foundation Architecture](../draft/RFC-0050-agentwolf-v1-foundation-architecture.md)
 - [RFC-0042: Unified Lifecycle Architecture](../draft/RFC-0042-unified-lifecycle-architecture.md)
 - [GitHub Issue #154: Extend Feedback type with messageId](https://github.com/Leoyzen/agentpool/issues/154)

@@ -163,9 +163,8 @@ async def append_message_to_session(
         session_id: The session ID to append to.
         msg: The OpenCode message to append.
     """
-    session_pool = None
-    if hasattr(state, "pool") and state.pool is not None:
-        session_pool = getattr(state.pool, "session_pool", None)
+    pool = state.pool
+    session_pool = getattr(pool, "session_pool", None) if pool is not None else None
     if session_pool is not None:
         chat_msg = opencode_to_chat_message(msg, session_id=session_id)
         try:
@@ -299,11 +298,8 @@ def _reconstruct_tool_parts_from_checkpoint(
     # session state instead of hardcoding "agentpool". Falls back to
     # "agentpool" when the session state is unavailable.
     agent_name = "agentpool"
-    try:
-        pool = state.pool
-        session_pool = pool.session_pool
-    except RuntimeError:
-        session_pool = None
+    pool = state.pool
+    session_pool = pool.session_pool if pool is not None else None
     if session_pool is not None:
         session_state = session_pool.sessions.get_session(session_id)
         if session_state is not None:

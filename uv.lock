@@ -181,6 +181,7 @@ docs = [
     { name = "json-schema-for-humans" },
     { name = "mkdocs-material" },
     { name = "mknodes" },
+    { name = "zensical" },
 ]
 lint = [
     { name = "mypy", extra = ["faster-cache"] },
@@ -310,6 +311,7 @@ docs = [
     { name = "json-schema-for-humans", specifier = ">=1.0.0" },
     { name = "mkdocs-material" },
     { name = "mknodes" },
+    { name = "zensical", specifier = ">=0.0.51" },
 ]
 lint = [
     { name = "mypy", extras = ["faster-cache"] },

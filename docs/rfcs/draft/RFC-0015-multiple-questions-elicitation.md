@@ -25,11 +25,11 @@ The proposal involves extending `_handle_question_elicitation` to support `objec
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Technical Design](#technical-design)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
 - [References](#references)
 
@@ -490,7 +490,7 @@ def resolve_question(self, question_id: str, answers: list[list[str]]) -> bool:
 
 ### Related RFCs
 
-- [RFC-0010](/packages/xeno-agent/docs/rfcs/RFC-0010-multi-question-tool-for-user.md): Multi-Question Tool for User Interaction
+- RFC-0010: Multi-Question Tool for User Interaction
 
 ### Code References
 
