@@ -24,9 +24,9 @@ related_rfcs:
 ## Table of Contents
 
 - [1. Overview](#1-overview)
-- [2. Background & Context](#2-background--context)
+- 2. Background & Context
 - [3. Problem Statement](#3-problem-statement)
-- [4. Goals & Non-Goals](#4-goals--non-goals)
+- 4. Goals & Non-Goals
 - [5. Evaluation Criteria](#5-evaluation-criteria)
 - [6. Design Decisions](#6-design-decisions)
 - [7. Technical Design](#7-technical-design)

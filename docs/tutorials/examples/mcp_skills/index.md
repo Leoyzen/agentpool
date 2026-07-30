@@ -283,7 +283,7 @@ Reference not found: 'skill://server/skill/file.md'
 ## See Also
 
 - [FastMCP Skills Provider Documentation](https://gofastmcp.com/servers/providers/skills)
-- [Skill URI Usage](../../how-to/configuration/skill-uri-usage.md)
+- [Skill URI Usage](../../../how-to/configuration/skill-uri-usage.md)
 - [MCP Servers (YAML)](../mcp_servers_yaml/) - Basic MCP integration
 ## Code
 

@@ -188,7 +188,7 @@ agentpool run skill_with_references/reference_explorer \
 
 ## See Also
 
-- [Skill URI Usage](../../how-to/configuration/skill-uri-usage.md) - Complete URI documentation
+- [Skill URI Usage](../../../how-to/configuration/skill-uri-usage.md) - Complete URI documentation
 - [Skill URI Loading](../skill_uri_loading/) - Basic skill loading examples
 ## Code
 

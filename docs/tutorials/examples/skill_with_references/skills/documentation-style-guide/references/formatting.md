@@ -31,9 +31,9 @@ Use numbered lists for sequential steps:
 
 ## Links
 
-- Internal: [Section Title](#section-id)
+- Internal: Section Title
 - External: [External Site](https://example.com)
-- Cross-doc: [Other Doc](../other/page.md)
+- Cross-doc: Other Doc
 
 ## Callouts
 

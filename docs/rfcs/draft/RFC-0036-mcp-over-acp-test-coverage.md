@@ -46,17 +46,17 @@ related_rfcs:
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Test Architecture](#test-architecture)
 - [Test Case Catalog](#test-case-catalog)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---

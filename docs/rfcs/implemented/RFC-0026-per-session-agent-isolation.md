@@ -15,7 +15,7 @@ related_rfcs:
 
 # RFC-0026: Per-Session Agent Instances — Remove agent_lock
 
-> **Phase 1 of the Multi-Session Isolation Roadmap.** See [RFC-0024](./RFC-0024-agent-stateless-refactor.md) for Phase 2 and [RFC-0025](./RFC-0025-shared-agent-architecture.md) for Phase 3.
+> **Phase 1 of the Multi-Session Isolation Roadmap.** See [RFC-0024](../draft/RFC-0024-agent-stateless-refactor.md) for Phase 2 and [RFC-0025](../draft/RFC-0025-shared-agent-architecture.md) for Phase 3.
 
 ## Overview
 
@@ -49,7 +49,7 @@ agent_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 ### Non-Goals
 
-1. **Not**: Refactoring `BaseAgent` internals (that's [RFC-0024](./RFC-0024-agent-stateless-refactor.md))
+1. **Not**: Refactoring `BaseAgent` internals (that's [RFC-0024](../draft/RFC-0024-agent-stateless-refactor.md))
 2. **Not**: Implementing session cleanup/eviction (acceptable for 2–5 concurrent users; can be added later)
 3. **Not**: Lazy MCP initialization at tool-call level (agents init MCP on first `run_stream()`; ~50ms session creation + MCP init on first message)
 4. **Not**: Migrating ACP server (separate follow-up)
@@ -122,7 +122,7 @@ Option 2 is a dead end because `_active_run_ctx` cannot be parameterized — `in
 
 ### Accepted Trade-offs
 
-1. **MCP subprocess per session**: Acceptable for 2–5 concurrent users. If this becomes a bottleneck, [RFC-0025](./RFC-0025-shared-agent-architecture.md) addresses it by sharing a single agent with pool-level MCP.
+1. **MCP subprocess per session**: Acceptable for 2–5 concurrent users. If this becomes a bottleneck, [RFC-0025](../draft/RFC-0025-shared-agent-architecture.md) addresses it by sharing a single agent with pool-level MCP.
 2. **No session cleanup**: Acceptable because sessions are typically long-lived (hours). Can be added independently.
 3. **Model switching per-session**: This is the correct behavior — different sessions should be able to use different models.
 
@@ -338,8 +338,8 @@ Self-contained change. Revert by restoring `state.agent` + `state.agent_lock` + 
 ## References
 
 - [RFC-0021: Agent Concurrent Execution Safety](./RFC-0021-agent-concurrent-execution-safety.md) — Per-run isolation via `AgentRunContext`
-- [RFC-0024: Agent Stateless Refactor](./RFC-0024-agent-stateless-refactor.md) — Phase 2: Make `BaseAgent` stateless
-- [RFC-0025: Shared Agent Architecture](./RFC-0025-shared-agent-architecture.md) — Phase 3: Single agent, per-session state
+- [RFC-0024: Agent Stateless Refactor](../draft/RFC-0024-agent-stateless-refactor.md) — Phase 2: Make `BaseAgent` stateless
+- [RFC-0025: Shared Agent Architecture](../draft/RFC-0025-shared-agent-architecture.md) — Phase 3: Single agent, per-session state
 
 ### Key Source Files
 

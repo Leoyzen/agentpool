@@ -121,7 +121,7 @@ skill://{provider}/{skill-name}/SKILL.md           # Explicit main file
 skill://{provider}/{skill-name}/references/file    # Reference files
 ```
 
-See [Skill URI Usage](../../how-to/configuration/skill-uri-usage.md) for complete documentation.
+See [Skill URI Usage](../../../how-to/configuration/skill-uri-usage.md) for complete documentation.
 ## Code
 
 ### `config.yml`

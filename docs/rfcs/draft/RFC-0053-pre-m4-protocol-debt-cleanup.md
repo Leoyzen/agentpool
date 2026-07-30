@@ -24,16 +24,16 @@ This RFC proposes a phased cleanup of 51 technical debt items identified across 
 
 ## Table of Contents
 
-- [Background & Context](#background--context)
+- Background & Context
 - [Problem Statement](#problem-statement)
-- [Goals & Non-Goals](#goals--non-goals)
+- Goals & Non-Goals
 - [Evaluation Criteria](#evaluation-criteria)
 - [Options Analysis](#options-analysis)
 - [Recommendation](#recommendation)
 - [Technical Design](#technical-design)
-- [Implementation Plan](#implementation-plan)
+- Implementation Plan
 - [Open Questions](#open-questions)
-- [Decision Record](#decision-record)
+- Decision Record
 - [References](#references)
 
 ---
@@ -860,9 +860,9 @@ TBD
 
 ### Related Documents
 
-- [OpenSpec Change: pre-m4-protocol-cleanup](../../openspec/changes/archive/proposal.md)
-- [Design Document](../../openspec/changes/archive/design.md)
-- [Task Breakdown](../../openspec/changes/archive/tasks.md)
+- OpenSpec Change: pre-m4-protocol-cleanup
+- Design Document
+- Task Breakdown
 - [RFC-0050: AgentWolf v1 Foundation Architecture](./RFC-0050-agentwolf-v1-foundation-architecture.md)
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md)
 - [RFC-0041: Loop/Run Separation](./RFC-0041-loop-run-separation.md)

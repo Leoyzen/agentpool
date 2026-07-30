@@ -147,5 +147,5 @@ If an instruction function fails:
 ### See Also
 
 - [Dynamic Instructions Example](../../examples/dynamic-instructions/)
-- [ResourceProvider Base Class](../api/resource_providers.md)
-- [Instruction Types](../api/instructions.md)
+- ResourceProvider Base Class
+- Instruction Types
