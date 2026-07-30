@@ -506,7 +506,7 @@ class TestRetrieveTools:
     async def test_viking_glob(self, viking_cap: VikingCapability, mock_client: AsyncMock) -> None:
         """viking_glob passes pattern and uri correctly."""
         mock_client.glob = AsyncMock(
-            return_value={"uris": ["viking://doc1.md", "viking://doc2.md"]}
+            return_value={"matches": ["viking://doc1.md", "viking://doc2.md"]}
         )
         tools = build_tools(viking_cap)
         glob_tool = _get_tool(tools, "viking_glob")
@@ -527,7 +527,7 @@ class TestRetrieveTools:
         self, viking_cap: VikingCapability, mock_client: AsyncMock
     ) -> None:
         """viking_glob returns 'No URIs found.' when empty."""
-        mock_client.glob = AsyncMock(return_value={"uris": []})
+        mock_client.glob = AsyncMock(return_value={"matches": []})
         tools = build_tools(viking_cap)
         glob_tool = _get_tool(tools, "viking_glob")
 

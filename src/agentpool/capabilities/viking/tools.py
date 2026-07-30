@@ -252,7 +252,7 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                     node_limit=256,
                 )
                 if isinstance(result, dict):
-                    uris = result.get("uris", result.get("results", []))
+                    uris = result.get("matches", result.get("results", []))
                 else:
                     uris = result
                 if not uris:
