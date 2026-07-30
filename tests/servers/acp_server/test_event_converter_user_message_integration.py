@@ -20,8 +20,8 @@ from typing import Any
 import pytest
 
 from acp.schema import TextContentBlock, UserMessageChunk
-from agentpool.agents.events.events import UserMessageInsertedEvent
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentwolf.agents.events.events import UserMessageInsertedEvent
+from agentwolf_server.acp_server.event_converter import ACPEventConverter
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]

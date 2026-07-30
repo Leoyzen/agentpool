@@ -9,11 +9,11 @@ icon: material/tools
 Start the MCP (Model Context Protocol) server to expose agent tools to other MCP-compatible clients.
 
 ```bash
-agentpool serve-mcp config.yml
+agentwolf serve-mcp config.yml
 ```
 
 For a full list of options, run:
 
 ```bash
-agentpool serve-mcp --help
+agentwolf serve-mcp --help
 ```

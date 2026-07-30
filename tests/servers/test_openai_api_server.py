@@ -8,10 +8,10 @@ from fastapi.testclient import TestClient
 from pydantic_ai.usage import RunUsage
 import pytest
 
-from agentpool import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool_server.openai_api_server.server import (
+from agentwolf import AgentPool
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf_server.openai_api_server.server import (
     OpenAIAPIServer,
     _serialize_completion_usage,
 )

@@ -9,9 +9,9 @@ import asyncio
 
 from mcp import types
 
-from agentpool import Agent
-from agentpool_server.opencode_server.input_provider import OpenCodeInputProvider
-from agentpool_server.opencode_server.state import ServerState
+from agentwolf import Agent
+from agentwolf_server.opencode_server.input_provider import OpenCodeInputProvider
+from agentwolf_server.opencode_server.state import ServerState
 
 
 async def demo_single_select():

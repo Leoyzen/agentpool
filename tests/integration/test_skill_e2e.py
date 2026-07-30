@@ -18,24 +18,24 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.capabilities.extension_registry import (
+from agentwolf.capabilities.extension_registry import (
     ExtensionRegistry,
     Scope,
     ScopeLevel,
 )
-from agentpool.capabilities.resource_protocols import (
+from agentwolf.capabilities.resource_protocols import (
     SkillEntry,
     SkillResource,
 )
-from agentpool.capabilities.skill_manager_cap import SkillManagerCap
-from agentpool.skills.skill import Skill
-from agentpool.skills.skill_tool_manager import SkillToolManager
-from agentpool.skills.uri_resolver import SkillURIResolver
-from agentpool_config.skills import SkillToolConfig
+from agentwolf.capabilities.skill_manager_cap import SkillManagerCap
+from agentwolf.skills.skill import Skill
+from agentwolf.skills.skill_tool_manager import SkillToolManager
+from agentwolf.skills.uri_resolver import SkillURIResolver
+from agentwolf_config.skills import SkillToolConfig
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -160,7 +160,7 @@ async def test_skill_uri_resolution_nonexistent_skill() -> None:
     Given a SkillURIResolver with ExtensionRegistry, When resolving
     a nonexistent skill URI, Then SkillNotFoundError is raised.
     """
-    from agentpool.skills.exceptions import SkillNotFoundError
+    from agentwolf.skills.exceptions import SkillNotFoundError
 
     skill = make_skill(name="existing-skill", instructions="Content.")
     cap = SkillManagerCap(local_skills={"existing-skill": skill})
@@ -218,7 +218,7 @@ def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> No
     This is verified by checking that the skills_tools_provider is
     injected into _external_capabilities.
     """
-    from agentpool.host.factory import _inject_pool_providers
+    from agentwolf.host.factory import _inject_pool_providers
 
     class FakeAgent:
         def __init__(self) -> None:
@@ -256,7 +256,7 @@ def test_load_skill_available_in_child_session_agent(minimal_pool: AgentPool) ->
     This ensures child session agents have access to load_skill and
     list_skills tools.
     """
-    from agentpool.host.factory import _inject_pool_providers
+    from agentwolf.host.factory import _inject_pool_providers
 
     class FakeAgent:
         def __init__(self) -> None:
@@ -359,7 +359,7 @@ async def test_load_skill_return_includes_tool_status() -> None:
     display tool import status. We verify that the tool import
     succeeds and the MCP server config is accessible.
     """
-    from agentpool_config.skills import SkillMcpServerConfig
+    from agentwolf_config.skills import SkillMcpServerConfig
 
     skill = make_skill(
         name="status-skill",

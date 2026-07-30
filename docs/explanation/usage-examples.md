@@ -5,7 +5,7 @@
 ### Native Agent
 
 ```python
-from agentpool.agents import Agent
+from agentwolf.agents import Agent
 
 def greet(name: str) -> str:
     """Greet someone."""
@@ -24,7 +24,7 @@ async with Agent(
 ### ACP Agent
 
 ```python
-from agentpool.agents.acp_agent import ACPAgent
+from agentwolf.agents.acp_agent import ACPAgent
 
 async with ACPAgent(
     command="goose",  # Required: executable name
@@ -56,8 +56,8 @@ agents:
 ### Python Code
 
 ```python
-from agentpool.delegation import AgentPool
-from agentpool.agents.events import (
+from agentwolf.delegation import AgentPool
+from agentwolf.agents.events import (
     PartDeltaEvent,
     ToolCallStartEvent,
     ToolCallCompleteEvent,

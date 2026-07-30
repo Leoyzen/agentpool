@@ -6,10 +6,10 @@ from importlib.util import find_spec
 
 import pytest
 
-from agentpool import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool_server.a2a_server import A2AServer
+from agentwolf import AgentPool
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf_server.a2a_server import A2AServer
 
 
 pytestmark = pytest.mark.integration
@@ -119,7 +119,7 @@ async def test_a2a_server_from_config(tmp_path):
     environments:
       test:
         type: inline
-        module_path: agentpool
+        module_path: agentwolf
         class_name: Agent
 
     agents:

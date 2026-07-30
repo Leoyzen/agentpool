@@ -5,8 +5,8 @@ import asyncio
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.messaging.message_utils import build_message_index, get_message_chain
+from agentwolf import Agent
+from agentwolf.messaging.message_utils import build_message_index, get_message_chain
 
 
 pytestmark = pytest.mark.unit

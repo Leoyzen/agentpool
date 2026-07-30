@@ -11,12 +11,12 @@ Skills are defined as `SKILL.md` files following the [Agent Skills Spec](https:/
 
 ## Key Files
 
-- `src/agentpool/skills/skill.py` — `Skill` model: YAML frontmatter parsing, lazy instruction loading
-- `src/agentpool/skills/registry.py` — `SkillsRegistry` auto-discovers SKILL.md files from configured paths
-- `src/agentpool/skills/manager.py` — `SkillsManager` pool-level lifecycle
-- `src/agentpool/skills/uri_resolver.py` — `skill://` URI scheme resolver
-- `src/agentpool/skills/command.py` — `SkillCommand` wraps skills as protocol-agnostic slash commands
-- `src/agentpool/skills/instruction_provider.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
+- `src/agentwolf/skills/skill.py` — `Skill` model: YAML frontmatter parsing, lazy instruction loading
+- `src/agentwolf/skills/registry.py` — `SkillsRegistry` auto-discovers SKILL.md files from configured paths
+- `src/agentwolf/skills/manager.py` — `SkillsManager` pool-level lifecycle
+- `src/agentwolf/skills/uri_resolver.py` — `skill://` URI scheme resolver
+- `src/agentwolf/skills/command.py` — `SkillCommand` wraps skills as protocol-agnostic slash commands
+- `src/agentwolf/skills/instruction_provider.py` — `SkillsInstructionProvider` injects skills as XML into prompts (metadata/full modes) — migrated from `resource_providers/`
 
 ## Injection Modes
 

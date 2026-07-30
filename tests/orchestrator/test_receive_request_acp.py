@@ -13,16 +13,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.agents.acp_agent import ACPAgent
-from agentpool.lifecycle import RunState
-from agentpool.lifecycle.types import DeliveryMode
-from agentpool.orchestrator.core import EventBus, SessionController
-from agentpool.orchestrator.run import RunHandle
+from agentwolf.agents.acp_agent import ACPAgent
+from agentwolf.lifecycle import RunState
+from agentwolf.lifecycle.types import DeliveryMode
+from agentwolf.orchestrator.core import EventBus, SessionController
+from agentwolf.orchestrator.run import RunHandle
 from tests._controller_helpers import send_via_controller
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit

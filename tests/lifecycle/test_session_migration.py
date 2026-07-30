@@ -28,24 +28,24 @@ from unittest.mock import ANY, AsyncMock, MagicMock
 import anyio
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle import (
+from agentwolf.lifecycle import (
     DirectChannel,
     MemoryJournal,
     ProtocolChannel,
     ProtocolTrigger,
 )
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.event_bus import EventBus
-from agentpool.orchestrator.session_controller import (
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.event_bus import EventBus
+from agentwolf.orchestrator.session_controller import (
     SessionController,
     SessionState,
 )
-from agentpool.orchestrator.session_pool import SessionPool
-from agentpool.orchestrator.turn import Turn
+from agentwolf.orchestrator.session_pool import SessionPool
+from agentwolf.orchestrator.turn import Turn
 from tests._controller_helpers import send_via_controller
 
 
@@ -437,8 +437,8 @@ async def test_set_current_run_id_publishes_state_update_running() -> None:
     ``comm.on_state_change(RunState.RUNNING)`` and schedules a
     ``StateUpdate`` event publish.
     """
-    from agentpool.agents.events import StateUpdate
-    from agentpool.lifecycle.types import RunState
+    from agentwolf.agents.events import StateUpdate
+    from agentwolf.lifecycle.types import RunState
 
     session = SessionState(session_id="s1", agent_name="test_agent")
     comm = MagicMock()
@@ -470,8 +470,8 @@ async def test_set_current_run_id_publishes_state_update_idle() -> None:
     ``comm.on_state_change(RunState.IDLE)`` and schedules a
     ``StateUpdate`` event publish.
     """
-    from agentpool.agents.events import StateUpdate
-    from agentpool.lifecycle.types import RunState
+    from agentwolf.agents.events import StateUpdate
+    from agentwolf.lifecycle.types import RunState
 
     session = SessionState(session_id="s1", agent_name="test_agent")
     comm = MagicMock()

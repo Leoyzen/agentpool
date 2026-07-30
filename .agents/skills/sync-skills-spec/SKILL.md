@@ -1,11 +1,11 @@
 ---
 name: sync-skills-spec
-description: Sync the agentpool skills implementation with the official Agent Skills Spec by comparing against the reference repository.
+description: Sync the agentwolf skills implementation with the official Agent Skills Spec by comparing against the reference repository.
 ---
 
 # Sync Skills Spec
 
-Keep `src/agentpool/skills/` aligned with the official Agent Skills Spec.
+Keep `src/agentwolf/skills/` aligned with the official Agent Skills Spec.
 
 ## Steps
 
@@ -21,18 +21,18 @@ Keep `src/agentpool/skills/` aligned with the official Agent Skills Spec.
    - Focus on the `SkillProperties` model, frontmatter fields, validation rules, and prompt generation
 
 3. **Compare with our implementation**:
-   - `src/agentpool/skills/skill.py` — our `Skill` Pydantic model, validators, `parse_frontmatter()`, `to_prompt()`
-   - `src/agentpool/skills/registry.py` — discovery and registration (our extension, not part of the spec)
-   - `src/agentpool/skills/manager.py` — pool-wide management (our extension)
+   - `src/agentwolf/skills/skill.py` — our `Skill` Pydantic model, validators, `parse_frontmatter()`, `to_prompt()`
+   - `src/agentwolf/skills/registry.py` — discovery and registration (our extension, not part of the spec)
+   - `src/agentwolf/skills/manager.py` — pool-wide management (our extension)
    - Check for missing fields, changed validation rules, new spec requirements
 
 4. **Apply updates** to our code:
    - Add any new frontmatter fields to the `Skill` model
    - Update validators to match spec changes (name format, length limits, allowed fields)
    - Update `to_prompt()` if the recommended XML format changed
-   - Do NOT replace our registry/manager — those are agentpool-specific extensions
+   - Do NOT replace our registry/manager — those are agentwolf-specific extensions
 
-5. **Update the synced commit hash** in `src/agentpool/skills/skill.py`:
+5. **Update the synced commit hash** in `src/agentwolf/skills/skill.py`:
    - Get the current HEAD of the cloned repo: `git -C "$tmp/agentskills" rev-parse HEAD`
    - Update the `SPEC_SYNCED_COMMIT` constant to the new hash
    - This tracks which version of the spec we last synced against

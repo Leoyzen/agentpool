@@ -23,13 +23,13 @@ from acp.schema import (
     ToolCallStart,
     TurnCompleteUpdate,
 )
-from agentpool import Agent
-from agentpool.agents.acp_agent.turn import ACPTurn
-from agentpool.agents.context import AgentRunContext
-from agentpool.hooks import AgentHooks, CallableHook, HookResult
-from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle
+from agentwolf import Agent
+from agentwolf.agents.acp_agent.turn import ACPTurn
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.hooks import AgentHooks, CallableHook, HookResult
+from agentwolf.lifecycle import DirectChannel, MemoryJournal
+from agentwolf.orchestrator.core import EventBus, SessionState
+from agentwolf.orchestrator.run import RunHandle
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +96,7 @@ async def _run_native_standalone(hook_type: HookType) -> None:
     )
     async with agent:
         run_ctx = AgentRunContext(session_id="smoke-session")
-        from agentpool.agents.native_agent.turn import NativeTurn
+        from agentwolf.agents.native_agent.turn import NativeTurn
 
         turn = NativeTurn(
             agent=agent,

@@ -6,9 +6,9 @@ from typing import Any
 import anyio
 import pytest
 
-from agentpool import Agent  # noqa: TC001
-from agentpool.running.discovery import node_function
-from agentpool.running.executor import (
+from agentwolf import Agent  # noqa: TC001
+from agentwolf.running.discovery import node_function
+from agentwolf.running.executor import (
     ExecutionError,
     _group_parallel,
     _sort_functions,

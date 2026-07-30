@@ -22,14 +22,14 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.agents.native_agent.agent import Agent
-from agentpool.capabilities.modality_filter import ModalityFilterCapability
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.model_configs import (
+from agentwolf.agents.native_agent.agent import Agent
+from agentwolf.capabilities.modality_filter import ModalityFilterCapability
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.model_configs import (
     FallbackModelConfig,
     TestModelConfig as _TestModelConfig,
 )
-from agentpool_config.model_capabilities import ModelCapabilities
+from agentwolf_config.model_capabilities import ModelCapabilities
 
 
 pytestmark = [pytest.mark.integration]
@@ -387,7 +387,7 @@ async def test_acp_agent_image_input_false_advertises_false() -> None:
     # The ACP agent derives image_prompts from
     # model_config.capabilities.image_input. We test this logic directly
     # by simulating the derivation that occurs in initialize().
-    from agentpool.models.model_configs import BaseModelConfig
+    from agentwolf.models.model_configs import BaseModelConfig
 
     model_config = _TestModelConfig(capabilities=_text_only_caps())
     assert isinstance(model_config, BaseModelConfig)

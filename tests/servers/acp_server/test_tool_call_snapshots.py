@@ -12,8 +12,8 @@ from exxec.models import ExecutionResult
 import pytest
 from syrupy.extensions.json import JSONSnapshotExtension
 
-from agentpool_config.agentpool_tools import BashToolConfig, ExecuteCodeToolConfig
-from agentpool_config.toolsets import FSSpecToolsetConfig
+from agentwolf_config.agentwolf_tools import BashToolConfig, ExecuteCodeToolConfig
+from agentwolf_config.toolsets import FSSpecToolsetConfig
 
 from .tool_call_harness import ToolCallTestHarness
 
@@ -305,7 +305,7 @@ class TestMCPToolSnapshots:
         """Test MCP tool with progress notifications produces expected messages."""
         from pathlib import Path
 
-        from agentpool_config.mcp_server import StdioMCPServerConfig
+        from agentwolf_config.mcp_server import StdioMCPServerConfig
 
         server_path = Path(__file__).parent.parent.parent / "mcp_server" / "server.py"
         mcp_server = StdioMCPServerConfig(

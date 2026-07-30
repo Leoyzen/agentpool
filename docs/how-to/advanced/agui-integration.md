@@ -19,25 +19,25 @@ Unlike ACP (which uses stdio/JSON-RPC for IDE integration), AG-UI is designed fo
 
 ## AG-UI Agents: The Client Side
 
-In agentpool, `AGUIAgent` acts as a **client** that connects **to** remote AG-UI servers. This allows you to:
+In agentwolf, `AGUIAgent` acts as a **client** that connects **to** remote AG-UI servers. This allows you to:
 
 - Integrate external AG-UI agents into your agent pool
-- Compose remote agents with native agentpools via connections and teams
+- Compose remote agents with native agentwolfs via connections and teams
 - Execute tools locally while letting remote agents decide when to use them
 - Maintain unified messaging and event systems
 
 !!! note "Client vs Server"
-    Currently, agentpool provides the **client side** (consuming AG-UI agents). 
-    Server-side support (exposing agentpools as AG-UI endpoints) is planned for future releases.
+    Currently, agentwolf provides the **client side** (consuming AG-UI agents). 
+    Server-side support (exposing agentwolfs as AG-UI endpoints) is planned for future releases.
 
 ## Installation
 
-No additional installation required - AG-UI support is included in agentpool:
+No additional installation required - AG-UI support is included in agentwolf:
 
 ```bash
-pip install agentpool
+pip install agentwolf
 # or
-uv add agentpool
+uv add agentwolf
 ```
 
 The `ag-ui` Python package is a dependency and provides the protocol types.
@@ -47,7 +47,7 @@ The `ag-ui` Python package is a dependency and provides the protocol types.
 ### Connecting to an AG-UI Agent
 
 ```python
-from agentpool.agents import AGUIAgent
+from agentwolf.agents import AGUIAgent
 
 async def main():
     # Connect to a remote AG-UI agent
@@ -90,7 +90,7 @@ agents:
 Load and use:
 
 ```python
-from agentpool import AgentPool
+from agentwolf import AgentPool
 
 async def main():
     async with AgentPool("agents.yml") as pool:
@@ -272,7 +272,7 @@ agents:
 AG-UI agents emit the same events as native agents:
 
 ```python
-from agentpool.agents.events import ToolCallStartEvent
+from agentwolf.agents.events import ToolCallStartEvent
 
 async def tool_call_handler(ctx, event):
     if isinstance(event, ToolCallStartEvent):
@@ -322,7 +322,7 @@ async with AGUIAgent(
 
 ## Future: AG-UI Server Support
 
-Future versions will support exposing agentpools **as** AG-UI servers:
+Future versions will support exposing agentwolfs **as** AG-UI servers:
 
 ```yaml title="Future feature"
 agui_server:
@@ -335,7 +335,7 @@ agui_server:
 
 This will enable:
 
-- Frontends directly connecting to agentpools
+- Frontends directly connecting to agentwolfs
 - Web UI integration
 - Bidirectional AG-UI workflows
 

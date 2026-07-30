@@ -16,14 +16,14 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai.messages import ToolReturn
 import pytest
 
-from agentpool.capabilities.file_team_state import FileTeamState
-from agentpool.capabilities.team_comm_capability import TeamCommCapability
+from agentwolf.capabilities.file_team_state import FileTeamState
+from agentwolf.capabilities.team_comm_capability import TeamCommCapability
 from tests.team_mode.conftest import build_agent_context, make_mock_run_context
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
-    from agentpool_config.team_mode import TeamModeConfig
+    from agentwolf import AgentPool
+    from agentwolf_config.team_mode import TeamModeConfig
 
 
 # ---------------------------------------------------------------------------

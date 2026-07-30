@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from dirty_equals import IsPartialDict, IsStr
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     StreamCompleteEvent,
     ToolCallCompleteEvent,
     ToolCallStartEvent,
@@ -25,7 +25,7 @@ from tests.vcr.conftest import cassette_exists
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 pytestmark = pytest.mark.vcr
 

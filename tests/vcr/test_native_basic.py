@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING
 from dirty_equals import IsStr
 import pytest
 
-from agentpool.agents.events import StreamCompleteEvent
+from agentwolf.agents.events import StreamCompleteEvent
 from tests.vcr.conftest import cassette_exists
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 pytestmark = pytest.mark.vcr
 

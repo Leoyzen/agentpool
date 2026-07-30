@@ -11,10 +11,10 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import FunctionToolset
 import pytest
 
-from agentpool.capabilities.agent_context import AgentContextDeps
-from agentpool.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
-from agentpool.capabilities.resource_capability import ResourceCapability
-from agentpool.capabilities.resource_protocols import (
+from agentwolf.capabilities.agent_context import AgentContextDeps
+from agentwolf.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
+from agentwolf.capabilities.resource_capability import ResourceCapability
+from agentwolf.capabilities.resource_protocols import (
     BlobResourceContent,
     CompletionArgument,
     CompletionResult,
@@ -23,7 +23,7 @@ from agentpool.capabilities.resource_protocols import (
     SkillEntry,
     TextResourceContent,
 )
-from agentpool.host.context import RunScope
+from agentwolf.host.context import RunScope
 
 
 if TYPE_CHECKING:
@@ -927,7 +927,7 @@ async def test_resolve_agent_context_from_runtime_context() -> None:
     ctx.deps = agents.context.AgentContext, and our
     capabilities.agent_context.AgentContextDeps is at ctx.deps.data.
     """
-    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+    from agentwolf.agents.context import AgentContext as RuntimeAgentContext
 
     agent_ctx = _make_agent_context(registry=None)
     runtime_ctx = RuntimeAgentContext(node=MagicMock())
@@ -958,7 +958,7 @@ async def test_resolve_agent_context_none_deps() -> None:
 
 async def test_resolve_agent_context_runtime_ctx_none_data() -> None:
     """_resolve_agent_context raises RuntimeError when RuntimeAgentContext.data is None."""
-    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+    from agentwolf.agents.context import AgentContext as RuntimeAgentContext
 
     runtime_ctx = RuntimeAgentContext(node=MagicMock())
     runtime_ctx.data = None

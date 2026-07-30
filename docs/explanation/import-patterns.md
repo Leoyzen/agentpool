@@ -6,8 +6,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentpool.delegation import AgentPool
+    from agentwolf.delegation import AgentPool
 
-# Config models are in agentpool_config to avoid circular deps
-from agentpool_config.teams import TeamConfig
+# Config models are in agentwolf_config to avoid circular deps
+from agentwolf_config.teams import TeamConfig
 ```

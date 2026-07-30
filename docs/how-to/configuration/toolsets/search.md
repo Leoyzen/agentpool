@@ -69,8 +69,8 @@ tools:
 ## Available Tools
 
 ```python exec="true"
-from agentpool_toolsets.search_toolset import SearchTools
-from agentpool.docs.utils import generate_tool_docs
+from agentwolf_toolsets.search_toolset import SearchTools
+from agentwolf.docs.utils import generate_tool_docs
 
 toolset = SearchTools()
 print(generate_tool_docs(toolset))
@@ -79,7 +79,7 @@ print(generate_tool_docs(toolset))
 ## Configuration Reference
 
 /// mknodes
-{{ "agentpool_config.toolsets.SearchToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
+{{ "agentwolf_config.toolsets.SearchToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
 ///
 
 ## Environment Variables

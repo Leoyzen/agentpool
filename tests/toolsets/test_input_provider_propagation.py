@@ -16,10 +16,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.messaging.messages import ChatMessage
-from agentpool.ui.base import InputProvider
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.messaging.messages import ChatMessage
+from agentwolf.ui.base import InputProvider
 
 
 pytestmark = pytest.mark.integration
@@ -240,10 +240,10 @@ async def test_input_provider_propagated_when_session_bound_only() -> None:
     ctx.get_input_provider() would return a provider via SessionState,
     the provider IS propagated to the child session.
     """
-    from agentpool.agents.context import AgentContext
-    from agentpool.messaging.messagenode import MessageNode
-    from agentpool.orchestrator.core import SessionPool
-    from agentpool_toolsets.builtin.subagent_tools import SubagentTools
+    from agentwolf.agents.context import AgentContext
+    from agentwolf.messaging.messagenode import MessageNode
+    from agentwolf.orchestrator.core import SessionPool
+    from agentwolf_toolsets.builtin.subagent_tools import SubagentTools
 
     fake_provider = FakeInputProviderSession()
 

@@ -1,13 +1,13 @@
 # /// script
-# dependencies = ["agentpool"]
+# dependencies = ["agentwolf"]
 # ///
 
 """Example: Two agents working together to explore git commit history."""
 
 from __future__ import annotations
 
-from agentpool import Agent, Team
-from agentpool.docs.utils import run
+from agentwolf import Agent, Team
+from agentwolf.docs.utils import run
 
 
 PICKER = """

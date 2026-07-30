@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.base_agent import BaseAgent
-from agentpool.orchestrator.turn import Turn
+from agentwolf.agents.base_agent import BaseAgent
+from agentwolf.orchestrator.turn import Turn
 
 
 pytestmark = pytest.mark.unit
@@ -22,8 +22,8 @@ pytestmark = pytest.mark.unit
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from agentpool.agents.context import AgentRunContext
-    from agentpool.agents.events import RichAgentStreamEvent
+    from agentwolf.agents.context import AgentRunContext
+    from agentwolf.agents.events import RichAgentStreamEvent
 
 
 # ---------------------------------------------------------------------------

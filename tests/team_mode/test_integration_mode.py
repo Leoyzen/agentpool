@@ -13,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import yamling
 
-from agentpool.capabilities.file_team_state import FileTeamState
-from agentpool.capabilities.team_comm_capability import TeamCommCapability
-from agentpool.models.manifest import AgentsManifest
-from agentpool_config.team_mode import (
+from agentwolf.capabilities.file_team_state import FileTeamState
+from agentwolf.capabilities.team_comm_capability import TeamCommCapability
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf_config.team_mode import (
     MemberSpec,
     TeamDefaultsConfig,
     TeamModeConfig,
@@ -25,7 +25,7 @@ from tests.team_mode.conftest import build_agent_context, make_mock_run_context
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ def _make_run_context(
         session_id: Session ID string for the mock SessionState.
         delegation: Mock DelegationService (defaults to a generic MagicMock).
     """
-    from agentpool.capabilities.agent_context import AgentContextDeps
+    from agentwolf.capabilities.agent_context import AgentContextDeps
 
     cfg = config or _make_enabled_config(base_dir=base_dir)
 

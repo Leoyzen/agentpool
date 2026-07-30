@@ -1,6 +1,6 @@
 """Quick red flag test: verify skill reference loading against local MCP scratchpad.
 
-Run from packages/agentpool directory:
+Run from packages/agentwolf directory:
     uv run python reproduce_skill_bug.py
 """
 
@@ -10,11 +10,11 @@ import asyncio
 import sys
 
 
-sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
+sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentwolf/src")
 
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from agentwolf.resource_providers.mcp_provider import MCPResourceProvider
 
-from agentpool.skills.uri_resolver import SkillURIResolver
+from agentwolf.skills.uri_resolver import SkillURIResolver
 
 
 async def main():

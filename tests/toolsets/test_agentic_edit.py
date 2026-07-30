@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import Agent
-from agentpool_toolsets.fsspec_toolset import FSSpecTools
+from agentwolf import Agent
+from agentwolf_toolsets.fsspec_toolset import FSSpecTools
 
 
 if TYPE_CHECKING:

@@ -18,19 +18,19 @@ from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events.events import (
+from agentwolf import Agent
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events.events import (
     RunErrorEvent,
     StreamCompleteEvent,
     ToolCallCompleteEvent,
 )
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.tasks.exceptions import RunAbortedError
+from agentwolf.agents.native_agent.turn import NativeTurn
+from agentwolf.tasks.exceptions import RunAbortedError
 
 
 if TYPE_CHECKING:
-    from agentpool.tools.base import Tool
+    from agentwolf.tools.base import Tool
 
 
 def _make_mock_agentlet_raising(exc: BaseException) -> MagicMock:
@@ -108,7 +108,7 @@ async def test_terminal_tool_stops_execution() -> None:
 
         events: list[Any] = []
         with patch(
-            "agentpool.agents.native_agent.turn.is_terminal_tool",
+            "agentwolf.agents.native_agent.turn.is_terminal_tool",
             side_effect=fake_is_terminal,
         ):
             events.extend([event async for event in turn.execute()])

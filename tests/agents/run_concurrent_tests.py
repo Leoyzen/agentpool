@@ -13,11 +13,11 @@ import sys
 import time
 
 
-# Add agentpool to path
+# Add agentwolf to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from agentpool import Agent
-from agentpool.agents.events import StreamCompleteEvent
+from agentwolf import Agent
+from agentwolf.agents.events import StreamCompleteEvent
 
 
 async def run_baseline_test():  # noqa: PLR0915

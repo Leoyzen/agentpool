@@ -34,15 +34,15 @@ documentation. You do NOT edit files.
 ## What to Check
 
 1. **Context Loading Table**
-   - New `src/agentpool/**/AGENTS.md` files MUST be registered in the root
+   - New `src/agentwolf/**/AGENTS.md` files MUST be registered in the root
      `AGENTS.md` Context Loading table.
    - Removed subsystem AGENTS.md files MUST be removed from the table.
 
 2. **Subsystem Documentation**
-   - New modules under `src/agentpool/` that introduce a new directory SHOULD have
+   - New modules under `src/agentwolf/` that introduce a new directory SHOULD have
      a corresponding `AGENTS.md` in that directory.
-   - Changes to `src/agentpool/lifecycle/`, `src/agentpool/capabilities/`,
-     `src/agentpool/skills/`, `src/agentpool/hooks/` MUST check whether the
+   - Changes to `src/agentwolf/lifecycle/`, `src/agentwolf/capabilities/`,
+     `src/agentwolf/skills/`, `src/agentwolf/hooks/` MUST check whether the
      subsystem AGENTS.md needs updating.
 
 3. **Explanation Docs**

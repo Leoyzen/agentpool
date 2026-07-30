@@ -18,7 +18,7 @@ from dirty_equals import IsStr
 from pydantic_ai.messages import TextPart, ThinkingPart
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     PartDeltaEvent,
     PartStartEvent,
     RunStartedEvent,
@@ -28,7 +28,7 @@ from tests.vcr.conftest import cassette_exists
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 pytestmark = pytest.mark.vcr
 

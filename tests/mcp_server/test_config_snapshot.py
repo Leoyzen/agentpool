@@ -7,8 +7,8 @@ from dataclasses import FrozenInstanceError
 from pydantic import HttpUrl
 import pytest
 
-from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-from agentpool_config.mcp_server import (
+from agentwolf.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+from agentwolf_config.mcp_server import (
     SSEMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,

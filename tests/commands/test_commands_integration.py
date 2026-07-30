@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 import pytest
 from slashed import CommandStore
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.messaging.context import NodeContext
-from agentpool_commands.prompts import ShowPromptCommand
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.messaging.context import NodeContext
+from agentwolf_commands.prompts import ShowPromptCommand
 
 
 pytestmark = pytest.mark.unit

@@ -15,7 +15,7 @@ import pytest
 if TYPE_CHECKING:
     from httpx import AsyncClient
 
-    from agentpool_server.opencode_server.state import ServerState
+    from agentwolf_server.opencode_server.state import ServerState
 
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
@@ -280,7 +280,7 @@ async def test_collision_warning_logged(
     mock_prompt.name = "collision-cmd"
     mock_agent.list_prompts = AsyncMock(return_value=[mock_prompt])
 
-    with patch("agentpool_server.opencode_server.routes.session_routes.logger") as mock_logger:
+    with patch("agentwolf_server.opencode_server.routes.session_routes.logger") as mock_logger:
         response = await async_client.post(
             f"/session/{session_id}/command",
             json={"command": "collision-cmd"},

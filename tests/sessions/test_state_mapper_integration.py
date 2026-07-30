@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.lifecycle.journal import DurableJournal
-from agentpool.lifecycle.snapshot_store import DurableSnapshotStore
-from agentpool.sessions.state_mapper import (
+from agentwolf.lifecycle.journal import DurableJournal
+from agentwolf.lifecycle.snapshot_store import DurableSnapshotStore
+from agentwolf.sessions.state_mapper import (
     SESSION_STATUS_ACTIVE,
     SESSION_STATUS_CHECKPOINTED,
     SESSION_STATUS_RESUMING,
@@ -29,7 +29,7 @@ from agentpool.sessions.state_mapper import (
 
 
 if TYPE_CHECKING:
-    from agentpool.lifecycle.types import RunState
+    from agentwolf.lifecycle.types import RunState
 
 
 pytestmark = pytest.mark.integration

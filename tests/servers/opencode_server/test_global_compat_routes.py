@@ -16,14 +16,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from agentpool.models.manifest import AgentsManifest
-from agentpool.storage import StorageManager
-from agentpool.utils.streams import FileOpsTracker
-from agentpool.utils.todos import TodoTracker
-from agentpool_server.opencode_server.dependencies import get_state
-from agentpool_server.opencode_server.routes.config_routes import router as config_router
-from agentpool_server.opencode_server.routes.global_routes import router as global_router
-from agentpool_server.opencode_server.state import ServerState
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf.storage import StorageManager
+from agentwolf.utils.streams import FileOpsTracker
+from agentwolf.utils.todos import TodoTracker
+from agentwolf_server.opencode_server.dependencies import get_state
+from agentwolf_server.opencode_server.routes.config_routes import router as config_router
+from agentwolf_server.opencode_server.routes.global_routes import router as global_router
+from agentwolf_server.opencode_server.state import ServerState
 
 
 pytestmark = pytest.mark.integration
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def _server_state(tmp_path: Path) -> ServerState:
     """Build a ServerState with a mock agent for config route tests."""
-    from agentpool_config.storage import MemoryStorageConfig, StorageConfig
+    from agentwolf_config.storage import MemoryStorageConfig, StorageConfig
 
     storage_manager = StorageManager(config=StorageConfig(providers=[MemoryStorageConfig()]))
     file_ops = FileOpsTracker()

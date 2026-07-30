@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentpool.messaging.messages import ChatMessage
-from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.models import (
+from agentwolf.messaging.messages import ChatMessage
+from agentwolf.utils.time_utils import now_ms
+from agentwolf_server.opencode_server.models import (
     AssistantMessage,
     MessagePath,
     MessageTime,
@@ -25,13 +25,13 @@ from agentpool_server.opencode_server.models import (
     TimeCreated,
     UserMessage,
 )
-from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-from agentpool_server.opencode_server.models.session import Session, SessionRevert
-from agentpool_server.opencode_server.opencode_message_bridge import (
+from agentwolf_server.opencode_server.models.common import TimeCreatedUpdated
+from agentwolf_server.opencode_server.models.session import Session, SessionRevert
+from agentwolf_server.opencode_server.opencode_message_bridge import (
     _apply_revert_filter,
     get_messages_for_session,
 )
-from agentpool_server.opencode_server.state import ServerState
+from agentwolf_server.opencode_server.state import ServerState
 
 
 pytestmark = pytest.mark.unit
@@ -378,7 +378,7 @@ class TestSoftHideSessionPool:
         state.agent = Mock()
         state.agent.name = "test-agent"
         state.agent.model_name = None
-        state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        state.resolve_default_model_info = Mock(return_value=("default", "agentwolf"))
         state.working_dir = "/tmp"
 
         pool_mock = Mock()
@@ -429,7 +429,7 @@ class TestSoftHideSessionPool:
         state.agent = Mock()
         state.agent.name = "test-agent"
         state.agent.model_name = None
-        state.resolve_default_model_info = Mock(return_value=("default", "agentpool"))
+        state.resolve_default_model_info = Mock(return_value=("default", "agentwolf"))
         state.working_dir = "/tmp"
 
         pool_mock = Mock()

@@ -20,12 +20,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
-from agentpool.orchestrator.session_controller import SessionController, SessionState
+from agentwolf.mcp_server.config_snapshot import McpConfigSnapshot
+from agentwolf.orchestrator.session_controller import SessionController, SessionState
 
 
 if TYPE_CHECKING:
-    from agentpool.mcp_server.manager import MCPManager
+    from agentwolf.mcp_server.manager import MCPManager
 
 
 # ============================================================================
@@ -51,9 +51,9 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
     6. Call get_or_create_session_agent(child_id).
     7. Assert parent_id has NO session context (no phantom created).
     """
-    from agentpool.agents.native_agent import Agent
-    from agentpool.models.agents import NativeAgentConfig
-    from agentpool.models.manifest import AgentsManifest
+    from agentwolf.agents.native_agent import Agent
+    from agentwolf.models.agents import NativeAgentConfig
+    from agentwolf.models.manifest import AgentsManifest
 
     def simple_callback(message: str) -> str:
         return f"Test: {message}"
@@ -140,9 +140,9 @@ async def test_get_or_create_session_agent_reads_parent_snapshot_without_leaking
     This test passes both before and after the fix — it guards against
     regressions where the parent context is accidentally recreated.
     """
-    from agentpool.agents.native_agent import Agent
-    from agentpool.models.agents import NativeAgentConfig
-    from agentpool.models.manifest import AgentsManifest
+    from agentwolf.agents.native_agent import Agent
+    from agentwolf.models.agents import NativeAgentConfig
+    from agentwolf.models.manifest import AgentsManifest
 
     def simple_callback(message: str) -> str:
         return f"Test: {message}"

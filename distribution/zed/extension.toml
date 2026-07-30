@@ -1,41 +1,41 @@
-id = "agentpool"
+id = "agentwolf"
 name = "AgentPool"
 description = "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
 version = "1.15.12"
 schema_version = 1
 authors = ["Philipp Temminghoff"]
-repository = "https://github.com/phil65/agentpool"
+repository = "https://github.com/phil65/agentwolf"
 
-[agent_servers.agentpool]
+[agent_servers.agentwolf]
 name = "AgentPool"
-icon = "./icons/agentpool.svg"
+icon = "./icons/agentwolf.svg"
 
-[agent_servers.agentpool.targets.darwin-aarch64]
-archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-darwin-aarch64-1.15.12.zip"
-cmd = "./agentpool"
+[agent_servers.agentwolf.targets.darwin-aarch64]
+archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-darwin-aarch64-1.15.12.zip"
+cmd = "./agentwolf"
 args = ["serve-acp"]
 
-[agent_servers.agentpool.targets.darwin-x86_64]
-archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-darwin-x86_64-1.15.12.zip"
-cmd = "./agentpool"
+[agent_servers.agentwolf.targets.darwin-x86_64]
+archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-darwin-x86_64-1.15.12.zip"
+cmd = "./agentwolf"
 args = ["serve-acp"]
 
-# [agent_servers.agentpool.targets.linux-aarch64]
-# archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-linux-aarch64-1.15.12.zip"
-# cmd = "./agentpool"
+# [agent_servers.agentwolf.targets.linux-aarch64]
+# archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-linux-aarch64-1.15.12.zip"
+# cmd = "./agentwolf"
 # args = ["serve-acp"]
 
-[agent_servers.agentpool.targets.linux-x86_64]
-archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-linux-x86_64-1.15.12.zip"
-cmd = "./agentpool"
+[agent_servers.agentwolf.targets.linux-x86_64]
+archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-linux-x86_64-1.15.12.zip"
+cmd = "./agentwolf"
 args = ["serve-acp"]
 
-# [agent_servers.agentpool.targets.windows-aarch64]
-# archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-windows-aarch64-1.15.12.zip"
-# cmd = "./agentpool.exe"
+# [agent_servers.agentwolf.targets.windows-aarch64]
+# archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-windows-aarch64-1.15.12.zip"
+# cmd = "./agentwolf.exe"
 # args = ["serve-acp"]
 
-[agent_servers.agentpool.targets.windows-x86_64]
-archive = "https://github.com/phil65/agentpool/releases/download/v2.9.5/agentpool-windows-x86_64-1.15.12.zip"
-cmd = "./agentpool.exe"
+[agent_servers.agentwolf.targets.windows-x86_64]
+archive = "https://github.com/phil65/agentwolf/releases/download/v2.9.5/agentwolf-windows-x86_64-1.15.12.zip"
+cmd = "./agentwolf.exe"
 args = ["serve-acp"]

@@ -10,12 +10,12 @@ from pydantic_ai import (
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
 import pytest
 
-from agentpool.agents.events.events import (
+from agentwolf.agents.events.events import (
     RunStartedEvent,
     ToolCallCompleteEvent,
     ToolCallStartEvent,
 )
-from agentpool.orchestrator.event_mapper import EventMapper
+from agentwolf.orchestrator.event_mapper import EventMapper
 
 
 @pytest.mark.unit

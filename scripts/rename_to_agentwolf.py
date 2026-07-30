@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Rename agentpool → agentwolf across the entire codebase.
+"""Rename agentwolf → agentwolf across the entire codebase.
 
 Phase 8 of the thin-wrapper refactor. This script performs a one-shot
-mechanical rename of all agentpool references to agentwolf.
+mechanical rename of all agentwolf references to agentwolf.
 
 Usage:
     python scripts/rename_to_agentwolf.py [--dry-run]
@@ -13,7 +13,7 @@ Pre-requisites:
     - Run from repository root
 
 What this script does:
-    1. Rename src/ directories (agentpool → agentwolf, agentpool_* → agentwolf_*)
+    1. Rename src/ directories (agentwolf → agentwolf, agentwolf_* → agentwolf_*)
     2. Replace all references in .py/.toml/.yml/.md/.json/etc files
     3. Verify entry point files exist post-rename
     4. Print verification checklist
@@ -42,29 +42,29 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SRC_DIRS_TO_RENAME = [
-    ("src/agentpool", "src/agentwolf"),
-    ("src/agentpool_bot", "src/agentwolf_bot"),
-    ("src/agentpool_cli", "src/agentwolf_cli"),
-    ("src/agentpool_commands", "src/agentwolf_commands"),
-    ("src/agentpool_config", "src/agentwolf_config"),
-    ("src/agentpool_prompts", "src/agentwolf_prompts"),
-    ("src/agentpool_server", "src/agentwolf_server"),
-    ("src/agentpool_storage", "src/agentwolf_storage"),
-    ("src/agentpool_sync", "src/agentwolf_sync"),
-    ("src/agentpool_toolsets", "src/agentwolf_toolsets"),
+    ("src/agentwolf", "src/agentwolf"),
+    ("src/agentwolf_bot", "src/agentwolf_bot"),
+    ("src/agentwolf_cli", "src/agentwolf_cli"),
+    ("src/agentwolf_commands", "src/agentwolf_commands"),
+    ("src/agentwolf_config", "src/agentwolf_config"),
+    ("src/agentwolf_prompts", "src/agentwolf_prompts"),
+    ("src/agentwolf_server", "src/agentwolf_server"),
+    ("src/agentwolf_storage", "src/agentwolf_storage"),
+    ("src/agentwolf_sync", "src/agentwolf_sync"),
+    ("src/agentwolf_toolsets", "src/agentwolf_toolsets"),
 ]
 
 REPLACEMENTS = [
-    ("agentpool_config", "agentwolf_config"),
-    ("agentpool_server", "agentwolf_server"),
-    ("agentpool_toolsets", "agentwolf_toolsets"),
-    ("agentpool_storage", "agentwolf_storage"),
-    ("agentpool_cli", "agentwolf_cli"),
-    ("agentpool_commands", "agentwolf_commands"),
-    ("agentpool_prompts", "agentwolf_prompts"),
-    ("agentpool_sync", "agentwolf_sync"),
-    ("agentpool_bot", "agentwolf_bot"),
-    ("agentpool", "agentwolf"),
+    ("agentwolf_config", "agentwolf_config"),
+    ("agentwolf_server", "agentwolf_server"),
+    ("agentwolf_toolsets", "agentwolf_toolsets"),
+    ("agentwolf_storage", "agentwolf_storage"),
+    ("agentwolf_cli", "agentwolf_cli"),
+    ("agentwolf_commands", "agentwolf_commands"),
+    ("agentwolf_prompts", "agentwolf_prompts"),
+    ("agentwolf_sync", "agentwolf_sync"),
+    ("agentwolf_bot", "agentwolf_bot"),
+    ("agentwolf", "agentwolf"),
 ]
 
 FILE_PATTERNS = [
@@ -100,7 +100,7 @@ EXCLUDE_DIRS: list[Path] = [
 
 
 def rename_directories(dry_run: bool) -> None:
-    """Rename src/ directories from agentpool* to agentwolf*."""
+    """Rename src/ directories from agentwolf* to agentwolf*."""
     print("Step 1: Renaming source directories")
     for old, new in SRC_DIRS_TO_RENAME:
         old_path = REPO_ROOT / old
@@ -117,7 +117,7 @@ def rename_directories(dry_run: bool) -> None:
 
 
 def replace_references(dry_run: bool) -> None:
-    """Replace all agentpool references in source files."""
+    """Replace all agentwolf references in source files."""
     print("\nStep 2: Replacing references in files")
     files_changed = 0
     for pattern in FILE_PATTERNS:
@@ -164,7 +164,7 @@ def print_verification_checklist() -> None:
     print("  [ ] Run: uv run mypy src/")
     print("  [ ] Run: agentwolf --version")
     print("  [ ] Run: agentwolf serve-acp config.yml")
-    print("  [ ] Commit: git add -A && git commit -m 'refactor: rename agentpool to agentwolf'")
+    print("  [ ] Commit: git add -A && git commit -m 'refactor: rename agentwolf to agentwolf'")
     print("  [ ] Push: git push million refactor/thin-wrapper --force")
 
 

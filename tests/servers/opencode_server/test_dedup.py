@@ -14,12 +14,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.agents.events.events import UserMessageInsertedEvent
-from agentpool_server.opencode_server.event_processor import EventProcessor
-from agentpool_server.opencode_server.event_processor_context import (
+from agentwolf.agents.events.events import UserMessageInsertedEvent
+from agentwolf_server.opencode_server.event_processor import EventProcessor
+from agentwolf_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
-from agentpool_server.opencode_server.models.message import (
+from agentwolf_server.opencode_server.models.message import (
     MessagePath,
     MessageTime,
     MessageWithParts,
@@ -38,7 +38,7 @@ def _make_ctx() -> EventProcessorContext:
         agent_name="agent",
         model_id="default",
         parent_id="",
-        provider_id="agentpool",
+        provider_id="agentwolf",
         path=MessagePath(cwd="/tmp", root="/tmp"),
     )
     state = MagicMock()
@@ -51,7 +51,7 @@ def _make_ctx() -> EventProcessorContext:
     )
 
 
-_BRIDGE_PATH = "agentpool_server.opencode_server.opencode_message_bridge.append_message_to_session"
+_BRIDGE_PATH = "agentwolf_server.opencode_server.opencode_message_bridge.append_message_to_session"
 
 
 async def test_accepted_source_produces_events() -> None:

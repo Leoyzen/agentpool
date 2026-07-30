@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-from agentpool_config.toolsets import CustomToolsetConfig
+from agentwolf.capabilities.function_toolset import FunctionToolsetCapability
+from agentwolf_config.toolsets import CustomToolsetConfig
 
 
 pytestmark = pytest.mark.unit

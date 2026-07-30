@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.host.context import HostContext
-from agentpool.host.stubs import CapabilityCache, ModelCache, ModelRegistry
+from agentwolf.host.context import HostContext
+from agentwolf.host.stubs import CapabilityCache, ModelCache, ModelRegistry
 
 
 pytestmark = pytest.mark.unit

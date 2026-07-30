@@ -11,18 +11,18 @@ from unittest.mock import AsyncMock, MagicMock
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.agents.native_agent.agent import Agent
-from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.turn import Turn
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentwolf.agents.native_agent.agent import Agent
+from agentwolf.lifecycle import DirectChannel, MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventBus, SessionState
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.turn import Turn
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -253,7 +253,7 @@ async def test_run_stream_breaks_on_stream_complete(minimal_pool: AgentPool) -> 
     stream.receive() after the run completes because the session
     remains open and EndOfStream is never raised.
     """
-    from agentpool.orchestrator.core import SessionController
+    from agentwolf.orchestrator.core import SessionController
 
     controller = SessionController(pool=minimal_pool)
     event_bus = EventBus()
@@ -305,7 +305,7 @@ def test_no_duplicate_stream_complete_in_run_once() -> None:
     NativeTurn.execute() already yields StreamCompleteEvent as its terminal
     event. Publishing it again results in duplicate events on the EventBus.
     """
-    import agentpool.agents.native_agent.agent as agent_module
+    import agentwolf.agents.native_agent.agent as agent_module
 
     source = inspect.getsource(agent_module.Agent._execute_node)
     # After the fix, there should be no explicit StreamCompleteEvent publish.
@@ -327,7 +327,7 @@ def test_no_duplicate_stream_complete_in_stream_events() -> None:
     NativeTurn.execute() already yields StreamCompleteEvent as its terminal
     event. Publishing it again results in duplicate events on the EventBus.
     """
-    import agentpool.agents.native_agent.agent as agent_module
+    import agentwolf.agents.native_agent.agent as agent_module
 
     source = inspect.getsource(agent_module.Agent._stream_events)
     import re
@@ -346,7 +346,7 @@ def test_base_agent_imports_are_runtime_available() -> None:
     Gemini claimed they were only in TYPE_CHECKING, but they are actually
     imported at module level (line 23 of base_agent.py).
     """
-    import agentpool.agents.base_agent as base_module
+    import agentwolf.agents.base_agent as base_module
 
     # Verify the classes are accessible as attributes (runtime import)
     assert hasattr(base_module, "StreamCompleteEvent"), (
@@ -363,7 +363,7 @@ def test_execute_node_handles_run_error_event() -> None:
     Without this, if turn.execute() yields RunErrorEvent and returns early,
     turn.final_message raises RuntimeError, masking the original error.
     """
-    import agentpool.agents.native_agent.agent as agent_module
+    import agentwolf.agents.native_agent.agent as agent_module
 
     source = inspect.getsource(agent_module.Agent._execute_node)
     assert "RunErrorEvent" in source, (
@@ -379,7 +379,7 @@ def test_stream_events_handles_run_error_event() -> None:
 
     Same issue as _execute_node — if turn fails, final_message is not set.
     """
-    import agentpool.agents.native_agent.agent as agent_module
+    import agentwolf.agents.native_agent.agent as agent_module
 
     source = inspect.getsource(agent_module.Agent._stream_events)
     assert "RunErrorEvent" in source, (

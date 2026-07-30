@@ -22,11 +22,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from agentpool_server.opencode_server.dependencies import get_state
-from agentpool_server.opencode_server.routes import agent_router, file_router, session_router
-from agentpool_server.opencode_server.routes.global_routes import router as global_router
-from agentpool_server.opencode_server.routes.message_routes import router as message_router
-from agentpool_server.opencode_server.state import ServerState
+from agentwolf_server.opencode_server.dependencies import get_state
+from agentwolf_server.opencode_server.routes import agent_router, file_router, session_router
+from agentwolf_server.opencode_server.routes.global_routes import router as global_router
+from agentwolf_server.opencode_server.routes.message_routes import router as message_router
+from agentwolf_server.opencode_server.state import ServerState
 from tests.vcr.conftest import cassette_exists
 
 
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 pytestmark = [pytest.mark.vcr, pytest.mark.integration]
 

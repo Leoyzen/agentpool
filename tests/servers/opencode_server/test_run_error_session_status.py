@@ -21,19 +21,19 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
-from agentpool.agents.events.events import RunErrorEvent
-from agentpool.orchestrator.core import EventEnvelope
-from agentpool_server.opencode_server.event_processor_context import (
+from agentwolf.agents.events.events import RunErrorEvent
+from agentwolf.orchestrator.core import EventEnvelope
+from agentwolf_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
-from agentpool_server.opencode_server.models import (
+from agentwolf_server.opencode_server.models import (
     AssistantMessage,
     MessageAbortedError,
     MessagePath,
     MessageTime,
     MessageWithParts,
 )
-from agentpool_server.opencode_server.opencode_event_bridge import (
+from agentwolf_server.opencode_server.opencode_event_bridge import (
     OpenCodeEventBridgeMixin,
 )
 
@@ -138,7 +138,7 @@ def _patch_set_session_status() -> AsyncMock:
     from unittest.mock import patch
 
     return patch(
-        "agentpool_server.opencode_server.opencode_event_bridge.set_session_status",
+        "agentwolf_server.opencode_server.opencode_event_bridge.set_session_status",
         new_callable=AsyncMock,
     )
 
@@ -148,7 +148,7 @@ def _patch_append_message() -> AsyncMock:
     from unittest.mock import patch
 
     return patch(
-        "agentpool_server.opencode_server.opencode_event_bridge.append_message_to_session",
+        "agentwolf_server.opencode_server.opencode_event_bridge.append_message_to_session",
         new_callable=AsyncMock,
     )
 

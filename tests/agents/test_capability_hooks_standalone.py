@@ -19,8 +19,8 @@ from typing import Any
 from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
-from agentpool.agents.native_agent.agent import Agent
-from agentpool.models.agents import NativeAgentConfig
+from agentwolf.agents.native_agent.agent import Agent
+from agentwolf.models.agents import NativeAgentConfig
 
 
 class HookTrackerCapability(AbstractCapability[Any]):

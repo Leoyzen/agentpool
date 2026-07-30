@@ -12,8 +12,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.capabilities.team_comm_capability import TeamCommCapability
-from agentpool_config.team_mode import MemberSpec, TeamDefaultsConfig, TeamModeConfig
+from agentwolf.capabilities.team_comm_capability import TeamCommCapability
+from agentwolf_config.team_mode import MemberSpec, TeamDefaultsConfig, TeamModeConfig
 
 
 def _make_defaults_config(base_dir: str) -> TeamModeConfig:
@@ -42,7 +42,7 @@ def _make_run_context(
     session_id: str = "lead_session_001",
 ) -> MagicMock:
     """Create a mock RunContext with AgentContextDeps deps for integration tests."""
-    from agentpool.capabilities.agent_context import AgentContextDeps
+    from agentwolf.capabilities.agent_context import AgentContextDeps
 
     agent_ctx = MagicMock(spec=AgentContextDeps)
     agent_ctx.session.metadata = metadata
@@ -64,7 +64,7 @@ async def test_team_create_with_config_default_members(tmp_path: Any) -> None:
     When: team_create is called with empty members.
     Then: uses defaults.members to create the team with child sessions.
     """
-    from agentpool.capabilities.file_team_state import FileTeamState
+    from agentwolf.capabilities.file_team_state import FileTeamState
 
     config = _make_defaults_config(str(tmp_path))
 
@@ -166,7 +166,7 @@ async def test_team_create_config_default_members_then_delete(tmp_path: Any) -> 
     When: team_delete is called afterwards.
     Then: team is successfully deleted.
     """
-    from agentpool.capabilities.file_team_state import FileTeamState
+    from agentwolf.capabilities.file_team_state import FileTeamState
 
     config = _make_defaults_config(str(tmp_path))
 

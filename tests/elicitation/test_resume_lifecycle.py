@@ -31,7 +31,7 @@ Two test levels:
   Level 1 passes, the bug is in ``RunHandle.start()`` event forwarding
   or ``EventBus`` delivery.
 
-Refs: https://github.com/Leoyzen/agentpool/issues/107
+Refs: https://github.com/Leoyzen/agentwolf/issues/107
 """
 
 from __future__ import annotations
@@ -45,22 +45,22 @@ from mcp.types import ElicitRequestFormParams, ElicitResult
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentContext, AgentRunContext, ConfirmationResult
-from agentpool.agents.events.events import (
+from agentwolf import Agent
+from agentwolf.agents.context import AgentContext, AgentRunContext, ConfirmationResult
+from agentwolf.agents.events.events import (
     RichAgentStreamEvent,
     StreamCompleteEvent,
 )
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.lifecycle import MemoryJournal, ProtocolChannel
-from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionState
-from agentpool.orchestrator.run import RunHandle
-from agentpool.sessions.models import ElicitationResumePayload
-from agentpool.ui.base import InputProvider
+from agentwolf.agents.native_agent.turn import NativeTurn
+from agentwolf.lifecycle import MemoryJournal, ProtocolChannel
+from agentwolf.orchestrator.core import EventBus, EventEnvelope, SessionState
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.sessions.models import ElicitationResumePayload
+from agentwolf.ui.base import InputProvider
 
 
 if TYPE_CHECKING:
-    from agentpool.agents.native_agent.elicitation_bridge import (
+    from agentwolf.agents.native_agent.elicitation_bridge import (
         ElicitationFutureRegistry,
     )
 
@@ -419,7 +419,7 @@ async def test_elicitation_timeout_yields_cancelled_stream_complete() -> None:
             )
 
         # Assert: StreamCompleteEvent(cancelled=True) should be yielded.
-        from agentpool.agents.events.events import RunErrorEvent
+        from agentwolf.agents.events.events import RunErrorEvent
 
         stream_complete_events = [e for e in events if isinstance(e, StreamCompleteEvent)]
         run_error_events = [e for e in events if isinstance(e, RunErrorEvent)]

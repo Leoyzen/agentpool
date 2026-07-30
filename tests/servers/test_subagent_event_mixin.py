@@ -13,13 +13,13 @@ from unittest.mock import AsyncMock
 from pydantic_ai import TextPartDelta
 import pytest
 
-from agentpool.agents.events.events import (
+from agentwolf.agents.events.events import (
     PartDeltaEvent,
     RunErrorEvent,
     SpawnSessionStart,
 )
-from agentpool.orchestrator.core import EventBus, EventEnvelope
-from agentpool_server.mixins import (
+from agentwolf.orchestrator.core import EventBus, EventEnvelope
+from agentwolf_server.mixins import (
     ConsumerShutdown,
     ProtocolEventConsumerMixin,
 )

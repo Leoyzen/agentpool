@@ -540,7 +540,7 @@ async def _run_stream_once(self, run_ctx: AgentRunContext, prompts, ...):
 4. **Verify Test Failure**: Ensure concurrent tests fail before fix (proves test validity)
 
 **Files Modified**:
-- `src/agentpool/agents/native_agent.py` (fix finally block)
+- `src/agentwolf/agents/native_agent.py` (fix finally block)
 
 **Deliverable**: 
 - Existing bug fixed
@@ -552,14 +552,14 @@ async def _run_stream_once(self, run_ctx: AgentRunContext, prompts, ...):
 ### Phase 1: Core Context Creation (Days 1-2)
 
 **Tasks**:
-1. Create `AgentRunContext` dataclass in `agentpool/agents/context.py`
+1. Create `AgentRunContext` dataclass in `agentwolf/agents/context.py`
 2. Add `run_ctx` parameter to internal methods
 3. Migrate `_cancelled` and `_current_stream_task` to context
 4. Run tests after each migration step
 
 **Files Modified**:
-- `src/agentpool/agents/context.py` (add AgentRunContext)
-- `src/agentpool/agents/base_agent.py` (core changes)
+- `src/agentwolf/agents/context.py` (add AgentRunContext)
+- `src/agentwolf/agents/base_agent.py` (core changes)
 
 **Deliverable**: Basic concurrent calls work for simple scenarios
 
@@ -575,9 +575,9 @@ async def _run_stream_once(self, run_ctx: AgentRunContext, prompts, ...):
 5. Run full test suite after each step
 
 **Files Modified**:
-- `src/agentpool/agents/base_agent.py`
-- `src/agentpool/agents/events/event_emitter.py`
-- `src/agentpool/agents/context.py`
+- `src/agentwolf/agents/base_agent.py`
+- `src/agentwolf/agents/events/event_emitter.py`
+- `src/agentwolf/agents/context.py`
 
 **Deliverable**: All mutable state isolated
 
@@ -603,7 +603,7 @@ async def _run_stream_once(self, run_ctx: AgentRunContext, prompts, ...):
 ### Dependencies
 
 - None external
-- Internal: All changes within `agentpool.agents` module
+- Internal: All changes within `agentwolf.agents` module
 
 ## 10. Open Questions
 
@@ -697,7 +697,7 @@ python tests/agents/run_concurrent_tests.py
 pytest tests/agents/test_concurrent_safety.py -v
 
 # With coverage
-pytest tests/agents/test_concurrent_safety.py --cov=src/agentpool/
+pytest tests/agents/test_concurrent_safety.py --cov=src/agentwolf/
 
 # Stress test only
 pytest tests/agents/test_concurrent_safety.py -m slow -v
@@ -747,10 +747,10 @@ async def test_concurrent_event_isolation():
 ### Code Locations
 
 Key files referenced in this RFC:
-- `src/agentpool/agents/base_agent.py` - BaseAgent implementation
-- `src/agentpool/agents/native_agent/agent.py` - NativeAgent implementation
-- `src/agentpool/agents/context.py` - AgentContext and (new) AgentRunContext
-- `src/agentpool/agents/events/event_emitter.py` - Event emission
+- `src/agentwolf/agents/base_agent.py` - BaseAgent implementation
+- `src/agentwolf/agents/native_agent/agent.py` - NativeAgent implementation
+- `src/agentwolf/agents/context.py` - AgentContext and (new) AgentRunContext
+- `src/agentwolf/agents/events/event_emitter.py` - Event emission
 
 ---
 
@@ -783,10 +783,10 @@ tests/agents/test_concurrent_safety.py::test_native_agent_concurrent PASSED
 
 ### Files Modified
 
-- `src/agentpool/agents/context.py` - AgentRunContext dataclass
-- `src/agentpool/agents/base_agent.py` - State migration to context
-- `src/agentpool/agents/native_agent/agent.py` - Bug fixes and context usage
-- `src/agentpool/agents/events/event_emitter.py` - Context-based event queue
+- `src/agentwolf/agents/context.py` - AgentRunContext dataclass
+- `src/agentwolf/agents/base_agent.py` - State migration to context
+- `src/agentwolf/agents/native_agent/agent.py` - Bug fixes and context usage
+- `src/agentwolf/agents/events/event_emitter.py` - Context-based event queue
 - All agent subclasses updated for context compatibility
 
 ### Migration Guide for Custom Subclasses

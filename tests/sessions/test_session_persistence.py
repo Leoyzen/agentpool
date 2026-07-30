@@ -15,14 +15,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.orchestrator.core import SessionController
-from agentpool.sessions.models import SessionData
-from agentpool_config.storage import SQLStorageConfig
-from agentpool_storage.sql_provider import SQLModelProvider
+from agentwolf.orchestrator.core import SessionController
+from agentwolf.sessions.models import SessionData
+from agentwolf_config.storage import SQLStorageConfig
+from agentwolf_storage.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -44,7 +44,7 @@ def make_session_data(
 @pytest.fixture
 def _clear_engine_cache():
     """Clear engine cache to avoid cross-test contamination."""
-    from agentpool_config.storage import _engine_cache
+    from agentwolf_config.storage import _engine_cache
 
     _engine_cache.clear()
     yield

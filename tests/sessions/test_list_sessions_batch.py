@@ -11,10 +11,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agentpool.sessions.models import SessionData
-from agentpool_config.storage import MemoryStorageConfig, SQLStorageConfig
-from agentpool_storage.memory_provider import MemoryStorageProvider
-from agentpool_storage.sql_provider import SQLModelProvider
+from agentwolf.sessions.models import SessionData
+from agentwolf_config.storage import MemoryStorageConfig, SQLStorageConfig
+from agentwolf_storage.memory_provider import MemoryStorageProvider
+from agentwolf_storage.sql_provider import SQLModelProvider
 
 
 pytestmark = pytest.mark.unit

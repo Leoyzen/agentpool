@@ -18,10 +18,10 @@ if TYPE_CHECKING:
 import anyenv
 import pytest
 
-from agentpool_config.storage import OpenCodeStorageConfig
-from agentpool_server.opencode_server.models import Session, TimeCreatedUpdated
-from agentpool_storage.opencode_provider import OpenCodeStorageProvider
-from agentpool_storage.opencode_provider.helpers import compute_project_id
+from agentwolf_config.storage import OpenCodeStorageConfig
+from agentwolf_server.opencode_server.models import Session, TimeCreatedUpdated
+from agentwolf_storage.opencode_provider import OpenCodeStorageProvider
+from agentwolf_storage.opencode_provider.helpers import compute_project_id
 
 
 pytestmark = pytest.mark.integration

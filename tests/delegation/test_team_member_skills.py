@@ -4,8 +4,8 @@ import asyncio
 
 import pytest
 
-from agentpool import BaseTeam
-from agentpool.skills.exceptions import SkillNotFoundError
+from agentwolf import BaseTeam
+from agentwolf.skills.exceptions import SkillNotFoundError
 
 
 pytestmark = pytest.mark.unit

@@ -4,4 +4,4 @@ icon: material/message
 
 # MessageNode API Reference
 
-::: agentpool.messaging.messagenode.MessageNode
+::: agentwolf.messaging.messagenode.MessageNode

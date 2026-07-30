@@ -27,21 +27,21 @@ from pydantic_ai.exceptions import UndrainedPendingMessagesError
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events.events import (
+from agentwolf import Agent
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events.events import (
     StreamCompleteEvent,
 )
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.run import RunHandle
-from agentpool.tasks.exceptions import RunAbortedError
+from agentwolf.agents.native_agent.turn import NativeTurn
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.orchestrator.core import EventBus
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.tasks.exceptions import RunAbortedError
 
 
 if TYPE_CHECKING:
-    from agentpool.agents.events.events import RichAgentStreamEvent
+    from agentwolf.agents.events.events import RichAgentStreamEvent
 
 
 pytestmark = pytest.mark.unit
@@ -68,7 +68,7 @@ async def test_native_turn_events_reach_event_bus_consumer() -> None:
         event_bus = EventBus()
 
         # Simulate SessionState with a turn_lock
-        from agentpool.orchestrator.core import SessionState
+        from agentwolf.orchestrator.core import SessionState
 
         session = SessionState(
             session_id="test-integration-session",
@@ -192,7 +192,7 @@ async def test_run_aborted_error_yields_cancelled_stream_complete() -> None:
             events.extend([event async for event in turn.execute()])
 
         # Must yield StreamCompleteEvent(cancelled=True), NOT RunErrorEvent
-        from agentpool.agents.events.events import RunErrorEvent
+        from agentwolf.agents.events.events import RunErrorEvent
 
         run_errors = [e for e in events if isinstance(e, RunErrorEvent)]
         stream_complete = [e for e in events if isinstance(e, StreamCompleteEvent)]
@@ -281,7 +281,7 @@ def test_native_turn_no_redundant_run_started_event() -> None:
     RunHandle.start() already publishes RunStartedEvent before calling
     turn.execute(). Yielding it again causes duplicate events.
     """
-    import agentpool.agents.native_agent.turn as turn_module
+    import agentwolf.agents.native_agent.turn as turn_module
 
     source = inspect.getsource(turn_module.NativeTurn.execute)
     import re
@@ -303,7 +303,7 @@ def test_native_turn_run_error_event_includes_run_id() -> None:
 
     Without run_id, error events can't be correlated with the active run.
     """
-    import agentpool.agents.native_agent.turn as turn_module
+    import agentwolf.agents.native_agent.turn as turn_module
 
     source = inspect.getsource(turn_module.NativeTurn.execute)
     assert "run_id=self._run_ctx.run_id" in source, (

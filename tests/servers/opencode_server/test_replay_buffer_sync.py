@@ -24,19 +24,19 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
-from agentpool.agents.events.events import (
+from agentwolf.agents.events.events import (
     UserMessageInsertedEvent,
 )
-from agentpool.orchestrator.core import EventBus
-from agentpool_server.opencode_server.event_processor_context import (
+from agentwolf.orchestrator.core import EventBus
+from agentwolf_server.opencode_server.event_processor_context import (
     EventProcessorContext,
 )
-from agentpool_server.opencode_server.models import (
+from agentwolf_server.opencode_server.models import (
     MessagePath,
     MessageTime,
     MessageWithParts,
 )
-from agentpool_server.opencode_server.opencode_event_bridge import (
+from agentwolf_server.opencode_server.opencode_event_bridge import (
     OpenCodeEventBridgeMixin,
 )
 

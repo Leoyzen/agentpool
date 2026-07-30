@@ -34,12 +34,12 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.session_controller import SessionState
-from agentpool.orchestrator.turn import Turn
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.lifecycle import DirectChannel, MemoryJournal
+from agentwolf.messaging import ChatMessage, MessageHistory
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.session_controller import SessionState
+from agentwolf.orchestrator.turn import Turn
 
 
 pytestmark = pytest.mark.unit

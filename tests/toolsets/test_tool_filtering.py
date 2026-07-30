@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
-from agentpool_config.toolsets import CodeToolsetConfig, SkillsToolsetConfig, SubagentToolsetConfig
+from agentwolf.capabilities.filtered_toolset import FilteredToolsetCapability
+from agentwolf_config.toolsets import CodeToolsetConfig, SkillsToolsetConfig, SubagentToolsetConfig
 
 
 pytestmark = pytest.mark.unit

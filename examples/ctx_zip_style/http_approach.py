@@ -5,12 +5,12 @@ to make tools available in sandbox environments, especially useful for
 cloud sandboxes like E2B that can't reach localhost.
 """
 
-from agentpool.resource_providers import StaticResourceProvider
-from agentpool.resource_providers.codemode import RemoteCodeModeResourceProvider
+from agentwolf.resource_providers import StaticResourceProvider
+from agentwolf.resource_providers.codemode import RemoteCodeModeResourceProvider
 from exxec_config import LocalExecutionEnvironmentConfig
 
-from agentpool import Agent
-from agentpool.tools.base import Tool
+from agentwolf import Agent
+from agentwolf.tools.base import Tool
 
 
 def add_numbers(x: int, y: int) -> int:

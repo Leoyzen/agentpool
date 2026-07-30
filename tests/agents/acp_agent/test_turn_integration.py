@@ -14,17 +14,17 @@ import pytest
 
 from acp import InitializeRequest
 from acp.schema import AgentMessageChunk, TextContentBlock
-from agentpool.agents.acp_agent import ACPAgent
-from agentpool.agents.acp_agent.turn import ACPTurn
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import (
+from agentwolf.agents.acp_agent import ACPAgent
+from agentwolf.agents.acp_agent.turn import ACPTurn
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import (
     PartDeltaEvent,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.turn import Turn
+from agentwolf.lifecycle import DirectChannel, MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.turn import Turn
 
 
 if TYPE_CHECKING:

@@ -14,10 +14,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, EventEnvelope, SessionController
+from agentwolf import AgentPool, AgentsManifest, NativeAgentConfig
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventBus, EventEnvelope, SessionController
 
 
 # ============================================================================

@@ -1,14 +1,14 @@
 # AgentPool
 
-[![PyPI License](https://img.shields.io/pypi/l/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Package status](https://img.shields.io/pypi/status/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Monthly downloads](https://img.shields.io/pypi/dm/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Python version](https://img.shields.io/pypi/pyversions/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Github Stars](https://img.shields.io/github/stars/Leoyzen/agentpool)](https://github.com/Leoyzen/agentpool/stars)
+[![PyPI License](https://img.shields.io/pypi/l/agentwolf.svg)](https://pypi.org/project/agentwolf/)
+[![Package status](https://img.shields.io/pypi/status/agentwolf.svg)](https://pypi.org/project/agentwolf/)
+[![Monthly downloads](https://img.shields.io/pypi/dm/agentwolf.svg)](https://pypi.org/project/agentwolf/)
+[![Python version](https://img.shields.io/pypi/pyversions/agentwolf.svg)](https://pypi.org/project/agentwolf/)
+[![Github Stars](https://img.shields.io/github/stars/Leoyzen/agentwolf)](https://github.com/Leoyzen/agentwolf/stars)
 
 **A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
 
-[Documentation](https://leoyzen.github.io/agentpool/)
+[Documentation](https://leoyzen.github.io/agentwolf/)
 
 ## The Problem
 
@@ -48,7 +48,7 @@ flowchart TB
 ## Quick Start
 
 ```bash
-uv tool install agentpool
+uv tool install agentwolf
 
 ```
 
@@ -65,10 +65,10 @@ agents:
 
 ```bash
 # Run via CLI
-agentpool run assistant "Hello!"
+agentwolf run assistant "Hello!"
 
 # Or start as ACP server (for Zed, Toad, etc.)
-agentpool serve-acp agents.yml
+agentwolf serve-acp agents.yml
 ```
 
 ### Integrating External Agents
@@ -154,11 +154,11 @@ AgentPool can expose your agents through multiple server protocols:
 
 | Server | Command | Use Case |
 |--------|---------|----------|
-| **ACP** | `agentpool serve-acp` | IDE integration (Zed, Toad) - bidirectional communication with tool confirmations |
-| **OpenCode** | `agentpool serve-opencode` | OpenCode TUI/Desktop - supports remote filesystems via fsspec |
-| **MCP** | `agentpool serve-mcp` | Expose tools to other agents |
-| AG-UI | `agentpool serve-agui` | AG-UI compatible frontends |
-| OpenAI API | `agentpool serve-api` | Drop-in OpenAI API replacement |
+| **ACP** | `agentwolf serve-acp` | IDE integration (Zed, Toad) - bidirectional communication with tool confirmations |
+| **OpenCode** | `agentwolf serve-opencode` | OpenCode TUI/Desktop - supports remote filesystems via fsspec |
+| **MCP** | `agentwolf serve-mcp` | Expose tools to other agents |
+| AG-UI | `agentwolf serve-agui` | AG-UI compatible frontends |
+| OpenAI API | `agentwolf serve-api` | Drop-in OpenAI API replacement |
 
 The **ACP server** is ideal for IDE integration - it provides real-time tool confirmations and session management. The **OpenCode server** enables the OpenCode TUI to control AgentPool agents, including agents operating on remote environments (Docker, SSH, cloud sandboxes).
 
@@ -176,18 +176,18 @@ The **ACP server** is ideal for IDE integration - it provides real-time tool con
 ### CLI
 
 ```bash
-agentpool run agent_name "prompt"           # Single run
-agentpool serve-acp config.yml              # ACP server for IDEs
-agentpool serve-opencode config.yml         # OpenCode TUI server
-agentpool serve-mcp config.yml              # MCP server
-agentpool watch --config agents.yml         # React to triggers
-agentpool history stats --group-by model    # View analytics
+agentwolf run agent_name "prompt"           # Single run
+agentwolf serve-acp config.yml              # ACP server for IDEs
+agentwolf serve-opencode config.yml         # OpenCode TUI server
+agentwolf serve-mcp config.yml              # MCP server
+agentwolf watch --config agents.yml         # React to triggers
+agentwolf history stats --group-by model    # View analytics
 ```
 
 ### Programmatic
 
 ```python
-from agentpool import AgentPool
+from agentwolf import AgentPool
 
 async with AgentPool("agents.yml") as pool:
     agent = pool.get_agent("assistant")
@@ -205,4 +205,4 @@ async with AgentPool("agents.yml") as pool:
 
 ## Documentation
 
-For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/agentpool](https://leoyzen.github.io/agentpool/).
+For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/agentwolf](https://leoyzen.github.io/agentwolf/).

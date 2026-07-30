@@ -21,9 +21,9 @@ import mcp.types
 from pydantic import AnyUrl
 import pytest
 
-from agentpool.capabilities.change_event import ChangeEvent
-from agentpool.capabilities.mcp_server_cap import McpServerCap
-from agentpool.capabilities.resource_protocols import (
+from agentwolf.capabilities.change_event import ChangeEvent
+from agentwolf.capabilities.mcp_server_cap import McpServerCap
+from agentwolf.capabilities.resource_protocols import (
     BlobResourceContent,
     ChangeObservable,
     CompletionArgument,
@@ -36,7 +36,7 @@ from agentpool.capabilities.resource_protocols import (
     ToolAccess,
     ToolEntry,
 )
-from agentpool.mcp_server.message_handler import MCPMessageHandler
+from agentwolf.mcp_server.message_handler import MCPMessageHandler
 
 
 pytestmark = pytest.mark.unit
@@ -850,8 +850,8 @@ async def test_message_handler_dispatches_resource_list_changed_via_call() -> No
 @pytest.mark.anyio
 async def test_mcpclient_subscribe_resource_delegates_to_session() -> None:
     """subscribe_resource calls ClientSession.subscribe_resource with AnyUrl."""
-    from agentpool.mcp_server.client import MCPClient
-    from agentpool_config.mcp_server import StdioMCPServerConfig
+    from agentwolf.mcp_server.client import MCPClient
+    from agentwolf_config.mcp_server import StdioMCPServerConfig
 
     config = StdioMCPServerConfig(command="echo", args=["test"])
     client = MCPClient(config)
@@ -873,8 +873,8 @@ async def test_mcpclient_subscribe_resource_delegates_to_session() -> None:
 @pytest.mark.anyio
 async def test_mcpclient_unsubscribe_resource_delegates_to_session() -> None:
     """unsubscribe_resource calls ClientSession.unsubscribe_resource with AnyUrl."""
-    from agentpool.mcp_server.client import MCPClient
-    from agentpool_config.mcp_server import StdioMCPServerConfig
+    from agentwolf.mcp_server.client import MCPClient
+    from agentwolf_config.mcp_server import StdioMCPServerConfig
 
     config = StdioMCPServerConfig(command="echo", args=["test"])
     client = MCPClient(config)
@@ -896,8 +896,8 @@ async def test_mcpclient_unsubscribe_resource_delegates_to_session() -> None:
 @pytest.mark.anyio
 async def test_mcpclient_subscribe_resource_not_connected_raises() -> None:
     """subscribe_resource raises RuntimeError when not connected."""
-    from agentpool.mcp_server.client import MCPClient
-    from agentpool_config.mcp_server import StdioMCPServerConfig
+    from agentwolf.mcp_server.client import MCPClient
+    from agentwolf_config.mcp_server import StdioMCPServerConfig
 
     config = StdioMCPServerConfig(command="echo", args=["test"])
     client = MCPClient(config)

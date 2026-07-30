@@ -24,6 +24,61 @@ wheels = [
 [[package]]
 name = "agentpool"
 version = "2.9.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "alembic" },
+    { name = "anyenv", extra = ["httpx"] },
+    { name = "clawd-code-sdk" },
+    { name = "docler" },
+    { name = "docstring-parser" },
+    { name = "epregistry" },
+    { name = "evented" },
+    { name = "exxec" },
+    { name = "fastapi" },
+    { name = "fastmcp" },
+    { name = "fsspec" },
+    { name = "httpx" },
+    { name = "jinja2" },
+    { name = "jinjarope" },
+    { name = "keyring" },
+    { name = "llmling-models" },
+    { name = "logfire", extra = ["fastapi"] },
+    { name = "mcp" },
+    { name = "pillow" },
+    { name = "platformdirs" },
+    { name = "promptantic" },
+    { name = "psygnal" },
+    { name = "py-key-value-aio", extra = ["disk"] },
+    { name = "pydantic" },
+    { name = "pydantic-ai-slim", extra = ["anthropic", "google", "mistral", "openai", "retries"] },
+    { name = "pydocket" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "ripgrep-rs" },
+    { name = "schemez", extra = ["codegen"] },
+    { name = "searchly", extra = ["all"] },
+    { name = "slashed" },
+    { name = "sqlalchemy", extra = ["aiosqlite"] },
+    { name = "sqlmodel" },
+    { name = "structlog" },
+    { name = "sublime-search" },
+    { name = "tokonomics" },
+    { name = "toprompt" },
+    { name = "typer" },
+    { name = "upathtools", extra = ["httpx"] },
+    { name = "uvicorn", extra = ["standard"] },
+    { name = "watchfiles" },
+    { name = "websockets" },
+    { name = "yamling" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6c/5a/e858b0724d7637993d4a8c8a901d5c0e2611ee01d62222a55e97c96d79cf/agentpool-2.9.5.tar.gz", hash = "sha256:e3c60adbd77ea56c7639c533aba4ef3ec871730f807b55b5b693911c48f85121", size = 3858635 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/61/7c/690b675a468b10e09614ddc64944182c43f58828ae5adef1790e4dbfc14d/agentpool-2.9.5-py3-none-any.whl", hash = "sha256:81c5ae37e30e46e064b35ec73fb3233aaa0eeb547011c1a7f9a2914b48b27257", size = 4170375 },
+]
+
+[[package]]
+name = "agentwolf"
+version = "2.9.5"
 source = { editable = "." }
 dependencies = [
     { name = "ag-ui-protocol" },
@@ -975,6 +1030,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/15/1f/ca74b65b19798895d63a6e92874162f44233467c9e7c1ed8afd19016ebe9/chevron-0.14.0.tar.gz", hash = "sha256:87613aafdf6d77b6a90ff073165a61ae5086e21ad49057aa0e53681601800ebf", size = 11440 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/52/93/342cc62a70ab727e093ed98e02a725d85b746345f05d2b5e5034649f4ec8/chevron-0.14.0-py3-none-any.whl", hash = "sha256:fbf996a709f8da2e745ef763f482ce2d311aa817d287593a5b990d6d6e4f0443", size = 11595 },
+]
+
+[[package]]
+name = "clawd-code-sdk"
+version = "1.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "anyenv" },
+    { name = "anyio" },
+    { name = "logfire" },
+    { name = "mcp" },
+    { name = "python-dotenv" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/b7/158079d9c76f2247eb934c4792a6fefbd10069326d4b435d69613a92044f/clawd_code_sdk-1.1.6.tar.gz", hash = "sha256:e85b834bba7efde466d8f82c873004fbd92debb6657c1ed49360c196d6dd4fea", size = 198815 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/23/2ad1586d809669f7161365b8aa639b4a7fbf3d4635f1e9fe5f95352b2cc5/clawd_code_sdk-1.1.6-py3-none-any.whl", hash = "sha256:b5dec10cbe8bd09475b05cbce985874e2f4ab5f3b614f3a46cf0c109cfc09721", size = 159138 },
 ]
 
 [[package]]
@@ -2432,6 +2504,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4c/00/d29736be177a906ac0b84a5b04b4fbfa22c776dc2f366de4172b0f968c08/librt-0.13.0-cp313-cp313-win32.whl", hash = "sha256:79e44cff71750d299d61a678e49995b0d5935a9cda238c2574daeca3ba536927", size = 106193 },
     { url = "https://files.pythonhosted.org/packages/c8/ac/aff6fb45393cb8912f39dfb156ef6b2d1cadb207ff465fc8f66141054be8/librt-0.13.0-cp313-cp313-win_amd64.whl", hash = "sha256:54dab44a847d5ad1acd05c8a83fe518ae685516ecf4d3f7cc6e3df2a66767650", size = 126962 },
     { url = "https://files.pythonhosted.org/packages/d9/3a/d68cb2b334d53fd30fac81d3a489ce4ba0d9506f4df43fcf676b68352b19/librt-0.13.0-cp313-cp313-win_arm64.whl", hash = "sha256:d4cb6fbfdf874340ab5e51450753c0f817b6958a3621125ee695bbc3de866566", size = 112127 },
+]
+
+[[package]]
+name = "llmling-models"
+version = "1.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyenv", extra = ["httpx"] },
+    { name = "pydantic" },
+    { name = "pydantic-ai-slim" },
+    { name = "schemez" },
+    { name = "tokonomics" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/17/eb/0730ef45f5442da4ac1866e8969678ce2d96551474f8dc66fe85f47d703c/llmling_models-1.6.1.tar.gz", hash = "sha256:6f73ead1d1bdc518531c0af0756cd7e4862f176e6a15d1514a1ad299211d2908", size = 90738 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/33/54/90dc8ef416f24b138ebbe579548dd2940f6cdae9f93db0ce0f1c9e920524/llmling_models-1.6.1-py3-none-any.whl", hash = "sha256:94bfd7608b39b324ca2d40a1a07c1a623990ea6c81213deef327012c48dde147", size = 130926 },
 ]
 
 [[package]]

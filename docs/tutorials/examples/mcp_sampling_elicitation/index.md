@@ -94,7 +94,7 @@ if __name__ == "__main__":
 
 ```python
 # /// script
-# dependencies = ["agentpool"]
+# dependencies = ["agentwolf"]
 # ///
 
 """Demo: Agent using MCP server with code fixer (sampling + elicitation)."""
@@ -105,8 +105,8 @@ from pathlib import Path
 
 import anyio
 
-from agentpool import Agent
-from agentpool_config.mcp_server import StdioMCPServerConfig
+from agentwolf import Agent
+from agentwolf_config.mcp_server import StdioMCPServerConfig
 
 
 async def main() -> None:

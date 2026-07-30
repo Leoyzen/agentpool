@@ -11,15 +11,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.agents.events import RunErrorEvent, StreamCompleteEvent
-from agentpool.lifecycle.types import DeliveryMode
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.session_controller import SessionNotFoundError
+from agentwolf.agents.events import RunErrorEvent, StreamCompleteEvent
+from agentwolf.lifecycle.types import DeliveryMode
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.session_controller import SessionNotFoundError
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
-    from agentpool.orchestrator.core import SessionPool
+    from agentwolf import AgentPool
+    from agentwolf.orchestrator.core import SessionPool
 
 
 pytestmark = pytest.mark.unit

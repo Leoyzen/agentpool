@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.observability import registry
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.observability import registry
 
 
 pytestmark = pytest.mark.integration

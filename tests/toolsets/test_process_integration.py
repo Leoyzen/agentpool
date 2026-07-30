@@ -6,10 +6,10 @@ import platform
 
 import pytest
 
-from agentpool.delegation.pool import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool_config.toolsets import (
+from agentwolf.delegation.pool import AgentPool
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf_config.toolsets import (
     FSSpecToolsetConfig,
     ProcessManagementToolsetConfig,
 )

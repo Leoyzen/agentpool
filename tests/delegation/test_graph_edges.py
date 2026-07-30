@@ -18,10 +18,10 @@ import pytest
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from agentpool.messaging import ChatMessage, MessageNode
-from agentpool.talk import Talk
-from agentpool.talk.graph_edges import TalkEdgeTranslator
-from agentpool.utils.time_utils import get_now
+from agentwolf.messaging import ChatMessage, MessageNode
+from agentwolf.talk import Talk
+from agentwolf.talk.graph_edges import TalkEdgeTranslator
+from agentwolf.utils.time_utils import get_now
 
 
 pytestmark = pytest.mark.unit
@@ -54,7 +54,7 @@ class FakeMessageNode(MessageNode[Any, Any]):
         return message
 
     async def get_stats(self) -> Any:
-        from agentpool.talk.stats import MessageStats
+        from agentwolf.talk.stats import MessageStats
 
         return MessageStats()
 

@@ -9,11 +9,11 @@ icon: material/monitor
 Start the AG-UI protocol server to expose agents to AG-UI compatible frontends.
 
 ```bash
-agentpool serve-agui config.yml
+agentwolf serve-agui config.yml
 ```
 
 For a full list of options, run:
 
 ```bash
-agentpool serve-agui --help
+agentwolf serve-agui --help
 ```

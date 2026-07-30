@@ -1,6 +1,6 @@
 """Test skill resolution with actual AgentPool setup mimicking serve-acp.
 
-Usage (from packages/agentpool):
+Usage (from packages/agentwolf):
     uv run python test_pool_skills.py
 """
 
@@ -10,9 +10,9 @@ import asyncio
 import sys
 
 
-sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
+sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentwolf/src")
 
-from agentpool import AgentPool
+from agentwolf import AgentPool
 
 
 async def main():  # noqa: PLR0915

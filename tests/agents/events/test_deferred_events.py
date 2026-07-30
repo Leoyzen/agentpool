@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from agentpool.agents.events.events import (
+from agentwolf.agents.events.events import (
     RichAgentStreamEvent,
     SessionResumeEvent,
     ToolCallDeferredEvent,

@@ -22,10 +22,10 @@ from unittest.mock import MagicMock
 from pydantic_ai.models.test import TestModel, TestStreamedResponse
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.base_agent import _current_run_ctx_var
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.orchestrator.core import SessionState
+from agentwolf import Agent
+from agentwolf.agents.base_agent import _current_run_ctx_var
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.orchestrator.core import SessionState
 
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ async def slow_agent() -> AsyncGenerator[Agent[None]]:
 
 def _mock_session_pool(agent: Agent[Any], run_ctx: Any) -> None:
     """Mock agent_pool.session_pool so _get_session_run_ctx() returns run_ctx."""
-    from agentpool.orchestrator.run import RunHandle
+    from agentwolf.orchestrator.run import RunHandle
 
     session_state = SessionState(session_id="test-session", agent_name="test")
     session_state.current_run_id = run_ctx.run_id

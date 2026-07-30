@@ -19,13 +19,13 @@ from unittest.mock import AsyncMock, MagicMock
 from pydantic_ai.messages import BinaryImage
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.turn import Turn
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.turn import Turn
 
 
 pytestmark = pytest.mark.unit
@@ -149,7 +149,7 @@ async def test_start_accepts_list_prompt() -> None:
 @pytest.mark.unit
 async def test_start_accepts_empty_string() -> None:
     """Empty string produces empty prompts list (no spurious turn)."""
-    from agentpool.agents.staged_content import StagedContent
+    from agentwolf.agents.staged_content import StagedContent
 
     turn = _CapturingStubTurn([])
     agent = MagicMock()
@@ -202,7 +202,7 @@ async def test_steer_accepts_list_content() -> None:
 @pytest.mark.unit
 async def test_acp_turn_flattens_multimodal_prompts() -> None:
     """ACPTurn flattens list[str | list[Any]] into list[UserContent] for ACP."""
-    from agentpool.agents.acp_agent.turn import ACPTurn
+    from agentwolf.agents.acp_agent.turn import ACPTurn
 
     binary_img = BinaryImage(data=b"\x89PNG", media_type="image/png")
 
@@ -263,7 +263,7 @@ async def test_acp_turn_flattens_multimodal_prompts() -> None:
 @pytest.mark.unit
 async def test_acp_turn_flattens_all_string_prompts() -> None:
     """ACPTurn with all string prompts flattens into text blocks."""
-    from agentpool.agents.acp_agent.turn import ACPTurn
+    from agentwolf.agents.acp_agent.turn import ACPTurn
 
     prompts: list[Any] = ["hello", "world"]
 
@@ -309,7 +309,7 @@ async def test_acp_turn_flattens_all_string_prompts() -> None:
 @pytest.mark.unit
 async def test_acp_turn_empty_prompts() -> None:
     """ACPTurn with empty prompts sends empty string."""
-    from agentpool.agents.acp_agent.turn import ACPTurn
+    from agentwolf.agents.acp_agent.turn import ACPTurn
 
     captured_content: list[Any] = []
 

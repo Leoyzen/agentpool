@@ -1,5 +1,5 @@
 # /// script
-# dependencies = ["agentpool"]
+# dependencies = ["agentwolf"]
 # ///
 
 """Adaption of a CrewAI-like flow."""
@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import os
 
-from agentpool import Agent, AgentsManifest
-from agentpool.docs.utils import get_config_path, is_pyodide, run
-from agentpool.running import node_function, run_nodes_async
+from agentwolf import Agent, AgentsManifest
+from agentwolf.docs.utils import get_config_path, is_pyodide, run
+from agentwolf.running import node_function, run_nodes_async
 
 
 # set your OpenAI API key here

@@ -19,16 +19,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.lifecycle import DirectChannel, MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventEnvelope
-from agentpool.orchestrator.turn import Turn
+from agentwolf.agents.events import RunFailedEvent, RunStartedEvent, StreamCompleteEvent
+from agentwolf.lifecycle import DirectChannel, MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventEnvelope
+from agentwolf.orchestrator.turn import Turn
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
-    from agentpool.agents.context import AgentRunContext
+    from agentwolf import AgentPool
+    from agentwolf.agents.context import AgentRunContext
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]

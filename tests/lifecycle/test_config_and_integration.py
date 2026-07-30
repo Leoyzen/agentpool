@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.event_transport import InProcessTransport
-from agentpool.lifecycle.factory import create_dimensions
-from agentpool.lifecycle.journal import DurableJournal, MemoryJournal
-from agentpool.lifecycle.snapshot_store import (
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.event_transport import InProcessTransport
+from agentwolf.lifecycle.factory import create_dimensions
+from agentwolf.lifecycle.journal import DurableJournal, MemoryJournal
+from agentwolf.lifecycle.snapshot_store import (
     DurableSnapshotStore,
     MemorySnapshotStore,
 )
-from agentpool_config.lifecycle import LifecycleConfig
-from agentpool_config.nodes import BaseAgentConfig
+from agentwolf_config.lifecycle import LifecycleConfig
+from agentwolf_config.nodes import BaseAgentConfig
 
 
 pytestmark = pytest.mark.integration

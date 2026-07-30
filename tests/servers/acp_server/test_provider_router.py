@@ -6,8 +6,8 @@ import asyncio
 
 import pytest
 
-from agentpool.models.model_configs import StringModelConfig
-from agentpool_server.acp_server.provider_router import ProviderRouter
+from agentwolf.models.model_configs import StringModelConfig
+from agentwolf_server.acp_server.provider_router import ProviderRouter
 
 
 pytestmark = pytest.mark.integration

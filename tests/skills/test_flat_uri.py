@@ -15,15 +15,15 @@ from typing import Any, Self
 
 import pytest
 
-from agentpool.capabilities.extension_registry import (
+from agentwolf.capabilities.extension_registry import (
     ExtensionRegistry,
     Scope,
     ScopeLevel,
 )
-from agentpool.capabilities.resource_protocols import SkillEntry, SkillResource
-from agentpool.capabilities.skill_manager_cap import SkillManagerCap
-from agentpool.skills.skill import Skill
-from agentpool.skills.uri_resolver import ResolvedSkillURI, SkillURIResolver
+from agentwolf.capabilities.resource_protocols import SkillEntry, SkillResource
+from agentwolf.capabilities.skill_manager_cap import SkillManagerCap
+from agentwolf.skills.skill import Skill
+from agentwolf.skills.uri_resolver import ResolvedSkillURI, SkillURIResolver
 
 
 pytestmark = pytest.mark.unit
@@ -176,7 +176,7 @@ async def test_flat_uri_resolver_raises_for_missing_skill() -> None:
     resolve('skill://nonexistent') is called, Then SkillNotFoundError is
     raised.
     """
-    from agentpool.skills.exceptions import SkillNotFoundError
+    from agentwolf.skills.exceptions import SkillNotFoundError
 
     reg = ExtensionRegistry()
     skill_cap = FakeSkillResource(skills={"existing": "content"})

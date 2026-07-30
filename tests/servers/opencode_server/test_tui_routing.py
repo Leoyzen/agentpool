@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentpool_server.opencode_server.models import GlobalEvent
-from agentpool_server.opencode_server.routes.routing import (
+from agentwolf_server.opencode_server.models import GlobalEvent
+from agentwolf_server.opencode_server.routes.routing import (
     RoutingCheckResponse,
     tui_event_filter,
 )

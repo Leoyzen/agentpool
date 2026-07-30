@@ -19,10 +19,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from slashed import Command as SlashedCommand, CommandStore
 
-from agentpool import Agent, AgentPool
-from agentpool.capabilities.change_event import ChangeEvent
-from agentpool.skills.skill import Skill
-from agentpool_server.acp_server.session import ACPSession
+from agentwolf import Agent, AgentPool
+from agentwolf.capabilities.change_event import ChangeEvent
+from agentwolf.skills.skill import Skill
+from agentwolf_server.acp_server.session import ACPSession
 
 
 if TYPE_CHECKING:
@@ -53,8 +53,8 @@ def _make_skill(
 
 def _make_pool_and_agent() -> tuple[AgentPool, Agent]:
     """Create a simple pool with one agent."""
-    from agentpool.models.agents import NativeAgentConfig
-    from agentpool.models.manifest import AgentsManifest
+    from agentwolf.models.agents import NativeAgentConfig
+    from agentwolf.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(agents={"test_agent": NativeAgentConfig(model="test")})
     pool = AgentPool(manifest)
@@ -395,7 +395,7 @@ async def test_regression_manifest_commands_still_work(
     _mock_skills_on_pool(pool, [_make_skill(name="my-skill")])
 
     # Mock manifest to return a command config
-    from agentpool_config.commands import StaticCommandConfig
+    from agentwolf_config.commands import StaticCommandConfig
 
     manifest_cmd = StaticCommandConfig(
         type="static",
@@ -463,7 +463,7 @@ async def test_regression_send_update_includes_both_manifest_and_skill_commands(
     skill = _make_skill(name="skill-cmd", description="A skill command")
     _mock_skills_on_pool(pool, [skill])
 
-    from agentpool_config.commands import StaticCommandConfig
+    from agentwolf_config.commands import StaticCommandConfig
 
     manifest_cmd = StaticCommandConfig(
         type="static",
@@ -503,7 +503,7 @@ async def test_regression_command_name_collision_last_registered_wins(
     skill = _make_skill(name=shared_name, description="Skill version of shared command")
     _mock_skills_on_pool(pool, [skill])
 
-    from agentpool_config.commands import StaticCommandConfig
+    from agentwolf_config.commands import StaticCommandConfig
 
     manifest_cmd = StaticCommandConfig(
         type="static",

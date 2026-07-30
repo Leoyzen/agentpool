@@ -11,13 +11,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.capabilities.agent_context import AgentContextDeps
-from agentpool.capabilities.delegation import DelegationService
-from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
-from agentpool.host.context import HostContext, RunScope
-from agentpool.host.registry import AgentRegistry
-from agentpool.orchestrator.run import RunHandle
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.capabilities.agent_context import AgentContextDeps
+from agentwolf.capabilities.delegation import DelegationService
+from agentwolf.capabilities.runloop_delegation import RunLoopDelegationService
+from agentwolf.host.context import HostContext, RunScope
+from agentwolf.host.registry import AgentRegistry
+from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit
@@ -164,7 +164,7 @@ def test_delegation_service_lists_agents() -> None:
 
 def test_delegation_service_raises_for_unknown_agent() -> None:
     """Test that RunLoopDelegationService raises for unknown agents."""
-    from agentpool.capabilities.delegation import AgentNotFoundError
+    from agentwolf.capabilities.delegation import AgentNotFoundError
 
     host = _make_host_context()
     registry = AgentRegistry()

@@ -14,13 +14,13 @@ from unittest.mock import AsyncMock, Mock
 from pydantic_ai import RequestUsage
 import pytest
 
-from agentpool.agents.events import StreamCompleteEvent
-from agentpool.lifecycle import RunOutcome, RunState
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus
-from agentpool.utils import identifiers as identifier
-from agentpool.utils.time_utils import now_ms
-from agentpool_server.opencode_server.models import (
+from agentwolf.agents.events import StreamCompleteEvent
+from agentwolf.lifecycle import RunOutcome, RunState
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventBus
+from agentwolf.utils import identifiers as identifier
+from agentwolf.utils.time_utils import now_ms
+from agentwolf_server.opencode_server.models import (
     AssistantMessage,
     MessagePath,
     MessageRequest,
@@ -31,11 +31,11 @@ from agentpool_server.opencode_server.models import (
     TimeCreatedUpdated,
     UserMessage,
 )
-from agentpool_server.opencode_server.models.message import MessageWithParts
-from agentpool_server.opencode_server.models.parts import StepFinishPart
-from agentpool_server.opencode_server.session_pool_integration import get_messages_for_session
-from agentpool_server.opencode_server.state import ServerState
-from agentpool_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
+from agentwolf_server.opencode_server.models.message import MessageWithParts
+from agentwolf_server.opencode_server.models.parts import StepFinishPart
+from agentwolf_server.opencode_server.session_pool_integration import get_messages_for_session
+from agentwolf_server.opencode_server.state import ServerState
+from agentwolf_server.opencode_server.stream_adapter import OpenCodeStreamAdapter
 from tests.servers.opencode_server.conftest import run_message_phases
 
 
@@ -45,7 +45,7 @@ pytestmark = pytest.mark.integration
 def _setup_session(state: ServerState, session_id: str) -> None:
     """Set up session state manually."""
     now = now_ms()
-    from agentpool_server.opencode_server.models import Session
+    from agentwolf_server.opencode_server.models import Session
 
     session = Session(
         id=session_id,

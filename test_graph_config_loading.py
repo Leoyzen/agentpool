@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentPool
-from agentpool_config.graph_translation import GraphConfig
+from agentwolf import AgentPool
+from agentwolf_config.graph_translation import GraphConfig
 
 
 if TYPE_CHECKING:
@@ -228,8 +228,8 @@ agents:
 @pytest.mark.asyncio
 async def test_programmatic_manifest_with_graph() -> None:
     """Programmatic manifests with graph in model_extra should work."""
-    from agentpool.models.agents import NativeAgentConfig
-    from agentpool.models.manifest import AgentsManifest
+    from agentwolf.models.agents import NativeAgentConfig
+    from agentwolf.models.manifest import AgentsManifest
 
     manifest = AgentsManifest(
         agents={

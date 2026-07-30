@@ -24,7 +24,7 @@ Skills injection allows you to:
 skills:
   # Skill discovery paths
   paths:
-    - ~/.config/agentpool/skills
+    - ~/.config/agentwolf/skills
     - ./skills
   
   # Include default AgentPool skills (default: true)
@@ -78,7 +78,7 @@ When skills injection is enabled, agents receive structured XML in their system 
       - Use snake_case for functions and variables
       - Use PascalCase for classes
     </instructions>
-    <base_directory>/home/user/.config/agentpool/skills/python-style-guide/</base_directory>
+    <base_directory>/home/user/.config/agentwolf/skills/python-style-guide/</base_directory>
   </skill>
   <skill id="refactoring" name="Code Refactoring" description="Safe refactoring techniques">
     <instructions>
@@ -91,7 +91,7 @@ When skills injection is enabled, agents receive structured XML in their system 
       4. Run tests after each change
       5. Commit incrementally
     </instructions>
-    <base_directory>/home/user/.config/agentpool/skills/refactoring/</base_directory>
+    <base_directory>/home/user/.config/agentwolf/skills/refactoring/</base_directory>
   </skill>
 </available-skills>
 ```
@@ -102,7 +102,7 @@ When skills injection is enabled, agents receive structured XML in their system 
 # Global skills configuration
 skills:
   paths:
-    - ~/.config/agentpool/skills
+    - ~/.config/agentwolf/skills
     - ./project-skills
   include_default: true
   

@@ -19,8 +19,8 @@ from pydantic_ai.messages import (
 )
 import pytest
 
-from agentpool.agents.native_agent.checkpoint import CheckpointManager
-from agentpool.storage.serialization import messages_adapter
+from agentwolf.agents.native_agent.checkpoint import CheckpointManager
+from agentwolf.storage.serialization import messages_adapter
 
 
 pytestmark = pytest.mark.unit

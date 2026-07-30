@@ -43,7 +43,7 @@ This demonstrates how to:
 
 ```python
 # /// script
-# dependencies = ["agentpool"]
+# dependencies = ["agentwolf"]
 # ///
 
 
@@ -59,8 +59,8 @@ from __future__ import annotations
 
 import os
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.docs.utils import get_config_path, is_pyodide, run
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.docs.utils import get_config_path, is_pyodide, run
 
 
 # set your OpenAI API key here
@@ -97,7 +97,7 @@ if __name__ == "__main__":
 ### `config.yml`
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentpool/refs/heads/main/schema/config-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentwolf/refs/heads/main/schema/config-schema.json
 agents:
   assistant:
     type: native

@@ -13,10 +13,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentContext, AgentRunContext
-from agentpool.agents.events import DiffContentItem, StreamEventEmitter
-from agentpool.utils.streams import FileOpsTracker
+from agentwolf import Agent
+from agentwolf.agents.context import AgentContext, AgentRunContext
+from agentwolf.agents.events import DiffContentItem, StreamEventEmitter
+from agentwolf.utils.streams import FileOpsTracker
 
 
 @pytest.mark.unit

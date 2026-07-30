@@ -12,8 +12,8 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AbstractToolset
 import pytest
 
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-from agentpool_toolsets.builtin import (
+from agentwolf.capabilities.function_toolset import FunctionToolsetCapability
+from agentwolf_toolsets.builtin import (
     CodeTools,
     DebugTools,
     ProcessManagementTools,

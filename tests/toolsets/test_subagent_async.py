@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
+from agentwolf import AgentPool, AgentsManifest
 
 
 pytestmark = pytest.mark.integration

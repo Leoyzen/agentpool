@@ -15,21 +15,21 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     RunStartedEvent,
     StreamCompleteEvent,
     ToolCallStartEvent,
     UserMessageInsertedEvent,
 )
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.event_bus import EventEnvelope
-from agentpool.orchestrator.turn import Turn
-from agentpool.utils.identifiers import ascending
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.event_bus import EventEnvelope
+from agentwolf.orchestrator.turn import Turn
+from agentwolf.utils.identifiers import ascending
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
-    from agentpool.agents.context import AgentRunContext
+    from agentwolf import AgentPool
+    from agentwolf.agents.context import AgentRunContext
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]

@@ -15,11 +15,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from agentpool_server.opencode_server.routes.session_routes import _ensure_session_idle
+from agentwolf_server.opencode_server.routes.session_routes import _ensure_session_idle
 
 
 if TYPE_CHECKING:
-    from agentpool_server.opencode_server.state import ServerState
+    from agentwolf_server.opencode_server.state import ServerState
 
 pytestmark = pytest.mark.unit
 
@@ -125,7 +125,7 @@ async def test_ensure_session_idle_cancel_times_out() -> None:
     state = _make_state(session_state=session_state, session_pool=session_pool)
 
     with patch(
-        "agentpool_server.opencode_server.routes.session_routes._IDLE_WAIT_TIMEOUT",
+        "agentwolf_server.opencode_server.routes.session_routes._IDLE_WAIT_TIMEOUT",
         0.05,
     ):
         await _ensure_session_idle(state, "sess-1")

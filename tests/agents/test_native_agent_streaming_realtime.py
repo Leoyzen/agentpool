@@ -19,8 +19,8 @@ from pydantic_ai import PartDeltaEvent, PartStartEvent
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.events import StreamCompleteEvent
+from agentwolf import Agent
+from agentwolf.agents.events import StreamCompleteEvent
 
 
 # ---------------------------------------------------------------------------

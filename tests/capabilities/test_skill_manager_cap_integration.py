@@ -14,12 +14,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.capabilities.resource_protocols import (
+from agentwolf.capabilities.resource_protocols import (
     SkillEntry,
     SkillResource,
 )
-from agentpool.capabilities.skill_manager_cap import SkillManagerCap
-from agentpool.skills.skill import Skill
+from agentwolf.capabilities.skill_manager_cap import SkillManagerCap
+from agentwolf.skills.skill import Skill
 
 
 pytestmark = pytest.mark.unit

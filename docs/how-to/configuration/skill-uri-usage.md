@@ -37,7 +37,7 @@ skill://{provider}/{skill-name}/{reference-path}
 When you use a bare skill name, AgentPool searches all providers in priority order:
 
 ```python
-from agentpool import AgentPool
+from agentwolf import AgentPool
 
 async with AgentPool("config.yml") as pool:
     agent = pool.get_agent("assistant")

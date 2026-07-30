@@ -7,8 +7,8 @@ These tests verify the two QA scenarios defined in the Verification Strategy:
 
 import pytest
 
-from agentpool.agents.events import RunStartedEvent, SubAgentEvent
-from agentpool.messaging.event_manager import EventManager
+from agentwolf.agents.events import RunStartedEvent, SubAgentEvent
+from agentwolf.messaging.event_manager import EventManager
 
 
 pytestmark = pytest.mark.unit

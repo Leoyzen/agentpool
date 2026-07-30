@@ -14,20 +14,20 @@ from unittest.mock import AsyncMock, patch
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.agents.native_agent.agent import (
+from agentwolf.agents.native_agent.agent import (
     Agent,
     _intersect_capabilities,
     _model_config_names,
 )
-from agentpool.capabilities.modality_filter import ModalityFilterCapability
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.model_configs import (
+from agentwolf.capabilities.modality_filter import ModalityFilterCapability
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.model_configs import (
     FallbackModelConfig,
     OpenAIModelConfig,
     StringModelConfig,
     TestModelConfig as _TestModelConfig,
 )
-from agentpool_config.model_capabilities import ModelCapabilities
+from agentwolf_config.model_capabilities import ModelCapabilities
 
 
 pytestmark = [pytest.mark.unit]
@@ -305,7 +305,7 @@ async def test_resolve_capabilities_called_for_string_model() -> None:
     # Mock resolve_capabilities to avoid real tokonomics calls.
     mock_caps = _text_only_caps()
     with patch(
-        "agentpool.host.stubs.resolve_capabilities",
+        "agentwolf.host.stubs.resolve_capabilities",
         new_callable=AsyncMock,
         return_value=mock_caps,
     ) as mock_resolve:
@@ -332,7 +332,7 @@ async def test_fallback_model_does_not_call_resolve_per_sub_model() -> None:
     agent = Agent(name="test", model="test", agent_config=config)
 
     with patch(
-        "agentpool.host.stubs.resolve_capabilities",
+        "agentwolf.host.stubs.resolve_capabilities",
         new_callable=AsyncMock,
     ) as mock_resolve:
         await agent.get_agentlet(model=None, output_type=str)
@@ -366,7 +366,7 @@ async def test_fallback_model_user_filter_gets_declared_caps() -> None:
     )
 
     with patch(
-        "agentpool.host.stubs.resolve_capabilities",
+        "agentwolf.host.stubs.resolve_capabilities",
         new_callable=AsyncMock,
     ):
         pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
@@ -398,7 +398,7 @@ async def test_agent_creation_no_tokonomics_query_for_custom_model() -> None:
     agent = Agent(name="test", model="test", agent_config=config)
 
     with patch(
-        "agentpool.host.stubs.CapabilityCache.get_capability",
+        "agentwolf.host.stubs.CapabilityCache.get_capability",
         new_callable=AsyncMock,
     ) as mock_get:
         pydantic_agent = await agent.get_agentlet(model=None, output_type=str)
@@ -416,7 +416,7 @@ async def test_agent_creation_no_tokonomics_query_for_custom_model() -> None:
 @pytest.mark.integration
 async def test_agent_creation_uses_cached_values() -> None:
     """Agent creation should use cached capability values when available."""
-    from agentpool.host.stubs import _get_default_cache
+    from agentwolf.host.stubs import _get_default_cache
 
     cache = _get_default_cache()
     # Pre-populate cache for the model.

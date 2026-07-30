@@ -6,8 +6,8 @@ icon: material/transit-connection-variant
 
 ## EventBus
 
-::: agentpool.orchestrator.event_bus.EventBus
+::: agentwolf.orchestrator.event_bus.EventBus
 
 ## SessionController
 
-::: agentpool.orchestrator.session_controller.SessionController
+::: agentwolf.orchestrator.session_controller.SessionController

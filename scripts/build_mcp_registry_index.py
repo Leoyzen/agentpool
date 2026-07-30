@@ -23,7 +23,7 @@ from pydantic import BaseModel
 DEFAULT_OUTPUT = (
     Path(__file__).parent.parent
     / "src"
-    / "agentpool_toolsets"
+    / "agentwolf_toolsets"
     / "mcp_discovery"
     / "data"
     / "mcp_servers.parquet"

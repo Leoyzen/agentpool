@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool_config.toolsets import NotificationsToolsetConfig
-from agentpool_toolsets.notifications import NotificationsTools
+from agentwolf_config.toolsets import NotificationsToolsetConfig
+from agentwolf_toolsets.notifications import NotificationsTools
 
 
 pytestmark = pytest.mark.unit

@@ -15,15 +15,15 @@ pytestmark = pytest.mark.unit
 
 
 TOOL_IMPLS_MODULES = [
-    "agentpool.tool_impls.agent_cli",
-    "agentpool.tool_impls.bash",
-    "agentpool.tool_impls.delete_path",
-    "agentpool.tool_impls.download_file",
-    "agentpool.tool_impls.execute_code",
-    "agentpool.tool_impls.grep",
-    "agentpool.tool_impls.list_directory",
-    "agentpool.tool_impls.question",
-    "agentpool.tool_impls.read",
+    "agentwolf.tool_impls.agent_cli",
+    "agentwolf.tool_impls.bash",
+    "agentwolf.tool_impls.delete_path",
+    "agentwolf.tool_impls.download_file",
+    "agentwolf.tool_impls.execute_code",
+    "agentwolf.tool_impls.grep",
+    "agentwolf.tool_impls.list_directory",
+    "agentwolf.tool_impls.question",
+    "agentwolf.tool_impls.read",
 ]
 
 

@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.hooks import AgentHooks, CallableHook, HookResult
-from agentpool.orchestrator.turn import HookAwareTurn
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.hooks import AgentHooks, CallableHook, HookResult
+from agentwolf.orchestrator.turn import HookAwareTurn
 
 
 # ---------------------------------------------------------------------------

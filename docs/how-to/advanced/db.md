@@ -29,9 +29,9 @@ The SQLite database is stored using platformdirs:
 
 ```python
 # Default location:
-# Linux: ~/.local/share/agentpool/history.db
-# Windows: %LOCALAPPDATA%\agentpool\history.db
-# macOS: ~/Library/Application Support/agentpool/history.db
+# Linux: ~/.local/share/agentwolf/history.db
+# Windows: %LOCALAPPDATA%\agentwolf\history.db
+# macOS: ~/Library/Application Support/agentwolf/history.db
 ```
 
 ## Memory Configuration
@@ -45,7 +45,7 @@ Agents can be configured with sophisticated memory management:
 Or via code:
 
 ```python
-from agentpool_config.session import MemoryConfig, SessionQuery
+from agentwolf_config.session import MemoryConfig, SessionQuery
 
 # Configure memory management
 memory_cfg = MemoryConfig(

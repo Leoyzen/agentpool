@@ -12,8 +12,8 @@ import asyncio
 
 import anyio
 
-from agentpool import Agent, AgentPool
-from agentpool_server import A2AServer, AggregatingServer, AGUIServer
+from agentwolf import Agent, AgentPool
+from agentwolf_server import A2AServer, AggregatingServer, AGUIServer
 
 
 async def main() -> None:

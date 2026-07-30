@@ -23,11 +23,11 @@ from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.usage import RunUsage
 import pytest
 
-from agentpool.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
-from agentpool.mcp_server.global_pool import GlobalConnectionPool
-from agentpool.mcp_server.manager import MCPManager
-from agentpool.mcp_server.session_pool import SessionConnectionPool
-from agentpool_config.mcp_server import (
+from agentwolf.mcp_server.config_snapshot import McpConfigEntry, McpConfigSnapshot
+from agentwolf.mcp_server.global_pool import GlobalConnectionPool
+from agentwolf.mcp_server.manager import MCPManager
+from agentwolf.mcp_server.session_pool import SessionConnectionPool
+from agentwolf_config.mcp_server import (
     AcpMCPServerConfig,
     StdioMCPServerConfig,
     StreamableHTTPMCPServerConfig,

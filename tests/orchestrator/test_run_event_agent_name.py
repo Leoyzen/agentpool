@@ -16,16 +16,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     RunErrorEvent,
     RunStartedEvent,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.turn import Turn
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.turn import Turn
 
 
 pytestmark = pytest.mark.unit
@@ -71,7 +71,7 @@ def _make_handle(
 
     Returns (handle, event_bus) so the caller can inspect published events.
     """
-    from agentpool.orchestrator.core import SessionState
+    from agentwolf.orchestrator.core import SessionState
 
     agent = MagicMock()
     agent.name = agent_name

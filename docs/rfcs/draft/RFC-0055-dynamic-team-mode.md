@@ -121,7 +121,7 @@ This workflow cannot be expressed as a static DAG because:
 
 ### Evidence
 
-- GitHub Discussion #160 (Leoyzen/agentpool) documents the architectural proposal and received community feedback
+- GitHub Discussion #160 (Leoyzen/agentwolf) documents the architectural proposal and received community feedback
 - The comparative survey (`docs/survey/multi-agent-orchestration/`) identified LLM-driven team creation as the dominant pattern in production frameworks (Qwen Code, OMO)
 - Three real-world scenarios (industrial diagnosis, manual translation, sales assistant) were analyzed and all require dynamic team composition
 
@@ -490,8 +490,8 @@ graph TB
 # capabilities/team_comm_capability.py
 from __future__ import annotations
 from collections.abc import Sequence
-from agentpool.capabilities.abstract_capability import AbstractCapability
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+from agentwolf.capabilities.abstract_capability import AbstractCapability
+from agentwolf.capabilities.function_toolset import FunctionToolsetCapability
 
 class TeamCommCapability(FunctionToolsetCapability[AgentDepsT]):
     """Exposes team communication tools to agents.
@@ -1037,7 +1037,7 @@ team_mode:
   lead_eligible: [orchestrator]
 
   # Storage (tempdir-based, not .omo/)
-  base_dir: /tmp/agentpool/teams
+  base_dir: /tmp/agentwolf/teams
   ttl_hours: 72
 
   # Bounds (guardrails for LLM-driven team creation)
@@ -1251,8 +1251,8 @@ No specific regulatory requirements. Team state is ephemeral coordination data, 
 - **Scope**: FileTeamState + TeamModeConfig
 - **Deliverables**:
   - `capabilities/file_team_state.py` — File I/O for inbox/tasks/blackboard
-  - `agentpool_config/team_mode.py` — Config model
-  - `agentpool_config/manifest.py` — +1 field (team_mode)
+  - `agentwolf_config/team_mode.py` — Config model
+  - `agentwolf_config/manifest.py` — +1 field (team_mode)
   - TTL cleanup background task
 - **Dependencies**: None
 - **Testing**: Unit test file operations, concurrent access, TTL cleanup
@@ -1413,8 +1413,8 @@ None. All reviewers converged on Option 2 after analysis of the BT precedent and
 - Multi-Agent Orchestration Survey
 - Survey: Comparison Matrix
 - Survey: Recommendations
-- [GitHub Discussion #160: Team Agent 架构设计](https://github.com/Leoyzen/agentpool/discussions/160)
-- [Qwen Code Deep Dive (Discussion #160 comment)](https://github.com/Leoyzen/agentpool/discussions/160#discussioncomment-17637183)
+- [GitHub Discussion #160: Team Agent 架构设计](https://github.com/Leoyzen/agentwolf/discussions/160)
+- [Qwen Code Deep Dive (Discussion #160 comment)](https://github.com/Leoyzen/agentwolf/discussions/160#discussioncomment-17637183)
 - [RFC-0042: Unified Lifecycle Architecture](./RFC-0042-unified-lifecycle-architecture.md)
 - [RFC-0037: Unify Steer and Followup](./RFC-0037-unify-steer-followup.md)
 
@@ -1450,10 +1450,10 @@ None. All reviewers converged on Option 2 after analysis of the BT precedent and
 |------|------|-----------|
 | `capabilities/team_comm_capability.py` | New — Capability (direct SessionPool access + defaults hook) | ~380 |
 | `capabilities/file_team_state.py` | New — File I/O | ~250 |
-| `agentpool_config/team_mode.py` | New — Config model | ~80 |
+| `agentwolf_config/team_mode.py` | New — Config model | ~80 |
 | `capabilities/agent_context.py` | Modified — +1 field (team_mode_config) | ~1 |
 | `orchestrator/run.py` | Modified — +1 line (team_mode_config injection) | ~1 |
-| `agentpool_config/manifest.py` | Modified — +1 field (team_mode) | ~2 |
+| `agentwolf_config/manifest.py` | Modified — +1 field (team_mode) | ~2 |
 | **Total new** | 3 files | ~680 |
 | **Total modified** | 3 files | ~4 lines |
 

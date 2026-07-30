@@ -30,23 +30,23 @@ import warnings
 
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import (
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import (
     PartDeltaEvent,
     PartStartEvent,
     StreamCompleteEvent,
 )
-from agentpool.lifecycle import (
+from agentwolf.lifecycle import (
     DeliveryMode,
     Feedback,
     MemoryJournal,
     ProtocolChannel,
 )
-from agentpool.messaging import ChatMessage, MessageHistory
-from agentpool.orchestrator.core import EventBus, SessionPool
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.session_controller import SessionState
-from agentpool.orchestrator.turn import Turn
+from agentwolf.messaging import ChatMessage, MessageHistory
+from agentwolf.orchestrator.core import EventBus, SessionPool
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf.orchestrator.session_controller import SessionState
+from agentwolf.orchestrator.turn import Turn
 
 
 pytestmark = pytest.mark.integration
@@ -136,8 +136,8 @@ async def test_steer_revoke_flow() -> None:
     ``feedback_queue`` when no RunHandle is active. ``SessionState.revoke()``
     removes a queued steer message by ID.
     """
-    from agentpool.lifecycle.types import Feedback
-    from agentpool.orchestrator.session_controller import SessionState
+    from agentwolf.lifecycle.types import Feedback
+    from agentwolf.orchestrator.session_controller import SessionState
 
     session = SessionState(session_id="test-session", agent_name="test-agent")
 
@@ -187,8 +187,8 @@ async def test_acp_turn_message_id_propagation() -> None:
     When: The turn constructs ChatMessage objects.
     Then: All ChatMessages from the same turn share the same message_id.
     """
-    from agentpool.agents.acp_agent.turn import ACPTurn
-    from agentpool.agents.context import AgentRunContext
+    from agentwolf.agents.acp_agent.turn import ACPTurn
+    from agentwolf.agents.context import AgentRunContext
 
     # Create a mock ACP client.
     client = MagicMock()
@@ -231,7 +231,7 @@ async def test_acp_event_converter_reads_message_id_from_events() -> None:
     Then: The returned message_id matches the event's message_id, not a
         newly generated UUID.
     """
-    from agentpool_server.acp_server.event_converter import ACPEventConverter
+    from agentwolf_server.acp_server.event_converter import ACPEventConverter
 
     converter = ACPEventConverter()
 
@@ -613,7 +613,7 @@ async def test_deprecation_warnings_emitted() -> None:
     Note: receive_request() deprecation tests removed — the method was
     deleted in Phase 6.4 of session-debt-cleanup.
     """
-    from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
+    from agentwolf.capabilities.runloop_delegation import RunLoopDelegationService
 
     # --- RunLoopDelegationService.get_available_agents() ---
     registry = MagicMock()
@@ -652,9 +652,9 @@ async def test_deprecation_warnings_emitted() -> None:
     # Mock EventBus for the new EventBus subscription pattern in spawn_subagent
     import asyncio as _asyncio
 
-    from agentpool.agents.events import StreamCompleteEvent
-    from agentpool.messaging.messagenode import ChatMessage
-    from agentpool.orchestrator.core import EventEnvelope
+    from agentwolf.agents.events import StreamCompleteEvent
+    from agentwolf.messaging.messagenode import ChatMessage
+    from agentwolf.orchestrator.core import EventEnvelope
 
     event_queue: _asyncio.Queue[Any] = _asyncio.Queue()
     done_event = StreamCompleteEvent(

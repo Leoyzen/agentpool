@@ -14,13 +14,13 @@ from typing import Any
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, AgentPool
-from agentpool.agents.base_agent import _current_run_ctx_var
-from agentpool.agents.context import AgentRunContext
-from agentpool.lifecycle import RunOutcome
-from agentpool.orchestrator.core import SessionPool
-from agentpool.orchestrator.metrics import MetricsCollector
-from agentpool.orchestrator.run import RunHandle
+from agentwolf import Agent, AgentPool
+from agentwolf.agents.base_agent import _current_run_ctx_var
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.lifecycle import RunOutcome
+from agentwolf.orchestrator.core import SessionPool
+from agentwolf.orchestrator.metrics import MetricsCollector
+from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]

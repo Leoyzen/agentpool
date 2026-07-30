@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from agentpool.delegation.base_team import BaseTeam
+from agentwolf.delegation.base_team import BaseTeam
 
 
 pytestmark = pytest.mark.unit

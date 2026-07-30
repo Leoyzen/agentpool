@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool_server.base import BaseServer
+from agentwolf_server.base import BaseServer
 
 
 pytestmark = pytest.mark.integration

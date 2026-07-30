@@ -15,13 +15,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool_server.acp_server.event_converter import ACPEventConverter
-from agentpool_server.acp_server.handler import ACPProtocolHandler
-from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentwolf_server.acp_server.event_converter import ACPEventConverter
+from agentwolf_server.acp_server.handler import ACPProtocolHandler
+from agentwolf_server.acp_server.session_manager import ACPSessionManager
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit

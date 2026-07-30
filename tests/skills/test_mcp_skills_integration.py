@@ -17,9 +17,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.capabilities.resource_protocols import SkillEntry
-from agentpool.skills.skill import Skill
-from agentpool_toolsets.builtin.skills import list_skills, load_skill
+from agentwolf.capabilities.resource_protocols import SkillEntry
+from agentwolf.skills.skill import Skill
+from agentwolf_toolsets.builtin.skills import list_skills, load_skill
 
 
 pytestmark = pytest.mark.integration

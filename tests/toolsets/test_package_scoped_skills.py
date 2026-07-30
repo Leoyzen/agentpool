@@ -6,9 +6,9 @@ from types import SimpleNamespace
 import pytest
 from upathtools import UPath
 
-from agentpool.capabilities.resource_protocols import SkillEntry
-from agentpool.skills.skill import Skill
-from agentpool_toolsets.builtin.skills import list_skills, load_skill, load_skill_for_node
+from agentwolf.capabilities.resource_protocols import SkillEntry
+from agentwolf.skills.skill import Skill
+from agentwolf_toolsets.builtin.skills import list_skills, load_skill, load_skill_for_node
 
 
 def _write_skill(root, name: str, description: str) -> Skill:

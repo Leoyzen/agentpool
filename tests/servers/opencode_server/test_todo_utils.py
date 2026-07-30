@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.utils.todos import TodoTracker
-from agentpool_server.opencode_server.models.session import Todo
-from agentpool_server.opencode_server.todo_utils import build_opencode_todos
+from agentwolf.utils.todos import TodoTracker
+from agentwolf_server.opencode_server.models.session import Todo
+from agentwolf_server.opencode_server.todo_utils import build_opencode_todos
 
 
 pytestmark = pytest.mark.integration

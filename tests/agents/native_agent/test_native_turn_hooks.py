@@ -11,11 +11,11 @@ from typing import Any
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events.events import StreamCompleteEvent
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.hooks import AgentHooks, CallableHook, HookResult
+from agentwolf import Agent
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events.events import StreamCompleteEvent
+from agentwolf.agents.native_agent.turn import NativeTurn
+from agentwolf.hooks import AgentHooks, CallableHook, HookResult
 
 
 # ---------------------------------------------------------------------------

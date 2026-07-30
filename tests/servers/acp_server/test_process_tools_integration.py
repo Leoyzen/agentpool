@@ -7,9 +7,9 @@ from exxec import MockExecutionEnvironment
 from exxec.models import ExecutionResult
 import pytest
 
-from agentpool import Agent, AgentContext
-from agentpool.agents.context import AgentRunContext
-from agentpool_toolsets.builtin.execution_environment import ProcessManagementTools
+from agentwolf import Agent, AgentContext
+from agentwolf.agents.context import AgentRunContext
+from agentwolf_toolsets.builtin.execution_environment import ProcessManagementTools
 
 
 pytestmark = pytest.mark.integration
@@ -218,7 +218,7 @@ async def test_execute_command(
     test_agent: Agent[None],
 ):
     """Test executing a command directly."""
-    from agentpool.tool_impls.bash import create_bash_tool
+    from agentwolf.tool_impls.bash import create_bash_tool
 
     bash_tool = create_bash_tool(env=mock_env)
 

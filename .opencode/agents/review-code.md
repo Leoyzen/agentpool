@@ -44,8 +44,8 @@ code changes in a pull request and report findings. You do NOT edit files.
    - No `asyncio.create_task()` without an active span
 
 5. **Architecture**
-   - Config models import from `agentpool_config.*`, not `agentpool.models`
-   - New modules follow existing patterns in `src/agentpool/`
+   - Config models import from `agentwolf_config.*`, not `agentwolf.models`
+   - New modules follow existing patterns in `src/agentwolf/`
    - New capabilities registered properly in the capability system
 
 ## Output Format

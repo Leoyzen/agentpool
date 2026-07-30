@@ -9,8 +9,8 @@ import yamling
 
 from acp.exceptions import RequestError
 from acp.schema import SessionConfigOption
-from agentpool import AgentPool, AgentsManifest
-from agentpool_server.acp_server.acp_agent import (
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf_server.acp_server.acp_agent import (
     AgentPoolACPAgent,
     get_agent_role_config_option,
 )

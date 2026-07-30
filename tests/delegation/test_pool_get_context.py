@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.delegation.pool import AgentPool
-from agentpool.host.context import HostContext
-from agentpool.host.factory import AgentFactory
+from agentwolf.delegation.pool import AgentPool
+from agentwolf.host.context import HostContext
+from agentwolf.host.factory import AgentFactory
 
 
 @pytest.fixture

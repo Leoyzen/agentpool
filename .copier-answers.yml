@@ -13,9 +13,9 @@ project_description: Pydantic-AI based Multi-Agent Framework with YAML-based Age
   Teams, Workflows & Extended ACP / AGUI integration
 project_name: AgentPool
 python_minimum_version: "3.13"
-python_package_command_line_name: agentpool
-python_package_distribution_name: agentpool
-python_package_import_name: agentpool
-repository_name: agentpool
+python_package_command_line_name: agentwolf
+python_package_distribution_name: agentwolf
+python_package_import_name: agentwolf
+repository_name: agentwolf
 repository_namespace: phil65
 repository_provider: github.com

@@ -30,16 +30,16 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.usage import RequestUsage
 import pytest
 
-from agentpool.capabilities.dcp.capability import DynamicContextPruningCapability
-from agentpool.capabilities.dcp.state import (
+from agentwolf.capabilities.dcp.capability import DynamicContextPruningCapability
+from agentwolf.capabilities.dcp.state import (
     DCPState,
     DistillTarget,
     PruneAction,
     WatermarkLevel,
 )
-from agentpool.capabilities.dcp.strategies import _is_pruned
-from agentpool.capabilities.dcp.tools import decompress_tool
-from agentpool.sessions.models import SessionData
+from agentwolf.capabilities.dcp.strategies import _is_pruned
+from agentwolf.capabilities.dcp.tools import decompress_tool
+from agentwolf.sessions.models import SessionData
 
 
 pytestmark = pytest.mark.integration
@@ -861,7 +861,7 @@ async def test_prune_then_decompress_same_turn() -> None:
           because prune_tool applies the action to state.current_messages
           immediately.
     """
-    from agentpool.capabilities.dcp.tools import decompress_tool, prune_tool
+    from agentwolf.capabilities.dcp.tools import decompress_tool, prune_tool
 
     session_data, state = _make_session_with_state()
     ctx = _make_run_context(session_data=session_data)
@@ -896,7 +896,7 @@ async def test_distill_then_decompress_same_turn() -> None:
           because distill_tool applies the action to state.current_messages
           immediately.
     """
-    from agentpool.capabilities.dcp.tools import decompress_tool, distill_tool
+    from agentwolf.capabilities.dcp.tools import decompress_tool, distill_tool
 
     session_data, state = _make_session_with_state()
     ctx = _make_run_context(session_data=session_data)

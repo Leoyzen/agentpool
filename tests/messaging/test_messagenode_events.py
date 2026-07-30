@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock
 from pydantic_ai import TextPartDelta
 import pytest
 
-from agentpool.agents.events import PartDeltaEvent
-from agentpool.messaging import ChatMessage
-from agentpool.messaging.messagenode import MessageNode
+from agentwolf.agents.events import PartDeltaEvent
+from agentwolf.messaging import ChatMessage
+from agentwolf.messaging.messagenode import MessageNode
 
 
 pytestmark = pytest.mark.unit

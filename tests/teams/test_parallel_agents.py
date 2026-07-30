@@ -7,8 +7,8 @@ from typing import Any
 from pydantic import BaseModel
 import pytest
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.delegation.base_team import BaseTeam
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.delegation.base_team import BaseTeam
 
 
 pytestmark = pytest.mark.integration

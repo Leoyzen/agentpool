@@ -22,8 +22,8 @@ from pydantic import BaseModel
 import pytest
 from upathtools import UPath
 
-from agentpool_config.context import CONFIG_DIR, ConfigContextManager
-from agentpool_config.paths import (
+from agentwolf_config.context import CONFIG_DIR, ConfigContextManager
+from agentwolf_config.paths import (
     CONFIG_DIR_ENV_VAR,
     LEGACY_PATHS_ENV_VAR,
     ConfigPath,

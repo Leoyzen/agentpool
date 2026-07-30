@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.running import NodeFunction, node_function
+from agentwolf.running import NodeFunction, node_function
 
 
 pytestmark = pytest.mark.unit

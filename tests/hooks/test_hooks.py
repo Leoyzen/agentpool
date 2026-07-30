@@ -6,15 +6,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import Agent
-from agentpool.hooks import AgentHooks, CallableHook
+from agentwolf import Agent
+from agentwolf.hooks import AgentHooks, CallableHook
 
 
 pytestmark = pytest.mark.unit
 
 
 if TYPE_CHECKING:
-    from agentpool.hooks import HookResult
+    from agentwolf.hooks import HookResult
 
 
 # Hook state for testing

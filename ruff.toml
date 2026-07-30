@@ -143,7 +143,7 @@ max-complexity = 15
   "TC001",
 ]  # Examples don't need TYPE_CHECKING imports
 # Team comm tools: ctx parameter is pydantic-ai internal, not described in docstrings
-"src/agentpool/capabilities/team_comm_capability.py" = ["D417"]
+"src/agentwolf/capabilities/team_comm_capability.py" = ["D417"]
 
 [format]
 preview = true

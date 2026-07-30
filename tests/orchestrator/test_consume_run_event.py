@@ -13,16 +13,16 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.events import StreamCompleteEvent, UserMessageInsertedEvent
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import SessionController, SessionState
+from agentwolf.agents.events import StreamCompleteEvent, UserMessageInsertedEvent
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import SessionController, SessionState
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
-    from agentpool.orchestrator.run import RunHandle
+    from agentwolf import AgentPool
+    from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit

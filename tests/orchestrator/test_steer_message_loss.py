@@ -24,14 +24,14 @@ from unittest.mock import MagicMock
 import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.lifecycle import Feedback
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentwolf.lifecycle import Feedback
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventBus, SessionState
+from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = [pytest.mark.unit]
@@ -271,7 +271,7 @@ async def test_start_drain_feedback_queue_to_queued_steer_messages() -> None:
     The messages in queued_steer_messages are later drained by
     NativeTurn.execute() via drain_queued_steer_messages().
     """
-    from agentpool.orchestrator.turn import Turn
+    from agentwolf.orchestrator.turn import Turn
 
     class _CapturingStubTurn(Turn):
         """Stub turn that captures prompts and simulates drain."""

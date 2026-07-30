@@ -5,12 +5,12 @@ from pydantic_ai.models.test import TestModel
 import pytest
 from sqlalchemy import select
 
-from agentpool import Agent, AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import RunStartedEvent
-from agentpool_config.storage import SQLStorageConfig, StorageConfig
-from agentpool_storage.sql_provider import SQLModelProvider
-from agentpool_storage.sql_provider.models import Conversation
-from agentpool_toolsets.builtin.subagent_tools import SubagentTools
+from agentwolf import Agent, AgentPool, AgentsManifest, NativeAgentConfig
+from agentwolf.agents.events import RunStartedEvent
+from agentwolf_config.storage import SQLStorageConfig, StorageConfig
+from agentwolf_storage.sql_provider import SQLModelProvider
+from agentwolf_storage.sql_provider.models import Conversation
+from agentwolf_toolsets.builtin.subagent_tools import SubagentTools
 
 
 pytestmark = pytest.mark.integration
@@ -123,7 +123,7 @@ async def test_subagent_event_lineage(test_pool):
 
 def test_conversation_model_defines_parent_id() -> None:
     """Regression: ORM must expose parent_id so log_session INSERT and DB schema stay aligned."""
-    from agentpool_storage.sql_provider.models import Conversation
+    from agentwolf_storage.sql_provider.models import Conversation
 
     assert "parent_id" in Conversation.model_fields
 

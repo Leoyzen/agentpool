@@ -5,9 +5,9 @@ from __future__ import annotations
 from exxec import MockExecutionEnvironment
 import pytest
 
-from agentpool import Agent, AgentContext
-from agentpool.tools.base import ToolResult
-from agentpool_toolsets.fsspec_toolset import FSSpecTools
+from agentwolf import Agent, AgentContext
+from agentwolf.tools.base import ToolResult
+from agentwolf_toolsets.fsspec_toolset import FSSpecTools
 
 
 pytestmark = pytest.mark.integration

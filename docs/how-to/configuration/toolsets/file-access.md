@@ -62,8 +62,8 @@ tools:
 ## Available Tools
 
 ```python exec="true"
-from agentpool_toolsets.fsspec_toolset import FSSpecTools
-from agentpool.docs.utils import generate_tool_docs
+from agentwolf_toolsets.fsspec_toolset import FSSpecTools
+from agentwolf.docs.utils import generate_tool_docs
 
 toolset = FSSpecTools()
 print(generate_tool_docs(toolset))
@@ -72,7 +72,7 @@ print(generate_tool_docs(toolset))
 ## Configuration Reference
 
 /// mknodes
-{{ "agentpool_config.toolsets.FSSpecToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
+{{ "agentwolf_config.toolsets.FSSpecToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
 ///
 
 ## Examples

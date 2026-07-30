@@ -17,8 +17,8 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.agents.native_agent.agent import Agent
-from agentpool.delegation import BaseTeam
+from agentwolf.agents.native_agent.agent import Agent
+from agentwolf.delegation import BaseTeam
 
 
 class _NodeHookTrackerCapability(AbstractCapability[Any]):

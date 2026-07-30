@@ -14,9 +14,9 @@ from acp.schema import (
     SessionModeState,
     UserMessageChunk,
 )
-from agentpool.agents.acp_agent import ACPAgent
-from agentpool.agents.acp_agent.session_state import ACPSessionState
-from agentpool.sessions.models import SessionData
+from agentwolf.agents.acp_agent import ACPAgent
+from agentwolf.agents.acp_agent.session_state import ACPSessionState
+from agentwolf.sessions.models import SessionData
 
 
 @pytest.fixture

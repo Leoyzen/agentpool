@@ -6,11 +6,11 @@ from pydantic_ai import FunctionToolCallEvent, PartStartEvent
 from pydantic_ai.messages import ToolCallPart
 import pytest
 
-from agentpool.agents.events.events import (
+from agentwolf.agents.events.events import (
     ToolCallProgressEvent,
     ToolCallStartEvent,
 )
-from agentpool.orchestrator.event_mapper import EventMapper
+from agentwolf.orchestrator.event_mapper import EventMapper
 
 
 @pytest.mark.unit

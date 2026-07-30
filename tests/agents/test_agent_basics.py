@@ -9,8 +9,8 @@ from pydantic_ai import ModelResponse, PartDeltaEvent, TextPart, TextPartDelta
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent, ChatMessage
-from agentpool.agents.events import StreamCompleteEvent
+from agentwolf import Agent, ChatMessage
+from agentwolf.agents.events import StreamCompleteEvent
 
 
 SIMPLE_PROMPT = "Hello, how are you?"

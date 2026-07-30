@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool.skills.exceptions import (
+from agentwolf.skills.exceptions import (
     ProviderError,
     ReferenceNotFoundError,
     SecurityError,
     SkillError,
     SkillNotFoundError,
 )
-from agentpool.utils.baseregistry import AgentPoolError
+from agentwolf.utils.baseregistry import AgentPoolError
 
 
 pytestmark = pytest.mark.unit

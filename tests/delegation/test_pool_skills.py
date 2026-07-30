@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 import pytest
 from upathtools import UPath
 
-from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-from agentpool.capabilities.resource_protocols import SkillResource
-from agentpool.skills.exceptions import SkillNotFoundError
-from agentpool.skills.uri_resolver import SkillURIResolver
-from agentpool_config.skills import SkillsConfig
+from agentwolf import AgentPool, AgentsManifest, NativeAgentConfig
+from agentwolf.capabilities.combined_toolset import CombinedToolsetCapability
+from agentwolf.capabilities.resource_protocols import SkillResource
+from agentwolf.skills.exceptions import SkillNotFoundError
+from agentwolf.skills.uri_resolver import SkillURIResolver
+from agentwolf_config.skills import SkillsConfig
 
 
 pytestmark = pytest.mark.integration

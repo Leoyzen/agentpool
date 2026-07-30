@@ -14,7 +14,7 @@ from acp import ClientCapabilities, InitializeRequest
 
 
 if TYPE_CHECKING:
-    from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
+    from agentwolf_server.acp_server.acp_agent import AgentPoolACPAgent
 
 
 pytestmark = pytest.mark.unit

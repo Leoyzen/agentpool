@@ -5,7 +5,7 @@ converter's integration of that utility when handling ``FilePartInput`` with
 ``ResourceSource`` (L2 integration tests).
 
 The tests are written against the target API where:
-- ``resolve_resource_content()`` lives in ``agentpool.capabilities.resource_resolver``
+- ``resolve_resource_content()`` lives in ``agentwolf.capabilities.resource_resolver``
 - ``_resolve_resource()`` in the converter delegates to ``resolve_resource_content()``
   by filtering ``agent._all_capabilities`` via ``isinstance`` checks.
 """
@@ -19,13 +19,13 @@ from typing import TYPE_CHECKING, Any
 from pydantic_ai import BinaryContent
 import pytest
 
-from agentpool.capabilities.resource_protocols import (
+from agentwolf.capabilities.resource_protocols import (
     BlobResourceContent,
     ResourceEntry,
     SkillEntry,
     TextResourceContent,
 )
-from agentpool.capabilities.resource_resolver import resolve_resource_content
+from agentwolf.capabilities.resource_resolver import resolve_resource_content
 
 
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ class FakeAgent:
     """
 
     def __init__(self, capabilities: list[Any], name: str = "fake-agent") -> None:
-        from agentpool.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
+        from agentwolf.capabilities.extension_registry import ExtensionRegistry, Scope, ScopeLevel
 
         registry = ExtensionRegistry()
         pool_scope = Scope(level=ScopeLevel.POOL)
@@ -253,10 +253,10 @@ async def test_resolve_resource_text_truncation() -> None:
 
 async def test_extract_user_prompt_with_resource_source() -> None:
     """FilePartInput with ResourceSource and agent → XML-wrapped text in result."""
-    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    from agentpool_server.opencode_server.models import FilePartInput
-    from agentpool_server.opencode_server.models.common import TextSpan
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from agentwolf_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentwolf_server.opencode_server.models import FilePartInput
+    from agentwolf_server.opencode_server.models.common import TextSpan
+    from agentwolf_server.opencode_server.models.parts import ResourceSource
 
     cap = FakeResourceAccess(read_result=[TextResourceContent(text="hello", uri="viking://doc.md")])
     agent = FakeAgent(capabilities=[cap])
@@ -276,10 +276,10 @@ async def test_extract_user_prompt_with_resource_source() -> None:
 
 async def test_extract_user_prompt_with_binary_resource() -> None:
     """Resource returns BlobResourceContent → result contains BinaryContent in XML sandwich."""
-    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    from agentpool_server.opencode_server.models import FilePartInput
-    from agentpool_server.opencode_server.models.common import TextSpan
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from agentwolf_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentwolf_server.opencode_server.models import FilePartInput
+    from agentwolf_server.opencode_server.models.common import TextSpan
+    from agentwolf_server.opencode_server.models.parts import ResourceSource
 
     blob_data = base64.b64encode(b"img").decode()
     cap = FakeResourceAccess(
@@ -308,10 +308,10 @@ async def test_extract_user_prompt_with_binary_resource() -> None:
 
 async def test_extract_user_prompt_resource_no_agent() -> None:
     """agent=None → FilePartInput falls through to generic file handler."""
-    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    from agentpool_server.opencode_server.models import FilePartInput
-    from agentpool_server.opencode_server.models.common import TextSpan
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from agentwolf_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentwolf_server.opencode_server.models import FilePartInput
+    from agentwolf_server.opencode_server.models.common import TextSpan
+    from agentwolf_server.opencode_server.models.parts import ResourceSource
 
     source = ResourceSource(
         text=TextSpan(value="@viking:doc.md", start=0, end=14),
@@ -333,10 +333,10 @@ async def test_extract_user_prompt_resource_no_agent() -> None:
 
 async def test_extract_user_prompt_resource_returns_none() -> None:
     """Resolve returns None → no content appended for that part."""
-    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    from agentpool_server.opencode_server.models import FilePartInput, TextPartInput
-    from agentpool_server.opencode_server.models.common import TextSpan
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from agentwolf_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentwolf_server.opencode_server.models import FilePartInput, TextPartInput
+    from agentwolf_server.opencode_server.models.common import TextSpan
+    from agentwolf_server.opencode_server.models.parts import ResourceSource
 
     cap = FakeResourceAccess(read_result=None)
     agent = FakeAgent(capabilities=[cap])
@@ -360,14 +360,14 @@ async def test_extract_user_prompt_resource_returns_none() -> None:
 
 async def test_extract_user_prompt_mixed_parts() -> None:
     """Text + resource + agent parts all processed."""
-    from agentpool_server.opencode_server.converters import extract_user_prompt_from_parts
-    from agentpool_server.opencode_server.models import (
+    from agentwolf_server.opencode_server.converters import extract_user_prompt_from_parts
+    from agentwolf_server.opencode_server.models import (
         AgentPartInput,
         FilePartInput,
         TextPartInput,
     )
-    from agentpool_server.opencode_server.models.common import TextSpan
-    from agentpool_server.opencode_server.models.parts import ResourceSource
+    from agentwolf_server.opencode_server.models.common import TextSpan
+    from agentwolf_server.opencode_server.models.parts import ResourceSource
 
     cap = FakeResourceAccess(
         read_result=[TextResourceContent(text="resource content", uri="viking://doc")]

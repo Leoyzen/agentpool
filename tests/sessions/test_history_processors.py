@@ -5,10 +5,10 @@ import inspect
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.utils.inspection import get_fn_name
-from agentpool_config.session import MemoryConfig
+from agentwolf import Agent
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.utils.inspection import get_fn_name
+from agentwolf_config.session import MemoryConfig
 
 
 pytestmark = pytest.mark.unit
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 def _validate_processor_signature(processor):
     """Validate processor signature using Agent's validation method."""
     # Create a minimal agent instance to access the method
-    from agentpool.agents.native_agent.agent import Agent as NativeAgent
+    from agentwolf.agents.native_agent.agent import Agent as NativeAgent
 
     # Access as unbound method and call with self=None (internal use only)
     return NativeAgent._validate_processor_signature(None, processor)
@@ -236,7 +236,7 @@ async def test_compaction_and_processors_interaction(mock_model):
     """
     from pydantic_ai import ModelResponse, TextPart
 
-    from agentpool.messaging import ChatMessage
+    from agentwolf.messaging import ChatMessage
 
     history = [
         ChatMessage.user_prompt("M1"),

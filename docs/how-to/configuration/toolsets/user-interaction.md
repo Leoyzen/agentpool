@@ -52,4 +52,4 @@ The user can pick one of the choices or provide custom input.
 
 Both tools return the user's answers through the agent tool result. Agents can then use the answers to decide next steps or personalize their response.
 
-For implementation details, see `agentpool_toolsets.builtin.question_tools`.
+For implementation details, see `agentwolf_toolsets.builtin.question_tools`.

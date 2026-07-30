@@ -1,1 +1,1 @@
-"""Examples demonstrating agentpool features and usage patterns."""
+"""Examples demonstrating agentwolf features and usage patterns."""

@@ -23,21 +23,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.events import (
+from agentwolf import AgentPool, AgentsManifest, NativeAgentConfig
+from agentwolf.agents.events import (
     RunErrorEvent,
     SpawnSessionStart,
     StreamCompleteEvent,
 )
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventEnvelope
-from agentpool_server.opencode_server.models.parts import (
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventEnvelope
+from agentwolf_server.opencode_server.models.parts import (
     ToolPart,
     ToolStateCompleted,
     ToolStateError,
     ToolStateRunning,
 )
-from agentpool_server.opencode_server.session_pool_integration import (
+from agentwolf_server.opencode_server.session_pool_integration import (
     OpenCodeSessionPoolIntegration,
 )
 
@@ -83,7 +83,7 @@ class MockServerState:
         self.events.append(event)
 
     def resolve_default_model_info(self) -> tuple[str, str]:
-        return "default", "agentpool"
+        return "default", "agentwolf"
 
 
 def _get_last_assistant_message(state: MockServerState, session_id: str) -> Any | None:

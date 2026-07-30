@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.orchestrator import SessionPool
-from agentpool.sessions import SessionData
-from agentpool.utils.identifiers import generate_session_id
-from agentpool_config.storage import SQLStorageConfig
-from agentpool_storage.memory_provider.provider import MemoryStorageProvider
-from agentpool_storage.sql_provider import SQLModelProvider
+from agentwolf.orchestrator import SessionPool
+from agentwolf.sessions import SessionData
+from agentwolf.utils.identifiers import generate_session_id
+from agentwolf_config.storage import SQLStorageConfig
+from agentwolf_storage.memory_provider.provider import MemoryStorageProvider
+from agentwolf_storage.sql_provider import SQLModelProvider
 
 
 pytestmark = pytest.mark.integration
@@ -20,7 +20,7 @@ pytestmark = pytest.mark.integration
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 @pytest.fixture

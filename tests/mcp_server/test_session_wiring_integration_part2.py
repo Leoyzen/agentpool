@@ -27,16 +27,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent
-from agentpool.delegation import AgentPool
-from agentpool.mcp_server.manager import MCPManager
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool.sessions import SessionData
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
-from agentpool_server.acp_server.session import ACPSession
-from agentpool_server.acp_server.session_manager import ACPSessionManager
+from agentwolf import Agent
+from agentwolf.delegation import AgentPool
+from agentwolf.mcp_server.manager import MCPManager
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf.sessions import SessionData
+from agentwolf_server.acp_server.acp_agent import AgentPoolACPAgent
+from agentwolf_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
+from agentwolf_server.acp_server.session import ACPSession
+from agentwolf_server.acp_server.session_manager import ACPSessionManager
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ async def test_after_resume_session_old_connection_cleaned_new_registered() -> N
     mock_new_session.register_update_callback = MagicMock()
 
     with patch(
-        "agentpool_server.acp_server.session_manager.ACPSession",
+        "agentwolf_server.acp_server.session_manager.ACPSession",
         return_value=mock_new_session,
     ):
         result = await acp_manager.resume_session(
@@ -536,7 +536,7 @@ async def test_resume_session_old_close_raises_new_still_created() -> None:
     mock_new_session.register_update_callback = MagicMock()
 
     with patch(
-        "agentpool_server.acp_server.session_manager.ACPSession",
+        "agentwolf_server.acp_server.session_manager.ACPSession",
         return_value=mock_new_session,
     ):
         result = await acp_manager.resume_session(

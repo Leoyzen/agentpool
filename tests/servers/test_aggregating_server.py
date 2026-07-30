@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentpool import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool_server import A2AServer, AggregatingServer, AGUIServer
+from agentwolf import AgentPool
+from agentwolf.models.agents import NativeAgentConfig
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf_server import A2AServer, AggregatingServer, AGUIServer
 
 
 pytestmark = pytest.mark.integration

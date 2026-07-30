@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool.capabilities.file_team_state import (
+from agentwolf.capabilities.file_team_state import (
     FileTeamState,
     TaskRecord,
     format_task_xml,

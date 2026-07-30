@@ -15,14 +15,14 @@ from pydantic_ai import (
 )
 import pytest
 
-from agentpool.agents.events import (
+from agentwolf.agents.events import (
     RunErrorEvent,
     StreamCompleteEvent,
     ToolCallStartEvent,
     detailed_print_handler,
     simple_print_handler,
 )
-from agentpool.messaging import ChatMessage
+from agentwolf.messaging import ChatMessage
 
 
 pytestmark = pytest.mark.unit

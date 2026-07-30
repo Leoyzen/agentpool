@@ -25,25 +25,25 @@ from mcp.types import ElicitRequestFormParams, ElicitResult
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.native_agent.checkpoint import CheckpointManager
-from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.session_pool import SessionPool
-from agentpool.sessions.models import (
+from agentwolf import Agent
+from agentwolf.agents.native_agent.checkpoint import CheckpointManager
+from agentwolf.orchestrator.core import EventBus
+from agentwolf.orchestrator.session_pool import SessionPool
+from agentwolf.sessions.models import (
     ElicitationResumePayload,
     PendingDeferredCall,
     SessionData,
 )
-from agentpool.storage.manager import StorageManager
-from agentpool.ui.base import InputProvider
-from agentpool_config.storage import SQLStorageConfig, StorageConfig
-from agentpool_storage.sql_provider import SQLModelProvider
+from agentwolf.storage.manager import StorageManager
+from agentwolf.ui.base import InputProvider
+from agentwolf_config.storage import SQLStorageConfig, StorageConfig
+from agentwolf_storage.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from agentpool.agents.context import AgentContext, ConfirmationResult
+    from agentwolf.agents.context import AgentContext, ConfirmationResult
 
 
 # ---------------------------------------------------------------------------

@@ -14,9 +14,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.capabilities.resource_protocols import SkillEntry, SkillResource
-from agentpool.skills.exceptions import SecurityError, SkillNotFoundError
-from agentpool.skills.uri_resolver import (
+from agentwolf.capabilities.resource_protocols import SkillEntry, SkillResource
+from agentwolf.skills.exceptions import SecurityError, SkillNotFoundError
+from agentwolf.skills.uri_resolver import (
     ResolvedSkillURI,
     SkillURIResolver,
     _validate_skill_name,

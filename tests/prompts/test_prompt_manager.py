@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from agentpool import AgentsManifest
-from agentpool.prompts.manager import PromptManager
+from agentwolf import AgentsManifest
+from agentwolf.prompts.manager import PromptManager
 
 
 pytestmark = pytest.mark.unit

@@ -12,15 +12,15 @@ from typing import Any
 from pydantic_ai import Agent as PydanticAgent, RunContext
 import pytest
 
-from agentpool.agents.context import AgentContext
-from agentpool.agents.native_agent import Agent
-from agentpool.agents.sys_prompts import SystemPrompts
-from agentpool.capabilities.function_toolset import FunctionToolsetCapability
-from agentpool.prompts.instructions import (
+from agentwolf.agents.context import AgentContext
+from agentwolf.agents.native_agent import Agent
+from agentwolf.agents.sys_prompts import SystemPrompts
+from agentwolf.capabilities.function_toolset import FunctionToolsetCapability
+from agentwolf.prompts.instructions import (
     InstructionFunc,
     PydanticAIInstruction,
 )
-from agentpool.utils.context_wrapping import wrap_instruction
+from agentwolf.utils.context_wrapping import wrap_instruction
 
 
 pytestmark = pytest.mark.unit

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import anyio
 
-from agentpool import Agent, AgentPool
-from agentpool_server.agui_server import AGUIServer
+from agentwolf import Agent, AgentPool
+from agentwolf_server.agui_server import AGUIServer
 
 
 async def main() -> None:

@@ -1,5 +1,5 @@
 # /// script
-# dependencies = ["agentpool"]
+# dependencies = ["agentwolf"]
 # ///
 
 
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import os
 
-from agentpool import AgentPool, AgentsManifest
-from agentpool.docs.utils import get_config_path, is_pyodide, run
+from agentwolf import AgentPool, AgentsManifest
+from agentwolf.docs.utils import get_config_path, is_pyodide, run
 
 
 PROMPT = "Get the latest commit hash!"

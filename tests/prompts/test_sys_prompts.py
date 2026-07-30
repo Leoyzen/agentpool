@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 import pytest
 
-from agentpool import Agent
+from agentwolf import Agent
 
 
 pytestmark = pytest.mark.unit

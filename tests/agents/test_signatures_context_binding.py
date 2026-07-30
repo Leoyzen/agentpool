@@ -5,10 +5,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from agentpool import Agent
-from agentpool.agents.context import AgentContext
-from agentpool.utils.inspection import get_fn_name
-from agentpool.utils.signatures import create_bound_callable
+from agentwolf import Agent
+from agentwolf.agents.context import AgentContext
+from agentwolf.utils.inspection import get_fn_name
+from agentwolf.utils.signatures import create_bound_callable
 
 
 pytestmark = pytest.mark.unit
@@ -290,7 +290,7 @@ class TestCodeModeIntegration:
         bad_callable.__name__ = "bad_callable"
         with (
             patch(
-                "agentpool.utils.signatures.inspect.signature",
+                "agentwolf.utils.signatures.inspect.signature",
                 side_effect=ValueError("no signature"),
             ),
             pytest.raises(ValueError, match="Cannot inspect signature"),

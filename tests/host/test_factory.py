@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.host.factory import AgentFactory
+from agentwolf.host.factory import AgentFactory
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit
@@ -114,7 +114,7 @@ async def test_create_session_agent_native_main_calls_get_agent_with_pool(
 
     factory = AgentFactory(pool=pool)
 
-    with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
+    with patch("agentwolf.models.agents.NativeAgentConfig", (type(cfg),)):
         result = await factory.create_session_agent(
             agent_name="test_agent",
             session_id="sess-1",
@@ -139,7 +139,7 @@ async def test_create_session_agent_native_main_calls_aenter(minimal_pool: Agent
 
     factory = AgentFactory(pool=minimal_pool)
 
-    with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
+    with patch("agentwolf.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(
             agent_name="test_agent",
             session_id="sess-1",
@@ -166,7 +166,7 @@ async def test_create_session_agent_native_main_no_pool_providers(minimal_pool: 
 
     factory = AgentFactory(pool=minimal_pool)
 
-    with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
+    with patch("agentwolf.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(
             agent_name="test_agent",
             session_id="sess-1",
@@ -210,7 +210,7 @@ async def test_create_session_agent_non_native_builds_snapshot_manually(
     factory = AgentFactory(pool=pool)
 
     # empty tuple → isinstance always False
-    with patch("agentpool.models.agents.NativeAgentConfig", ()):
+    with patch("agentwolf.models.agents.NativeAgentConfig", ()):
         result = await factory.create_session_agent(
             agent_name="acp_agent",
             session_id="sess-1",
@@ -249,7 +249,7 @@ async def test_create_session_agent_fixes_missing_name(minimal_pool: AgentPool) 
     host_context = _make_host_context()
     factory = AgentFactory(pool=minimal_pool)
 
-    with patch("agentpool.models.agents.NativeAgentConfig", (type(new_cfg),)):
+    with patch("agentwolf.models.agents.NativeAgentConfig", (type(new_cfg),)):
         await factory.create_session_agent(
             agent_name="fixed_name",
             session_id="sess-1",
@@ -276,7 +276,7 @@ async def test_create_session_agent_native_main_loads_session(minimal_pool: Agen
 
     factory = AgentFactory(pool=minimal_pool)
 
-    with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
+    with patch("agentwolf.models.agents.NativeAgentConfig", (type(cfg),)):
         await factory.create_session_agent(
             agent_name="test_agent",
             session_id="sess-42",

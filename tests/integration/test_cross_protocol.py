@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.agents.modes import ModeCategory, ModeInfo
-from agentpool_server.acp_server.acp_agent import get_agent_role_config_option
-from agentpool_server.opencode_server.routes.config_routes import list_modes
+from agentwolf.agents.modes import ModeCategory, ModeInfo
+from agentwolf_server.acp_server.acp_agent import get_agent_role_config_option
+from agentwolf_server.opencode_server.routes.config_routes import list_modes
 
 
 pytestmark = pytest.mark.unit
@@ -87,9 +87,9 @@ class TestCrossProtocolAlignment:
 
     async def test_cross_protocol_model_alignment(self):
         """Both protocols reflect same underlying model state."""
-        from agentpool.models.model_configs import StringModelConfig
-        from agentpool_server.acp_server.provider_router import ProviderRouter
-        from agentpool_server.shared.model_utils import build_model_state_for_acp
+        from agentwolf.models.model_configs import StringModelConfig
+        from agentwolf_server.acp_server.provider_router import ProviderRouter
+        from agentwolf_server.shared.model_utils import build_model_state_for_acp
 
         # Manifest with configured variants
         manifest = MagicMock()

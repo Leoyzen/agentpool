@@ -13,9 +13,9 @@ from unittest.mock import patch
 
 import pytest
 
-from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.agents.native_agent.turn import NativeTurn
-from agentpool.lifecycle.types import DeliveryMode
+from agentwolf import AgentPool, AgentsManifest, NativeAgentConfig
+from agentwolf.agents.native_agent.turn import NativeTurn
+from agentwolf.lifecycle.types import DeliveryMode
 
 
 pytestmark = pytest.mark.integration

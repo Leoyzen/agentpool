@@ -14,7 +14,7 @@ and IDE support for YAML linters by providing an extensive, detailed schema.
 Here's the complete manifest structure with all available top-level sections:
 
 /// mknodes
-{{ "agentpool.AgentsManifest" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", as_listitem=False) }}
+{{ "agentwolf.AgentsManifest" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", as_listitem=False) }}
 ///
 
 ## Top-Level Sections
@@ -97,10 +97,10 @@ Configs are loaded and merged in this order (later sources override earlier ones
 
 | Priority | Source | Location | Description |
 |----------|--------|----------|-------------|
-| 1 | Global | `~/.config/agentpool/agentpool.yml` | User-wide preferences |
+| 1 | Global | `~/.config/agentwolf/agentwolf.yml` | User-wide preferences |
 | 2 | Custom | `AGENTPOOL_CONFIG` env var | CI/deployment overrides |
 | 3 | Inline | `AGENTPOOL_CONFIG_CONTENT` env var | Runtime config as YAML/JSON string |
-| 4 | Project | `agentpool.yml` in project root | Project-specific settings |
+| 4 | Project | `agentwolf.yml` in project root | Project-specific settings |
 | 5 | Explicit | CLI argument | Highest precedence |
 | fallback | Built-in | Package defaults | Only if no agents defined elsewhere |
 
@@ -114,7 +114,7 @@ Configs are loaded and merged in this order (later sources override earlier ones
 
 ### Project Config Discovery
 
-Project config is discovered by searching for `agentpool.yml` (or `.yaml`, `.json`, `.jsonc`) starting from the current directory and traversing up to the nearest git repository root.
+Project config is discovered by searching for `agentwolf.yml` (or `.yaml`, `.json`, `.jsonc`) starting from the current directory and traversing up to the nearest git repository root.
 
 ### Fallback Behavior
 
@@ -127,7 +127,7 @@ The built-in fallback config (e.g., `acp_assistant.yml`) is **only loaded if no 
 
 === "Global config"
 
-    ```yaml title="~/.config/agentpool/agentpool.yml"
+    ```yaml title="~/.config/agentwolf/agentwolf.yml"
     # User preferences applied everywhere
     model_variants:
       fast:
@@ -139,12 +139,12 @@ The built-in fallback config (e.g., `acp_assistant.yml`) is **only loaded if no 
     
     storage:
       provider: sql
-      database_url: sqlite:///~/.local/share/agentpool/history.db
+      database_url: sqlite:///~/.local/share/agentwolf/history.db
     ```
 
 === "Project config"
 
-    ```yaml title="./agentpool.yml"
+    ```yaml title="./agentwolf.yml"
     # Project-specific agents (inherits global model_variants and storage)
     agents:
       coder:
@@ -184,14 +184,14 @@ Use these commands to inspect config resolution:
 
 ```bash
 # Show which configs are found and loaded
-agentpool config show
+agentwolf config show
 
 # Show standard config paths
-agentpool config paths
+agentwolf config paths
 
 # Create a starter config file
-agentpool config init           # In current project
-agentpool config init global    # In global config dir
+agentwolf config init           # In current project
+agentwolf config init global    # In global config dir
 ```
 
 ## File-Level Inheritance (INHERIT)
@@ -226,7 +226,7 @@ AgentPool supports UPaths (universal-pathlib) for `INHERIT`, allowing pointing t
 You can get IDE linter support by adding this line at the top of your YAML:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentpool/refs/heads/main/schema/config-schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Million-mo/agentwolf/refs/heads/main/schema/config-schema.json
 ```
 
 !!! note
@@ -237,7 +237,7 @@ You can get IDE linter support by adding this line at the top of your YAML:
 Load a manifest in your code:
 
 ```python
-from agentpool import AgentPool
+from agentwolf import AgentPool
 
 async with AgentPool("agents.yml") as pool:
     agent = pool.get_agent("analyzer")

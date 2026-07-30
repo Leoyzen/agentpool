@@ -11,12 +11,12 @@ import warnings
 
 import pytest
 
-from agentpool.hooks.agent_hooks import AgentHooks
-from agentpool.mcp_server.manager import MCPManager
-from agentpool.messaging import ChatMessage
-from agentpool.messaging.connection_manager import ConnectionManager
-from agentpool.messaging.messagenode import MessageNode
-from agentpool.utils.context_wrapping import wrap_instruction
+from agentwolf.hooks.agent_hooks import AgentHooks
+from agentwolf.mcp_server.manager import MCPManager
+from agentwolf.messaging import ChatMessage
+from agentwolf.messaging.connection_manager import ConnectionManager
+from agentwolf.messaging.messagenode import MessageNode
+from agentwolf.utils.context_wrapping import wrap_instruction
 
 
 pytestmark = pytest.mark.unit

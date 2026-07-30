@@ -14,9 +14,9 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from agentpool_config.storage import SQLStorageConfig
-from agentpool_storage.sql_provider.models import Message
-from agentpool_storage.sql_provider.sql_provider import SQLModelProvider
+from agentwolf_config.storage import SQLStorageConfig
+from agentwolf_storage.sql_provider.models import Message
+from agentwolf_storage.sql_provider.sql_provider import SQLModelProvider
 
 
 if TYPE_CHECKING:

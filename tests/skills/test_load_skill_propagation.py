@@ -14,11 +14,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.host.factory import _inject_pool_providers
+from agentwolf.host.factory import _inject_pool_providers
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 
 pytestmark = pytest.mark.unit

@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 
 
 if TYPE_CHECKING:
-    from agentpool import AgentContext
+    from agentwolf import AgentContext
 
 
 @dataclass

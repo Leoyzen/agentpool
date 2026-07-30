@@ -9,11 +9,11 @@ icon: material/history
 View and analyze agent interaction history.
 
 ```bash
-agentpool history stats --group-by model
+agentwolf history stats --group-by model
 ```
 
 For a full list of options, run:
 
 ```bash
-agentpool history --help
+agentwolf history --help
 ```

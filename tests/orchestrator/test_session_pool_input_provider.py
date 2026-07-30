@@ -12,17 +12,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentpool.agents.events import RunStartedEvent, StreamCompleteEvent
-from agentpool.messaging import ChatMessage
-from agentpool.ui.base import InputProvider
+from agentwolf.agents.events import RunStartedEvent, StreamCompleteEvent
+from agentwolf.messaging import ChatMessage
+from agentwolf.ui.base import InputProvider
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from agentpool import AgentPool
-    from agentpool.agents.context import AgentRunContext
-    from agentpool.orchestrator.core import SessionPool
+    from agentwolf import AgentPool
+    from agentwolf.agents.context import AgentRunContext
+    from agentwolf.orchestrator.core import SessionPool
 
 
 pytestmark = pytest.mark.unit

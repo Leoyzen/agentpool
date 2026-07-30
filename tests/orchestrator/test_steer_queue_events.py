@@ -21,13 +21,13 @@ from unittest.mock import MagicMock
 import anyio
 import pytest
 
-from agentpool.agents.context import AgentRunContext
-from agentpool.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import ChatMessage
-from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle
+from agentwolf.agents.context import AgentRunContext
+from agentwolf.agents.events import RunErrorEvent, RunStartedEvent, StreamCompleteEvent
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import ChatMessage
+from agentwolf.orchestrator.core import EventBus, SessionState
+from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]

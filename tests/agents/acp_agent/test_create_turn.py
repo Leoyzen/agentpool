@@ -8,11 +8,11 @@ import pytest
 
 from acp import InitializeRequest
 from acp.agent.acp_agent_api import ACPAgentAPI
-from agentpool.agents.acp_agent import ACPAgent
-from agentpool.agents.acp_agent.client_handler import TimeoutableEvent
-from agentpool.agents.acp_agent.session_state import ACPSessionState
-from agentpool.agents.acp_agent.turn import ACPClientProtocol, ACPTurn
-from agentpool.agents.context import AgentRunContext
+from agentwolf.agents.acp_agent import ACPAgent
+from agentwolf.agents.acp_agent.client_handler import TimeoutableEvent
+from agentwolf.agents.acp_agent.session_state import ACPSessionState
+from agentwolf.agents.acp_agent.turn import ACPClientProtocol, ACPTurn
+from agentwolf.agents.context import AgentRunContext
 
 
 @pytest.mark.unit

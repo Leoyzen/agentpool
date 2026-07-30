@@ -33,14 +33,14 @@ from dirty_equals import IsPartialDict
 from httpx import ASGITransport, AsyncClient
 import pytest
 
-from agentpool_server.agui_server import AGUIServer
+from agentwolf_server.agui_server import AGUIServer
 from tests.vcr.conftest import cassette_exists
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from agentpool import AgentPool
+    from agentwolf import AgentPool
 
 pytestmark = [pytest.mark.vcr, pytest.mark.integration]
 

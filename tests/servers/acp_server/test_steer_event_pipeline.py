@@ -18,13 +18,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from acp.schema import UserMessageChunk
-from agentpool.agents.events.events import UserMessageInsertedEvent
-from agentpool.lifecycle.comm_channel import DirectChannel
-from agentpool.lifecycle.journal import MemoryJournal
-from agentpool.messaging import MessageHistory
-from agentpool.orchestrator.core import EventBus, SessionState
-from agentpool.orchestrator.run import RunHandle
-from agentpool_server.acp_server.event_converter import ACPEventConverter
+from agentwolf.agents.events.events import UserMessageInsertedEvent
+from agentwolf.lifecycle.comm_channel import DirectChannel
+from agentwolf.lifecycle.journal import MemoryJournal
+from agentwolf.messaging import MessageHistory
+from agentwolf.orchestrator.core import EventBus, SessionState
+from agentwolf.orchestrator.run import RunHandle
+from agentwolf_server.acp_server.event_converter import ACPEventConverter
 
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]

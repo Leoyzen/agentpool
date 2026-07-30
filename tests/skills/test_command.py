@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from upathtools import UPath
 
-from agentpool.skills.command import SkillCommand
-from agentpool.skills.skill import Skill
+from agentwolf.skills.command import SkillCommand
+from agentwolf.skills.skill import Skill
 
 
 pytestmark = pytest.mark.unit

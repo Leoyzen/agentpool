@@ -23,25 +23,25 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 import pytest
 
-from agentpool.models.manifest import AgentsManifest
-from agentpool.storage import StorageManager
-from agentpool.utils.streams import FileOpsTracker
-from agentpool.utils.time_utils import now_ms
-from agentpool.utils.todos import TodoTracker
-from agentpool_server.opencode_server.dependencies import get_state
-from agentpool_server.opencode_server.models import Session
-from agentpool_server.opencode_server.models.common import TimeCreatedUpdated
-from agentpool_server.opencode_server.routes import agent_router, file_router, session_router
-from agentpool_server.opencode_server.routes.global_routes import router as global_router
-from agentpool_server.opencode_server.routes.message_routes import router as message_router
-from agentpool_server.opencode_server.state import ServerState
+from agentwolf.models.manifest import AgentsManifest
+from agentwolf.storage import StorageManager
+from agentwolf.utils.streams import FileOpsTracker
+from agentwolf.utils.time_utils import now_ms
+from agentwolf.utils.todos import TodoTracker
+from agentwolf_server.opencode_server.dependencies import get_state
+from agentwolf_server.opencode_server.models import Session
+from agentwolf_server.opencode_server.models.common import TimeCreatedUpdated
+from agentwolf_server.opencode_server.routes import agent_router, file_router, session_router
+from agentwolf_server.opencode_server.routes.global_routes import router as global_router
+from agentwolf_server.opencode_server.routes.message_routes import router as message_router
+from agentwolf_server.opencode_server.state import ServerState
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
-    from agentpool.sessions.models import SessionData
-    from agentpool_server.opencode_server.models.message import MessageRequest, MessageWithParts
+    from agentwolf.sessions.models import SessionData
+    from agentwolf_server.opencode_server.models.message import MessageRequest, MessageWithParts
 
 
 def _make_functional_event_bus() -> Mock:
@@ -97,7 +97,7 @@ def _make_functional_event_bus() -> Mock:
 
 async def _check_event_stream_for_failure(event_stream: Any, failure_type: type) -> bool:
     """Check an event stream for a failure event. Returns True if found."""
-    from agentpool.orchestrator.core import drain_and_merge
+    from agentwolf.orchestrator.core import drain_and_merge
 
     async for event in drain_and_merge(event_stream):
         if isinstance(event.event, failure_type):
@@ -128,7 +128,7 @@ async def run_message_phases(
 
     Returns the ``_MessageRunContext``.
     """
-    from agentpool_server.opencode_server.routes.message_routes import (
+    from agentwolf_server.opencode_server.routes.message_routes import (
         _route_message_locked,
     )
 
@@ -178,7 +178,7 @@ async def run_message_phases(
 
     # Drain early event stream: feed events to adapter and check for RunFailedEvent
     if early_event_stream is not None:
-        from agentpool.agents.events.events import RunFailedEvent
+        from agentwolf.agents.events.events import RunFailedEvent
 
         with contextlib.suppress(Exception):
             found_failure = await _drain_events_and_check_failure(
@@ -227,7 +227,7 @@ async def _finalize_assistant_inline(
     Note: EventBus events should already be drained and fed to the adapter
     by the caller (run_message_phases via _drain_events_and_check_failure).
     """
-    from agentpool_server.opencode_server.models import (
+    from agentwolf_server.opencode_server.models import (
         AssistantMessage,
         MessageAbortedError,
         MessageAbortedErrorData,
@@ -277,7 +277,7 @@ async def _finalize_assistant_inline(
         if sp_session_pool is not None and hasattr(sp_session_pool, "sessions"):
             sp_session = sp_session_pool.sessions.get_session(session_id)
             if sp_session is not None and getattr(sp_session, "agent", None) is not None:
-                from agentpool_server.opencode_server.routes.message_routes import (
+                from agentwolf_server.opencode_server.routes.message_routes import (
                     opencode_to_chat_message,
                 )
 
@@ -382,7 +382,7 @@ def storage_manager() -> StorageManager:
     Uses MemoryStorageProvider so session CRUD, message storage, etc.
     all work without any external dependencies or I/O.
     """
-    from agentpool_config.storage import MemoryStorageConfig, StorageConfig
+    from agentwolf_config.storage import MemoryStorageConfig, StorageConfig
 
     config = StorageConfig(providers=[MemoryStorageConfig()])
     return StorageManager(config=config)
@@ -450,7 +450,7 @@ def mock_pool(  # noqa: PLR0915
     ) -> Mock:
         from datetime import datetime
 
-        from agentpool.sessions.models import SessionData
+        from agentwolf.sessions.models import SessionData
 
         data = SessionData(
             session_id=session_id,
@@ -551,7 +551,7 @@ def mock_agent(mock_env: Mock, mock_pool: Mock, storage_manager: StorageManager)
     """
     agent = Mock()
     agent.name = "test-agent"
-    agent.model_name = None  # resolve_default_model_info() falls back to ("default", "agentpool")
+    agent.model_name = None  # resolve_default_model_info() falls back to ("default", "agentwolf")
     agent.env = mock_env
     agent._input_provider = None
     agent.run = AsyncMock(return_value=Mock(data="test response"))
@@ -638,7 +638,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:  # noq
         input_provider: Any | None = None,
         **kwargs: Any,
     ) -> Any:
-        from agentpool.lifecycle.types import DeliveryMode
+        from agentwolf.lifecycle.types import DeliveryMode
 
         # D14: Store the canonical assistant_msg_id (or fallback to
         # message_id) so _before_consumer_loop can reuse it instead of
@@ -682,16 +682,16 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:  # noq
         if message_id is not None:
             import time as _time
 
-            from agentpool_server.opencode_server.event_processor import (
+            from agentwolf_server.opencode_server.event_processor import (
                 OpenCodeUserMessageMeta,
                 _deserialize_part,
             )
-            from agentpool_server.opencode_server.models.common import TimeCreated
-            from agentpool_server.opencode_server.models.message import (
+            from agentwolf_server.opencode_server.models.common import TimeCreated
+            from agentwolf_server.opencode_server.models.message import (
                 MessageWithParts,
                 UserMessage,
             )
-            from agentpool_server.opencode_server.opencode_message_bridge import (
+            from agentwolf_server.opencode_server.opencode_message_bridge import (
                 append_message_to_session,
             )
 
@@ -723,7 +723,7 @@ def server_state(tmp_project_dir: Path, mock_agent: Mock) -> ServerState:  # noq
     # session_controller is present, but ensure it's initialized for cases
     # where the mock pool's event_bus isn't available at construction time.
     if state.event_bridge is None and state._pool is not None:
-        from agentpool_server.opencode_server.event_bridge import OpenCodeEventBridge
+        from agentwolf_server.opencode_server.event_bridge import OpenCodeEventBridge
 
         session_pool = getattr(state._pool, "session_pool", None)
         if session_pool is not None:

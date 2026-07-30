@@ -14,12 +14,12 @@ import warnings
 
 import pytest
 
-from agentpool.agents.events.events import StreamCompleteEvent
-from agentpool.capabilities.runloop_delegation import RunLoopDelegationService
-from agentpool.host.context import HostContext
-from agentpool.host.registry import AgentRegistry
-from agentpool.orchestrator.core import EventBus
-from agentpool.orchestrator.run import RunHandle
+from agentwolf.agents.events.events import StreamCompleteEvent
+from agentwolf.capabilities.runloop_delegation import RunLoopDelegationService
+from agentwolf.host.context import HostContext
+from agentwolf.host.registry import AgentRegistry
+from agentwolf.orchestrator.core import EventBus
+from agentwolf.orchestrator.run import RunHandle
 
 
 pytestmark = pytest.mark.unit

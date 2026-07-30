@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
-from agentpool.mcp_server.manager import MCPManager, McpSessionContext
+from agentwolf.mcp_server.config_snapshot import McpConfigSnapshot
+from agentwolf.mcp_server.manager import MCPManager, McpSessionContext
 
 
 # ---------------------------------------------------------------------------

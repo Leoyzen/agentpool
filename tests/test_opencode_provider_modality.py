@@ -7,8 +7,8 @@ from typing import Any
 import pytest
 from tokonomics.model_discovery.model_info import ModelInfo, ModelPricing
 
-from agentpool_config.model_capabilities import ModelCapabilities
-from agentpool_server.opencode_server.models.provider import Model
+from agentwolf_config.model_capabilities import ModelCapabilities
+from agentwolf_server.opencode_server.models.provider import Model
 
 
 pytestmark = pytest.mark.unit

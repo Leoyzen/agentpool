@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from agentpool import AgentsManifest
+from agentwolf import AgentsManifest
 
 
 pytestmark = pytest.mark.unit
