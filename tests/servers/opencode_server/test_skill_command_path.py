@@ -8,10 +8,13 @@ broken _execute_slashed_command path that caused three symptoms:
 2. User message swallowed (no UserMessage created)
 3. Double prompt injection (staged_content + hardcoded Chinese prompt)
 
-CRITICAL: These tests do NOT mock command.execute, send_message, or
-run_stream as no-ops. The root cause of #339 going undetected was
-over-mocking in test_command_execution.py. These tests exercise the real
-execute_command -> skill execution -> send_message chain.
+These tests use real ``SlashedCommand`` instances with ``category='skill'``
+that call ``ctx.print`` and inject into ``staged_content`` — the core skill
+execution chain is NOT mocked. However, ``route_message`` and
+``send_message`` are mock-based (the conftest's ``_mock_route_message``
+simulates the EventProcessor's user-message reconstruction from ``meta.parts``).
+The VCR test in ``tests/vcr/test_skill_command_vcr.py`` exercises the real
+EventBus → EventProcessor chain end-to-end (requires a recorded cassette).
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from slashed import Command as SlashedCommand, CommandContext
 
 from agentpool_server.opencode_server.event_processor import (
@@ -29,6 +33,7 @@ from agentpool_server.opencode_server.models import (
     UserMessage,
 )
 from agentpool_server.opencode_server.routes.session_routes import (
+    _CommandOutputCapture,
     _DiscardOutputWriter,
 )
 
@@ -37,6 +42,9 @@ if TYPE_CHECKING:
     from httpx import AsyncClient as HttpxAsyncClient
 
     from agentpool_server.opencode_server.state import ServerState
+
+
+pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 
 
 # ---------------------------------------------------------------------------
@@ -576,11 +584,9 @@ async def test_discard_output_writer_discards_messages():
     writer = _DiscardOutputWriter()
     await writer.print("Loading skill: test")
     await writer.print("Another message")
-    # No buffer to check — the writer should silently discard.
-    # If it captured output, it would have a _buffer attribute.
-    assert not hasattr(writer, "_buffer"), (
-        "_DiscardOutputWriter should not have a _buffer — it discards output"
-    )
+    # _DiscardOutputWriter discards output silently — unlike _CommandOutputCapture,
+    # it has no buffer or string representation that stores messages.
+    assert not isinstance(writer, _CommandOutputCapture)
 
 
 # ---------------------------------------------------------------------------

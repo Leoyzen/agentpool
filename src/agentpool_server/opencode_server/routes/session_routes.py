@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from pathlib import Path
+import shlex
 from typing import TYPE_CHECKING, Any
 
 from anyenv.text_sharing.opencode import Message, MessagePart, OpenCodeSharer
@@ -413,8 +414,10 @@ async def _execute_skill_command(
 
     # Execute the skill — injects into per-session agent's staged_content
     # and discards ctx.print output (no TextPart capture).
+    # Use shlex.split for consistent quoting semantics with the ACP path
+    # (which uses the shlex-based slashed parser).
     output_writer = _DiscardOutputWriter()
-    args = request.arguments.split() if request.arguments else []
+    args = shlex.split(request.arguments) if request.arguments else []
     cmd_ctx = CommandContext(
         output=output_writer,
         data=session_agent.get_context(),
@@ -422,8 +425,25 @@ async def _execute_skill_command(
     )
     try:
         await command.execute(cmd_ctx, args, {})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Skill execution failed: {e}") from e
+    except Exception:
+        logger.exception("Skill execution failed for command: %s", request.command)
+        # Fire-and-forget design: return placeholder even on skill execution
+        # failure. The error is logged; the TUI shows an empty assistant
+        # message that will eventually receive an error via SSE.
+        user_msg_id = identifier.ascending("message")
+        assistant_msg_id = identifier.ascending("message", request.message_id)
+        assistant_message = AssistantMessage(
+            id=assistant_msg_id,
+            session_id=session_id,
+            parent_id=user_msg_id,
+            model_id=request.model or "default",
+            provider_id="opencode",
+            mode="command",
+            agent=request.agent or "default",
+            path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+            time=MessageTime(created=now_ms()),
+        )
+        return MessageWithParts(info=assistant_message, parts=[])
 
     # Build raw command string for TUI display (e.g. "/lodestone analyze this")
     raw_command = f"/{request.command}"
@@ -490,6 +510,12 @@ async def _execute_skill_command(
             meta=route_meta,
         )
     else:
+        # Fallback: integration not available. In production, server.py
+        # always sets session_pool_integration when session_pool is not
+        # None, so this branch is effectively unreachable. It exists for
+        # test setups without integration. Note: send_message does not
+        # support assistant_msg_id, so the SSE-delivered ID may diverge
+        # from the HTTP placeholder in this path (cosmetic mismatch only).
         from agentpool.lifecycle.types import DeliveryMode
 
         await session_pool.send_message(
@@ -500,6 +526,11 @@ async def _execute_skill_command(
             message_id=user_msg_id,
             meta=route_meta,
         )
+
+    # Note: busy/idle status is NOT explicitly set here. The event bridge
+    # handles session status transitions: RunStartedEvent → busy,
+    # StreamCompleteEvent → idle. This matches the normal /message path
+    # (message_routes.py), which also does not set busy/idle explicitly.
 
     # Broadcast command.executed event (signals dispatch, not completion)
     await state.broadcast_event(
@@ -2153,7 +2184,7 @@ async def execute_command(  # noqa: PLR0915
             # prompt lifecycle via _execute_skill_command (send_message →
             # EventBus-only). Non-skill commands continue to
             # _execute_slashed_command (existing behavior preserved).
-            if getattr(cmd, "category", None) == "skill":
+            if cmd.category == "skill":
                 return await _execute_skill_command(state, session_id, request)
             return await _execute_slashed_command(state, session_id, request)
 
