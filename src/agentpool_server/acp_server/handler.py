@@ -76,7 +76,7 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         self._converters: dict[str, ACPEventConverter] = {}
         self._parent_of: dict[str, str] = {}
         self.acp_agent = acp_agent
-        self._elicitation_tasks: set[asyncio.Task[Any]] = set()
+        self._elicitation_tasks: dict[str, set[asyncio.Task[Any]]] = {}
 
     @property
     def event_bus(self) -> EventBus:
@@ -279,8 +279,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             task = asyncio.create_task(
                 self._handle_elicitation_deferred(effective_sid, envelope.event)
             )
-            self._elicitation_tasks.add(task)
-            task.add_done_callback(self._elicitation_tasks.discard)
+            self._elicitation_tasks.setdefault(effective_sid, set()).add(task)
+
+            def _discard_task(t: asyncio.Task[Any], sid: str = effective_sid) -> None:
+                self._elicitation_tasks.get(sid, set()).discard(t)
+
+            task.add_done_callback(_discard_task)
             return
 
         # Look up converter: try event's session first, fall back to consumer's session
@@ -358,10 +362,22 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 elicitation_mode: Literal["form", "url"] = "url"
             else:
                 elicitation_mode = "form"
+            logger.info(
+                "Elicitation: sending elicitation/create to ACP client",
+                session_id=session_id,
+                mode=elicitation_mode,
+                deferred_handle=event.deferred_handle,
+            )
             response = await acp_requests.elicitation_create(
                 message=event.message,
                 mode=elicitation_mode,
                 requested_schema=event.requested_schema or {"type": "object"},
+            )
+            logger.info(
+                "Elicitation: received response from ACP client",
+                session_id=session_id,
+                action=response.action,
+                deferred_handle=event.deferred_handle,
             )
         except asyncio.CancelledError:
             logger.debug("Elicitation background task cancelled", session_id=session_id)
@@ -406,32 +422,55 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             # loop exit → _after_consumer_loop cleanup). Without this, events
             # from the resumed agent run are published to EventBus but nobody
             # is listening, so the ACP client never receives them.
+            logger.info(
+                "Elicitation: starting event consumer before resume",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+            )
             await self.start_event_consumer(session_id)
+            logger.info(
+                "Elicitation: calling resume_session",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+                action=payload.action,
+            )
             await session_pool.resume_session(
                 session_id,
                 deferred_tool_results={},
                 elicitation_payloads=[payload],
             )
+            logger.info(
+                "Elicitation: resume_session completed",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+            )
         except Exception:
             logger.exception(
                 "Failed to resume session after elicitation response",
                 session_id=session_id,
+                deferred_handle=event.deferred_handle,
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
-        """Clean up per-session converter, parent-child tracking, and tasks.
+        """Clean up per-session converter and parent-child tracking.
+
+        IMPORTANT: Do NOT cancel elicitation tasks here. Elicitation tasks
+        outlive the consumer loop by design — the consumer loop exits when
+        the agent turn ends (tool is deferred), but the elicitation task is
+        still waiting for the user's response. Cancelling it here would
+        prevent ``resume_session`` from ever being called, leaving the
+        client with no后续 events after submitting an elicitation response.
+
+        The elicitation task itself calls ``start_event_consumer`` before
+        ``resume_session``, so a fresh consumer is started when the session
+        resumes. Elicitation tasks are cleaned up in ``close_session`` when
+        the session is explicitly torn down.
 
         Args:
             session_id: The session whose consumer has stopped.
         """
         self._converters.pop(session_id, None)
         self._parent_of.pop(session_id, None)
-        # Cancel any pending elicitation tasks for this session.
-        # These are background tasks that send elicitation/create requests
-        # to the client — if the consumer is stopping, they're orphaned.
-        for task in self._elicitation_tasks:
-            if not task.done():
-                task.cancel()
 
     async def _event_consumer_loop(self, session_id: str) -> None:
         """Backward-compatible wrapper for mixin's consumer loop.
@@ -767,11 +806,12 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
         # Cancel all child sessions first (depth-first, pop-before-recurse)
         await self._cancel_subagents(session_id)
 
-        # Cancel any pending elicitation tasks for this session.
-        for task in self._elicitation_tasks:
-            if not task.done():
-                task.cancel()
-        self._elicitation_tasks.clear()
+        # Cancel pending elicitation tasks for this session only.
+        session_tasks = self._elicitation_tasks.pop(session_id, None)
+        if session_tasks is not None:
+            for task in session_tasks:
+                if not task.done():
+                    task.cancel()
 
         # Stop the event consumer (mixin's stop handles cancellation + unsubscribe)
         await self.stop_event_consumer(session_id)

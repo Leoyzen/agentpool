@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import UTC, datetime
+import json
+import logging
 from typing import Any, Literal, cast
 
 from pydantic_ai import (
@@ -509,3 +511,119 @@ def normalize_thinking_parts_in_messages(
             new_parts[i] = dataclasses.replace(part, content=text)
         if new_parts is not None:
             messages[idx] = dataclasses.replace(msg, parts=new_parts)
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _extract_first_json_object(s: str) -> str | None:
+    """Extract the first valid JSON object from a string that may contain concatenated JSONs.
+
+    Uses a brace-depth scanner to find the boundary of the first top-level ``{...}``
+    object, then validates it parses cleanly.  Returns ``None`` if the string is
+    already valid JSON or if no valid first object can be extracted.
+    """
+    s = s.strip()
+    if not s or s[0] != "{":
+        return None
+
+    # Fast path: already valid JSON — no repair needed.
+    try:
+        json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    else:
+        return None
+
+    # Scan for the first complete top-level JSON object using brace depth.
+    depth = 0
+    in_string = False
+    escape = False
+    for i, ch in enumerate(s):
+        if escape:
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = s[: i + 1]
+                try:
+                    json.loads(candidate)
+                except json.JSONDecodeError:
+                    return None
+                else:
+                    return candidate
+    return None
+
+
+def sanitize_tool_call_args_in_messages(
+    messages: list[Any],
+) -> None:
+    """Repair duplicated tool call arguments in message history in-place.
+
+    Some inference backends (vLLM with the ``glm47`` parser, SGLang with GLM
+    detectors) have a known streaming bug where tool call arguments are emitted
+    twice, producing concatenated JSON like::
+
+        {"path": "/foo"}{"path": "/foo"}
+
+    This corrupts downstream model requests (HTTP 400 "Extra data") and tool
+    execution.  This function walks every ``ModelResponse`` in the list, checks
+    each ``BaseToolCallPart`` whose ``args`` is a ``str``, and — when the string
+    contains concatenated JSON objects — replaces it with just the first valid
+    object.
+
+    This is idempotent: parts with valid JSON args, ``dict`` args, or ``None``
+    args are left unchanged.
+
+    See: vllm-project/vllm#47504, vllm-project/vllm#44098,
+    sgl-project/sglang#23071, sgl-project/sglang#16371.
+
+    Args:
+        messages: A list of pydantic-ai messages (e.g. from
+            ``agent_run.all_messages()``).  Only ``ModelResponse`` messages
+            with ``BaseToolCallPart`` instances whose ``args`` is a corrupted
+            JSON string are affected; other messages pass through untouched.
+    """
+    from pydantic_ai.messages import ModelResponse
+
+    for msg in messages:
+        if not isinstance(msg, ModelResponse):
+            continue
+        needs_repair = False
+        new_parts = list(msg.parts)
+        for i, part in enumerate(new_parts):
+            if not isinstance(part, BaseToolCallPart):
+                continue
+            if not isinstance(part.args, str):
+                continue
+            repaired = _extract_first_json_object(part.args)
+            if repaired is None:
+                continue
+            _logger.warning(
+                "Repaired duplicated tool call arguments",
+                extra={
+                    "tool_name": part.tool_name,
+                    "tool_call_id": part.tool_call_id,
+                    "original_len": len(part.args),
+                    "repaired_len": len(repaired),
+                },
+            )
+            needs_repair = True
+            new_parts[i] = dataclasses.replace(part, args=repaired)
+        if needs_repair:
+            # Assign the full list so the mutation is visible to any reference
+            # holding the same ModelResponse (e.g. a CallToolsNode's
+            # ``model_response`` attribute).  ModelResponse is a non-frozen
+            # dataclass, so attribute assignment is safe.
+            msg.parts = new_parts

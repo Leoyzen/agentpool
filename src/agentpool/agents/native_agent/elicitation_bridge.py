@@ -266,6 +266,13 @@ async def _handle_elicitation_deferred(
         has_elicitation = True
         elicitation_params = _extract_elicitation_params(call_meta)
 
+        logger.info(
+            "Elicitation bridge: intercepted deferred elicitation call",
+            tool_name=call.tool_name,
+            tool_call_id=call.tool_call_id,
+            mode=elicitation_params.get("mode"),
+        )
+
         pending_call = _build_pending_call(
             tool_call_id=call.tool_call_id,
             tool_name=call.tool_name,
@@ -274,6 +281,11 @@ async def _handle_elicitation_deferred(
         pending_calls.append(pending_call)
 
         # (b) Emit ElicitationDeferredEvent to the event bus.
+        logger.info(
+            "Elicitation bridge: emitting ElicitationDeferredEvent",
+            tool_call_id=call.tool_call_id,
+            session_id=session_id,
+        )
         event = ElicitationDeferredEvent(
             deferred_handle=call.tool_call_id,
             message=elicitation_params.get("message", ""),
@@ -284,6 +296,10 @@ async def _handle_elicitation_deferred(
         await _emit_elicitation_event(ctx, event)
 
         # (c) Register future in ElicitationFutureRegistry.
+        logger.info(
+            "Elicitation bridge: registering future in registry",
+            tool_call_id=call.tool_call_id,
+        )
         future = registry.register(call.tool_call_id)
 
         # (d) Broadcast the elicitation question to the input provider so
@@ -325,6 +341,11 @@ async def _handle_elicitation_deferred(
     # Must be after the loop to avoid overwriting the checkpoint with
     # each individual call — only the last call would survive otherwise.
     if checkpoint_manager is not None and run_ctx is not None and pending_calls:
+        logger.info(
+            "Elicitation bridge: checkpointing session",
+            session_id=session_id,
+            pending_call_count=len(pending_calls),
+        )
         messages: list[ModelMessage] = list(ctx.messages)
         await checkpoint_manager.checkpoint(
             session_id=session_id,

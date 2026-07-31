@@ -36,6 +36,7 @@ from agentpool.observability.spans import safe_span
 from agentpool.orchestrator.event_mapper import (
     EventMapper,
     normalize_thinking_parts_in_messages,
+    sanitize_tool_call_args_in_messages,
 )
 from agentpool.orchestrator.turn import HookAwareTurn, Turn
 from agentpool.tasks.exceptions import RunAbortedError
@@ -127,14 +128,18 @@ class NativeTurn(HookAwareTurn, Turn):
         return str(self._prompts)
 
     def _set_message_history(self, messages: list[ModelMessage]) -> None:
-        """Store message history with ThinkingPart normalization.
+        """Store message history with ThinkingPart normalization and tool call args sanitization.
 
         Wraps ``self._message_history = ...`` to ensure raw CoT providers
         (vLLM, gpt-oss, etc.) have their reasoning text copied from
         ``provider_details['raw_content']`` into ``ThinkingPart.content``
         before the history is persisted.  See issue #155.
+
+        Also repairs duplicated tool call arguments caused by streaming bugs
+        in inference backends (vLLM glm47 parser, SGLang GLM detectors).
         """
         normalize_thinking_parts_in_messages(messages)
+        sanitize_tool_call_args_in_messages(messages)
         self._message_history = messages
 
     async def execute(self) -> AsyncGenerator[RichAgentStreamEvent[Any]]:  # noqa: PLR0915, PLR0911
@@ -315,6 +320,13 @@ class NativeTurn(HookAwareTurn, Turn):
                                 self._agent._iteration_task = iteration_task
                                 node = await iteration_task
                                 current_node = node
+
+                                # Repair duplicated tool call args before CallToolsNode
+                                # validates and executes them. vLLM's glm47 parser can
+                                # emit args twice in streaming mode (vllm#47504).
+                                if isinstance(node, CallToolsNode):
+                                    sanitize_tool_call_args_in_messages([node.model_response])
+
                                 logger.info(
                                     "agent_run.next() completed",
                                     next_node_type=type(node).__name__,
@@ -432,6 +444,7 @@ class NativeTurn(HookAwareTurn, Turn):
                             message_id=self._message_id,
                             session_id=self._run_ctx.session_id,
                             parent_id=self._parent_id,
+                            messages=self._message_history or [],
                         )
                         yield StreamCompleteEvent(
                             message=self._final_message,

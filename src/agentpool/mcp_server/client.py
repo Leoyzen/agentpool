@@ -607,6 +607,12 @@ class MCPClient:
                     # sentinel "decline" so FastMCP sees a normal decline.
                     # MCPClient.call_tool() will check the side-channel
                     # after the MCP call returns and re-raise CallDeferred.
+                    logger.info(
+                        "MCP elicitation_handler: CallDeferred raised",
+                        tool_name=agent_ctx.tool_name,
+                        tool_call_id=agent_ctx.tool_call_id,
+                        deferred_kind="elicitation",
+                    )
                     metadata = exc.metadata or {}
                     agent_ctx._pending_elicitation_deferral = metadata.get("elicitation")
                     return ElicitResult(action="decline")
@@ -639,13 +645,30 @@ class MCPClient:
             # futures for long periods).
             if agent_ctx:
                 agent_ctx.in_mcp_callback = True
+            logger.info(
+                "MCP call_tool: sending request",
+                tool_name=name,
+                tool_call_id=agent_ctx.tool_call_id if agent_ctx else None,
+            )
             result = await self._client.call_tool(
                 name, arguments, progress_handler=progress_handler, meta=meta, raise_on_error=False
+            )
+            logger.info(
+                "MCP call_tool: received response",
+                tool_name=name,
+                is_error=result.is_error,
+                tool_call_id=agent_ctx.tool_call_id if agent_ctx else None,
             )
             # Check side-channel for durable elicitation deferral
             if agent_ctx and agent_ctx._pending_elicitation_deferral is not None:
                 deferred_params = agent_ctx._pending_elicitation_deferral
                 agent_ctx._pending_elicitation_deferral = None
+                logger.info(
+                    "MCP call_tool: CallDeferred detected via side-channel",
+                    tool_name=name,
+                    deferred_kind="elicitation",
+                    tool_call_id=agent_ctx.tool_call_id,
+                )
                 raise CallDeferred(  # noqa: TRY301
                     metadata={
                         "elicitation": deferred_params,
