@@ -189,6 +189,15 @@ max-complexity = 15
 ]
 # AgentDB schema_advanced tests
 "tests/capabilities/agent_db/test_schema_advanced.py" = ["TC001", "E501"]
+# AgentDB schema_write: D417, BLE001, PLR0915, E501
+"src/agentpool/capabilities/agent_db/schema_write.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+  "E501",
+]
+# AgentDB schema_write tests
+"tests/capabilities/agent_db/test_schema_write.py" = ["TC001", "E501"]
 
 [format]
 preview = true
