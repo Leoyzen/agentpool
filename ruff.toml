@@ -155,6 +155,60 @@ max-complexity = 15
 "src/agentpool/capabilities/viking/__init__.py" = ["BLE001", "TRY300"]
 # Viking instructions: E501 for markdown table lines
 "src/agentpool/capabilities/viking/instructions.py" = ["E501"]
+# AgentDB tools: ctx is pydantic-ai internal, BLE001 is intentional for tool error handling
+"src/agentpool/capabilities/agent_db/tools.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+]
+# AgentDB capability: TC001 for VikingCapability needed at runtime for dataclass field
+"src/agentpool/capabilities/agent_db/__init__.py" = ["TC001"]
+# AgentDB tests: TC001 for VikingCapability used as mock type, E501 for test data
+"tests/capabilities/agent_db/test_proxy_tools.py" = ["TC001", "E501"]
+"tests/capabilities/agent_db/test_scaffolding.py" = ["TC001"]
+"tests/capabilities/agent_db/__init__.py" = ["D104"]
+# AgentDB helpers: PLR0915 (too many statements), E501 (regex patterns)
+"src/agentpool/capabilities/agent_db/helpers.py" = ["PLR0915", "E501"]
+# AgentDB schema_read: D417, BLE001, PLR0915, E501
+"src/agentpool/capabilities/agent_db/schema_read.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+  "E501",
+]
+# AgentDB schema_read tests
+"tests/capabilities/agent_db/test_helpers.py" = ["E501"]
+"tests/capabilities/agent_db/test_schema_read.py" = ["TC001", "E501"]
+# AgentDB schema_advanced: D417, BLE001, PLR0915, E501
+"src/agentpool/capabilities/agent_db/schema_advanced.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+  "E501",
+  "PERF401",
+]
+# AgentDB schema_advanced tests
+"tests/capabilities/agent_db/test_schema_advanced.py" = ["TC001", "E501"]
+# AgentDB schema_write: D417, BLE001, PLR0915, E501
+"src/agentpool/capabilities/agent_db/schema_write.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+  "PLR0911",
+  "E501",
+]
+# AgentDB schema_write tests
+"tests/capabilities/agent_db/test_schema_write.py" = ["TC001", "E501"]
+# AgentDB schema_feedback: D417, BLE001, PLR0915, E501
+"src/agentpool/capabilities/agent_db/schema_feedback.py" = [
+  "D417",
+  "BLE001",
+  "PLR0915",
+  "PLR0911",
+  "E501",
+]
+# AgentDB schema_feedback tests
+"tests/capabilities/agent_db/test_schema_feedback.py" = ["TC001", "E501"]
 
 [format]
 preview = true

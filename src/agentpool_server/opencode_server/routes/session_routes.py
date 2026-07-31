@@ -270,48 +270,105 @@ async def _execute_slashed_command(  # noqa: PLR0915
         message_with_parts.parts.append(text_part)
         await state.broadcast_event(PartUpdatedEvent.create(text_part))
 
-        # Run agent to process the loaded skill context
+        # Run agent to process the loaded skill context.
+        # Skill commands (category="skill") route through SessionPool's
+        # EventBus-only path (route_message → send_message → _consume_run)
+        # with a proper USER message — NOT via run_stream(). The skill
+        # instructions were injected into session_agent.staged_content by
+        # command.execute() above; turn.py prepends staged_content to the
+        # prompt automatically. Routing via route_message() creates a real
+        # user message (visible in the TUI) and consumes events from the
+        # EventBus exactly once, matching the normal prompt path. Non-skill
+        # commands keep the legacy run_stream() behavior.
         try:
-            # Create adapter to stream agent events through existing text_part
-            adapter = OpenCodeStreamAdapter(
-                state=state,
-                session_id=session_id,
-                assistant_msg_id=assistant_msg_id,
-                assistant_msg=message_with_parts,
-                working_dir=state.working_dir,
+            is_skill = bool(
+                getattr(command, "category", "") == "skill"
+                or (
+                    state.skill_bridge is not None
+                    and state.skill_bridge.get_command(request.command) is not None
+                )
             )
-            # Build prompt including user arguments
-            user_request = (
-                request.arguments if request.arguments else "请使用已加载的 skill context"
-            )
-            agent_prompt = (
-                f"用户执行了命令 '{request.command}' 并说: {user_request}\n\n"
-                "请使用已加载的 skill context 来回答用户的请求。"
-            )
-
             session_pool = (
                 state.pool_or_none.session_pool if state.pool_or_none is not None else None
             )
-            if session_pool is not None:
+            if is_skill and session_pool is not None and state.session_pool_integration is not None:
+                # Create a USER message (not assistant) so the TUI shows the
+                # user's input, matching the normal prompt path.
+                user_msg_id = identifier.ascending("message", request.message_id)
+                user_message = UserMessage(
+                    id=user_msg_id,
+                    session_id=session_id,
+                    role="user",
+                    time=TimeCreated.now(),
+                    agent=request.agent or "default",
+                )
+                user_text = request.arguments or ""
+                user_part_id = identifier.ascending("part")
+                user_msg_with_parts = MessageWithParts(
+                    info=user_message,
+                    parts=[
+                        TextPart(
+                            id=user_part_id,
+                            message_id=user_msg_id,
+                            session_id=session_id,
+                            text=user_text,
+                        )
+                    ],
+                )
+                await append_message_to_session(state, session_id, user_msg_with_parts)
+                await state.broadcast_event(PartUpdatedEvent.create(user_msg_with_parts.parts[0]))
+                await state.broadcast_event(MessageUpdatedEvent.create(user_message))
+
+                # The user message ID flows to _route_message → send_message →
+                # UserMessageInsertedEvent for dedup with this emission.
                 input_provider = state.ensure_input_provider(session_id)
-                iterator = session_pool.run_stream(
-                    session_id,
-                    agent_prompt,
-                    scope="session",
+                await state.session_pool_integration.route_message(
+                    session_id=session_id,
+                    content=user_text,
+                    priority="when_idle",
                     input_provider=input_provider,
-                    message_id=assistant_msg_id,
+                    agent_name=request.agent or "default",
+                    message_id=user_msg_id,
+                    assistant_msg_id=assistant_msg_id,
                 )
             else:
-                # Fallback to direct agent if SessionPool not available
-                agent = state.agent
-                iterator = agent.run_stream(agent_prompt, session_id=session_id)  # type: ignore[assignment]
+                # Create adapter to stream agent events through existing text_part
+                adapter = OpenCodeStreamAdapter(
+                    state=state,
+                    session_id=session_id,
+                    assistant_msg_id=assistant_msg_id,
+                    assistant_msg=message_with_parts,
+                    working_dir=state.working_dir,
+                )
+                # Build prompt including user arguments
+                user_request = (
+                    request.arguments if request.arguments else "请使用已加载的 skill context"
+                )
+                agent_prompt = (
+                    f"用户执行了命令 '{request.command}' 并说: {user_request}\n\n"
+                    "请使用已加载的 skill context 来回答用户的请求。"
+                )
 
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
-            # Append adapter's response to text_part
-            if adapter.response_text:
-                text_part.text = f"{output_text}\n\n{adapter.response_text}"
-                await state.broadcast_event(PartUpdatedEvent.create(text_part))
+                if session_pool is not None:
+                    input_provider = state.ensure_input_provider(session_id)
+                    iterator = session_pool.run_stream(
+                        session_id,
+                        agent_prompt,
+                        scope="session",
+                        input_provider=input_provider,
+                        message_id=assistant_msg_id,
+                    )
+                else:
+                    # Fallback to direct agent if SessionPool not available
+                    agent = state.agent
+                    iterator = agent.run_stream(agent_prompt, session_id=session_id)  # type: ignore[assignment]
+
+                async for oc_event in adapter.process_stream(iterator):
+                    await state.broadcast_event(oc_event)
+                # Append adapter's response to text_part
+                if adapter.response_text:
+                    text_part.text = f"{output_text}\n\n{adapter.response_text}"
+                    await state.broadcast_event(PartUpdatedEvent.create(text_part))
         except Exception:  # noqa: BLE001
             # Command already executed, ignore agent errors
             pass
