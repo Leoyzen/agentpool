@@ -59,11 +59,9 @@ from agentpool_server.opencode_server.models import (
     StepStartPart,
     SummarizeRequest,
     TextPart,
-    TimeCreated,
     TimeCreatedUpdated,
     Todo,
     Tokens,
-    UserMessage,
 )
 from agentpool_server.opencode_server.session_pool_integration import (
     append_message_to_session,
@@ -122,6 +120,20 @@ class _CommandOutputCapture:
     def __str__(self) -> str:
         """Get the captured output as a single string."""
         return "\n".join(self._buffer)
+
+
+class _DiscardOutputWriter:
+    """Output writer that discards all command output.
+
+    Used for skill commands where ``ctx.print`` output (e.g.
+    "Loading skill: ...") must NOT be rendered as an assistant ``TextPart``.
+    Mirrors ACP's ``handler.py:582``
+    (``output_writer=lambda msg: logger.debug(...)``).
+    """
+
+    async def print(self, message: str) -> None:
+        """Discard the message (log at debug level only)."""
+        logger.debug("Skill command output discarded: %s", message)
 
 
 def _process_skill_template(template: str, arguments: str | None) -> str:
@@ -340,187 +352,166 @@ async def _execute_slashed_command(  # noqa: PLR0915
     return message_with_parts
 
 
-async def _execute_skill_command(  # noqa: PLR0915
+async def _execute_skill_command(
     state: ServerState,
     session_id: str,
     request: CommandRequest,
 ) -> MessageWithParts:
-    """Execute a skill command from the SkillCommandRegistry.
+    """Execute a skill command through the normal prompt lifecycle.
 
-    This implements opencode-compatible skill handling:
-    1. Load skill instructions
-    2. Process template with arguments ($1, $2, $ARGUMENTS)
-    3. Create USER message with processed content
-    4. Run agent with this user message
+    Routes skill commands (``category == "skill"``) through
+    ``send_message`` → EventBus-only consumption (fire-and-forget),
+    matching the ACP protocol's correct skill handling pattern.
+
+    Key differences from ``_execute_slashed_command``:
+    - Discards ``ctx.print`` output (no TextPart capture).
+    - Injects skill instructions + args into the per-session agent's
+      ``staged_content`` (via ``skill_bridge.execute_skill``).
+    - Passes empty content to ``send_message`` — the model receives
+      instructions and args exclusively from ``staged_content``.
+    - Passes ``meta=OpenCodeUserMessageMeta(parts=[...])`` with the raw
+      command string for TUI display (avoids empty user message bubble).
+    - Returns a placeholder immediately (fire-and-forget); the response
+      is delivered via SSE events.
+    - Does NOT call ``run_stream``, ``_process_message``, or build a
+      second hardcoded prompt.
+    - All within ``execute_command``'s existing session lock.
 
     Args:
-        state: The server state containing the skill commands.
+        state: The server state containing the command store and session pool.
         session_id: The session ID for this command execution.
         request: The command request with command name and arguments.
 
     Returns:
-        MessageWithParts containing the assistant's response.
+        MessageWithParts containing the assistant message placeholder
+        (response arrives via SSE events).
 
     Raises:
-        HTTPException: 404 if skill command not found.
+        HTTPException: 404 if command store not initialized or command not found.
+        HTTPException: 500 if skill execution fails.
     """
-    skill_name = request.command.removeprefix("skill:")
+    if state.command_store is None:
+        raise HTTPException(status_code=404, detail="Command store not initialized")
 
-    # Get skill command from pool
-    skill_cmd = None
+    # Retrieve skill command from store
+    command = state.command_store.get_command(request.command)
+    if command is None:
+        raise HTTPException(status_code=404, detail=f"Command not found: {request.command}")
 
-    if not skill_cmd:
-        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
+    # Get per-session agent for staged_content injection (not state.agent)
+    # This matches ACP's handler.py:558 pattern: get_or_create_session_agent
+    # ensures the agent that send_message runs is the same one whose
+    # staged_content receives the skill instructions.
+    session_pool = state.pool_or_none.session_pool if state.pool_or_none is not None else None
+    if session_pool is None:
+        raise HTTPException(status_code=500, detail="SessionPool not available for skill commands")
 
-    # Load skill instructions - use resolver for virtual skills
-    instructions = ""
-    if state.pool.skill_resolver is not None:
-        try:
-            skill = await state.pool.skill_resolver.resolve(skill_name)
-            instructions = skill.load_instructions()
-        except Exception:  # noqa: BLE001
-            # Fall back to local load if resolver fails
-            try:
-                instructions = skill_cmd.skill.load_instructions()
-            except ValueError:
-                instructions = ""
-    else:
-        try:
-            instructions = skill_cmd.skill.load_instructions()
-        except ValueError:
-            instructions = ""
+    session_agent = await session_pool.sessions.get_or_create_session_agent(
+        session_id,
+        agent_name=request.agent,
+    )
 
-    # Build RFC-0008 compatible XML format prompt
-    args = request.arguments or ""
-    user_prompt = f"""<skill-instruction>
-{instructions}
-</skill-instruction>
-
-<user-request>
-{args}
-</user-request>"""
-
+    # Execute the skill — injects into per-session agent's staged_content
+    # and discards ctx.print output (no TextPart capture).
+    output_writer = _DiscardOutputWriter()
+    args = request.arguments.split() if request.arguments else []
+    cmd_ctx = CommandContext(
+        output=output_writer,
+        data=session_agent.get_context(),
+        command_store=state.command_store,
+    )
     try:
-        # Mark session as busy
-        await set_session_status(state, session_id, SessionStatus(type="busy"))
-        await state.broadcast_event(
-            SessionStatusEvent.create(session_id, SessionStatus(type="busy"))
-        )
+        await command.execute(cmd_ctx, args, {})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Skill execution failed: {e}") from e
 
-        # Load session into session agent to ensure conversation history is restored
-        # This ensures agent sees all previous messages during this run
-        agent = state.agent
-        await agent.load_session(session_id)
+    # Build raw command string for TUI display (e.g. "/lodestone analyze this")
+    raw_command = f"/{request.command}"
+    if request.arguments:
+        raw_command = f"{raw_command} {request.arguments}"
 
-        # Create USER message (not assistant!)
-        user_msg_id = identifier.ascending("message")
-        user_message = UserMessage(
-            id=user_msg_id,
+    # Build meta for TUI display — send_message(content="") causes
+    # EventProcessor to create an empty user message (no parts) because
+    # `if content:` is falsy for empty string. Passing meta with serialized
+    # TextPart parts allows the EventProcessor to reconstruct the user
+    # message from meta.parts, displaying the raw command in the TUI.
+    # This mirrors the normal path (message_routes.py:700-701).
+    from agentpool_server.opencode_server.event_processor import (
+        OpenCodeUserMessageMeta,
+    )
+
+    user_msg_id = identifier.ascending("message")
+    assistant_msg_id = identifier.ascending("message", request.message_id)
+    now = now_ms()
+
+    # Create assistant message placeholder (in memory only — NOT pre-persisted).
+    # The event bridge (_before_consumer_loop) creates and broadcasts the
+    # assistant message when the first real agent event arrives, reusing
+    # the assistant_msg_id passed via integration.route_message.
+    assistant_message = AssistantMessage(
+        id=assistant_msg_id,
+        session_id=session_id,
+        parent_id=user_msg_id,
+        model_id=request.model or "default",
+        provider_id="opencode",
+        mode="command",
+        agent=request.agent or "default",
+        path=MessagePath(cwd=state.working_dir, root=state.working_dir),
+        time=MessageTime(created=now),
+    )
+    placeholder = MessageWithParts(info=assistant_message, parts=[])
+
+    # Build serialized TextPart for the raw command string
+    text_part_dict = TextPart(
+        id=identifier.ascending("part"),
+        message_id=user_msg_id,
+        session_id=session_id,
+        text=raw_command,
+    ).model_dump()
+    route_meta = OpenCodeUserMessageMeta(parts=[text_part_dict])
+
+    # Route through SessionPool with empty content — the model gets
+    # instructions + args exclusively from staged_content (which
+    # skill_bridge.execute_skill already populated).
+    # Prefer integration.route_message for assistant_msg_id propagation
+    # (ensures HTTP response ID matches SSE-delivered ID).
+    input_provider = state.ensure_input_provider(session_id)
+    integration = state.session_pool_integration
+    if integration is not None:
+        await integration.route_message(
             session_id=session_id,
-            role="user",
-            time=TimeCreated.now(),
-            agent=request.agent or "default",
+            content="",
+            input_provider=input_provider,
+            agent_name=request.agent,
+            message_id=user_msg_id,
+            assistant_msg_id=assistant_msg_id,
+            model_id=None,
+            provider_id=None,
+            meta=route_meta,
         )
-        user_part_id = identifier.ascending("part")
-        user_msg_with_parts = MessageWithParts(
-            info=user_message,
-            parts=[
-                TextPart(
-                    id=user_part_id, message_id=user_msg_id, session_id=session_id, text=user_prompt
-                )
-            ],
-        )
+    else:
+        from agentpool.lifecycle.types import DeliveryMode
 
-        # Store and broadcast user message
-        await append_message_to_session(state, session_id, user_msg_with_parts)
-        await state.broadcast_event(PartUpdatedEvent.create(user_msg_with_parts.parts[0]))
-        await state.broadcast_event(MessageUpdatedEvent.create(user_message))
-
-        # Create assistant message (for response)
-        # D14: Use request.message_id if provided for end-to-end ID consistency.
-        assistant_msg_id = identifier.ascending("message", request.message_id)
-        assistant_message = AssistantMessage(
-            id=assistant_msg_id,
+        await session_pool.send_message(
             session_id=session_id,
-            parent_id=user_msg_id,
-            model_id=request.model or "default",
-            provider_id="opencode",
-            mode="command",
-            agent=request.agent or "default",
-            path=MessagePath(cwd=state.working_dir, root=state.working_dir),
-            time=MessageTime(created=now_ms()),
+            content="",
+            mode=DeliveryMode.QUEUE,
+            input_provider=input_provider,
+            message_id=user_msg_id,
+            meta=route_meta,
         )
-        message_with_parts = MessageWithParts(info=assistant_message, parts=[])
-        await append_message_to_session(state, session_id, message_with_parts)
-        await state.broadcast_event(MessageUpdatedEvent.create(assistant_message))
 
-        # Add step-start part
-        step_start = StepStartPart(
-            id=identifier.ascending("part"),
+    # Broadcast command.executed event (signals dispatch, not completion)
+    await state.broadcast_event(
+        CommandExecutedEvent.create(
+            name=request.command,
+            session_id=session_id,
+            arguments=request.arguments or "",
             message_id=assistant_msg_id,
-            session_id=session_id,
         )
-        message_with_parts.parts.append(step_start)
-        await state.broadcast_event(PartUpdatedEvent.create(step_start))
+    )
 
-        # Run agent with the user message context
-        try:
-            adapter = OpenCodeStreamAdapter(
-                state=state,
-                session_id=session_id,
-                assistant_msg_id=assistant_msg_id,
-                assistant_msg=message_with_parts,
-                working_dir=state.working_dir,
-            )
-
-            session_pool = state.pool_or_none.session_pool if state.pool_or_none else None
-            if session_pool is not None:
-                iterator = session_pool.run_stream(
-                    session_id,
-                    user_prompt,
-                    scope="session",
-                    message_id=assistant_msg_id,
-                )
-            else:
-                # Fallback to direct agent if session_pool is not available
-                agent = state.agent
-                iterator = agent.run_stream(user_prompt, session_id=session_id)
-            async for oc_event in adapter.process_stream(iterator):
-                await state.broadcast_event(oc_event)
-
-        except Exception as e:  # noqa: BLE001
-            error_text = f"Error: {e}"
-            text_part = TextPart(
-                id=identifier.ascending("part"),
-                message_id=assistant_msg_id,
-                session_id=session_id,
-                text=error_text,
-            )
-            message_with_parts.parts.append(text_part)
-            await state.broadcast_event(PartUpdatedEvent.create(text_part))
-
-        # Add step-finish part
-        step_finish = StepFinishPart(
-            id=identifier.ascending("part"),
-            message_id=assistant_msg_id,
-            session_id=session_id,
-        )
-        message_with_parts.parts.append(step_finish)
-        await state.broadcast_event(PartUpdatedEvent.create(step_finish))
-
-        # Broadcast command.executed event
-        await state.broadcast_event(
-            CommandExecutedEvent.create(
-                name=request.command,
-                session_id=session_id,
-                arguments=request.arguments or "",
-                message_id=assistant_msg_id,
-            )
-        )
-    finally:
-        await state.mark_session_idle(session_id)
-
-    return message_with_parts
+    return placeholder
 
 
 async def get_or_load_session(state: ServerState, session_id: str) -> Session | None:
@@ -2148,7 +2139,8 @@ async def execute_command(  # noqa: PLR0915
     # deadlock.
     async with state.get_session_lock(session_id):
         # Check CommandStore first (slashed commands take priority)
-        if state.command_store and state.command_store.get_command(request.command) is not None:
+        cmd = state.command_store.get_command(request.command) if state.command_store else None
+        if cmd is not None:
             # Check for collision with MCP prompts
             session_agent = state.agent
             prompts = await session_agent.list_prompts()
@@ -2157,6 +2149,12 @@ async def execute_command(  # noqa: PLR0915
                     "Both slashed command and prompt exist for '%s'. Using slashed command.",
                     request.command,
                 )
+            # Route skill commands (category == "skill") through the normal
+            # prompt lifecycle via _execute_skill_command (send_message →
+            # EventBus-only). Non-skill commands continue to
+            # _execute_slashed_command (existing behavior preserved).
+            if getattr(cmd, "category", None) == "skill":
+                return await _execute_skill_command(state, session_id, request)
             return await _execute_slashed_command(state, session_id, request)
 
         # Fall back to MCP prompts (existing code remains unchanged)
