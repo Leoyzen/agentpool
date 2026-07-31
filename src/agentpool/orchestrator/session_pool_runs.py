@@ -375,16 +375,38 @@ class SessionPoolRunsMixin:
             gen = run_handle.start(content)
         # Lock released — the run is now registered and can be steered
         # by concurrent receive_request() calls.
+        #
+        # Consume events from the EventBus subscription ONLY. The run
+        # publishes every event to the EventBus (ProtocolChannel.publish →
+        # event_bus.publish inside RunHandle._execute_turn), so draining
+        # start() directly AND the subscription would deliver each event
+        # twice. Drive start() as a background side-effect (discarding
+        # yields, exactly like SessionController._consume_run) and yield
+        # from the subscription. Tool-published mid-turn events
+        # (e.g. SpawnSessionStart from task() → create_child_session())
+        # arrive on the same single EventBus path, preserving ordering.
+        # Consume events from the EventBus subscription ONLY. The run
+        # publishes every event to the EventBus (ProtocolChannel.publish →
+        # event_bus.publish inside RunHandle._execute_turn), so yielding
+        # from start() directly AND the subscription would deliver each
+        # event twice. We drive start() in the CURRENT task (no background
+        # task — anyio cancel scopes cannot be exited from a different
+        # task) and drain bus_queue for every event start() produces,
+        # yielding only from the subscription. Tool-published mid-turn
+        # events (e.g. SpawnSessionStart) arrive on the same single path.
         try:
             async for evt in gen:
-                # Drain any tool-published events from EventBus before
-                # yielding the start() event. This ensures SpawnSessionStart
-                # and similar events appear before the StreamCompleteEvent.
+                # start() published evt to the EventBus before yielding it
+                # (ProtocolChannel.publish runs before `yield event` in
+                # _execute_turn), so it is already in bus_queue. Drain all
+                # pending bus events — this yields each event exactly once
+                # from the subscription, never from gen directly.
                 with contextlib.suppress(asyncio.QueueEmpty):
                     while True:
                         envelope = bus_queue.get_nowait()
                         yield envelope.event
-                yield evt
+                        if isinstance(envelope.event, StreamCompleteEvent | RunErrorEvent):
+                            break
                 if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
