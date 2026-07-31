@@ -310,10 +310,18 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
             and self.tool_call_id is not None
             and self.tool_call_id in self.run_ctx.cached_elicitation_responses
         ):
+            logger.info(
+                "handle_elicitation: Path 1 (crash recovery cached response)",
+                tool_call_id=self.tool_call_id,
+            )
             return self.run_ctx.cached_elicitation_responses[self.tool_call_id]
 
         provider = self.get_input_provider()
         if not provider.supports_durable_elicitation:
+            logger.info(
+                "handle_elicitation: non-durable path (provider.get_elicitation)",
+                tool_call_id=self.tool_call_id,
+            )
             return await provider.get_elicitation(params)
 
         # Build elicitation params dict (used in both MCP and local paths).
@@ -339,6 +347,11 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
 
         # Path 2: MCP tools — raise CallDeferred (FastMCP can't await).
         if self.in_mcp_callback:
+            logger.info(
+                "handle_elicitation: Path 2 (MCP CallDeferred)",
+                tool_call_id=self.tool_call_id,
+                tool_name=self.tool_name,
+            )
             raise CallDeferred(
                 metadata={
                     "elicitation": elicitation_params,
@@ -349,6 +362,11 @@ class AgentContext[TDeps = Any](NodeContext[TDeps]):
         # Path 3: Local tools — checkpoint, emit event, await future.
         # The agent run suspends here without ending. When the future
         # resolves, handle_elicitation() returns and the tool continues.
+        logger.info(
+            "handle_elicitation: Path 3 (local tool, await future)",
+            tool_call_id=self.tool_call_id,
+            tool_name=self.tool_name,
+        )
         run_ctx = self.run_ctx
         if run_ctx is None:
             # No run context — fall back to synchronous path.

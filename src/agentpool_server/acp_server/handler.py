@@ -362,10 +362,22 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
                 elicitation_mode: Literal["form", "url"] = "url"
             else:
                 elicitation_mode = "form"
+            logger.info(
+                "Elicitation: sending elicitation/create to ACP client",
+                session_id=session_id,
+                mode=elicitation_mode,
+                deferred_handle=event.deferred_handle,
+            )
             response = await acp_requests.elicitation_create(
                 message=event.message,
                 mode=elicitation_mode,
                 requested_schema=event.requested_schema or {"type": "object"},
+            )
+            logger.info(
+                "Elicitation: received response from ACP client",
+                session_id=session_id,
+                action=response.action,
+                deferred_handle=event.deferred_handle,
             )
         except asyncio.CancelledError:
             logger.debug("Elicitation background task cancelled", session_id=session_id)
@@ -410,16 +422,33 @@ class ACPProtocolHandler(ProtocolEventConsumerMixin):
             # loop exit → _after_consumer_loop cleanup). Without this, events
             # from the resumed agent run are published to EventBus but nobody
             # is listening, so the ACP client never receives them.
+            logger.info(
+                "Elicitation: starting event consumer before resume",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+            )
             await self.start_event_consumer(session_id)
+            logger.info(
+                "Elicitation: calling resume_session",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+                action=payload.action,
+            )
             await session_pool.resume_session(
                 session_id,
                 deferred_tool_results={},
                 elicitation_payloads=[payload],
             )
+            logger.info(
+                "Elicitation: resume_session completed",
+                session_id=session_id,
+                deferred_handle=event.deferred_handle,
+            )
         except Exception:
             logger.exception(
                 "Failed to resume session after elicitation response",
                 session_id=session_id,
+                deferred_handle=event.deferred_handle,
             )
 
     async def _after_consumer_loop(self, session_id: str) -> None:
