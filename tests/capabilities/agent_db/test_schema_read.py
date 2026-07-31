@@ -687,6 +687,8 @@ def test_build_schema_read_tools_returns_expected_tools(
         "agentdb_get_qt",
         "agentdb_get_context",
         "agentdb_get_sub_qts",
+        "agentdb_query_signals",
+        "agentdb_query_backlog",
     })
     assert names == expected
     assert len(tools) == len(expected)
@@ -1023,3 +1025,148 @@ class TestGetSubQTs:
         assert "OPS-child-1" in titles
         assert "OPS-child-2" in titles
         assert "OPS-other" not in titles
+
+
+# ---- TestQuerySignals ----
+
+
+class TestQuerySignals:
+    """Tests for agentdb_query_signals."""
+
+    async def test_query_signals_basic(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Scan tickets/ for signal metadata and return SignalInfo list."""
+        signal1 = (
+            "---\ntype: ops\nsignal_name: abnormal_pressure\n"
+            "signal_priority: high\nticket_status: open\n"
+            "created_at: 2026-01-15\n---\nBody."
+        )
+        signal2 = (
+            "---\ntype: ops\nsignal_name: low_flow\n"
+            "signal_priority: medium\nticket_status: open\n"
+            "created_at: 2026-02-01\n---\nBody."
+        )
+        nonsignal = (
+            "---\ntype: opa\ntitle: OPA-001\nticket_status: open\n"
+            "created_at: 2026-01-10\n---\nBody."
+        )
+
+        async def ls_side_effect(uri: str) -> list[Any]:
+            if uri == "viking://tickets/":
+                return [
+                    {"name": "opa/", "is_dir": True},
+                    {"name": "ops/", "is_dir": True},
+                    {"name": "opl_proposal/", "is_dir": True},
+                ]
+            if uri == "viking://tickets/opa/":
+                return [{"name": "opa-001.md", "is_dir": False}]
+            if uri == "viking://tickets/ops/":
+                return [
+                    {"name": "signal-1.md", "is_dir": False},
+                    {"name": "signal-2.md", "is_dir": False},
+                ]
+            if uri == "viking://tickets/opl_proposal/":
+                return []
+            return []
+
+        mock_client.ls = AsyncMock(side_effect=ls_side_effect)
+
+        async def read_side_effect(uri: str) -> str:
+            mapping: dict[str, str] = {
+                "viking://tickets/opa/opa-001.md": nonsignal,
+                "viking://tickets/ops/signal-1.md": signal1,
+                "viking://tickets/ops/signal-2.md": signal2,
+            }
+            return mapping.get(uri, "")
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_query_signals")
+
+        ctx = _make_ctx()
+        result = await tool(ctx)
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert isinstance(data, list)
+        assert len(data) == 2
+        names = {item["signal_name"] for item in data}
+        assert "abnormal_pressure" in names
+        assert "low_flow" in names
+
+
+# ---- TestQueryBacklog ----
+
+
+class TestQueryBacklog:
+    """Tests for agentdb_query_backlog."""
+
+    async def test_query_backlog_basic(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Aggregate pending QTs and compute backlog report."""
+        qt1 = (
+            "---\ntype: opa\ntitle: OPA-001\nticket_status: open\n"
+            "expert_owner: expert_a\ncreated_at: 2026-01-15\n---\nBody."
+        )
+        qt2 = (
+            "---\ntype: ops\ntitle: OPS-001\nticket_status: open\n"
+            "expert_owner: expert_b\ncreated_at: 2026-02-01\n---\nBody."
+        )
+        qt3 = (
+            "---\ntype: opl_proposal\ntitle: OPL-001\nticket_status: reviewing\n"
+            "expert_owner: expert_a\ncreated_at: 2026-01-10\n---\nBody."
+        )
+
+        async def ls_side_effect(uri: str) -> list[Any]:
+            if uri == "viking://tickets/":
+                return [
+                    {"name": "opa/", "is_dir": True},
+                    {"name": "ops/", "is_dir": True},
+                    {"name": "opl_proposal/", "is_dir": True},
+                ]
+            if uri == "viking://tickets/opa/":
+                return [{"name": "opa-001.md", "is_dir": False}]
+            if uri == "viking://tickets/ops/":
+                return [{"name": "ops-001.md", "is_dir": False}]
+            if uri == "viking://tickets/opl_proposal/":
+                return [{"name": "opl-001.md", "is_dir": False}]
+            return []
+
+        mock_client.ls = AsyncMock(side_effect=ls_side_effect)
+
+        async def read_side_effect(uri: str) -> str:
+            mapping: dict[str, str] = {
+                "viking://tickets/opa/opa-001.md": qt1,
+                "viking://tickets/ops/ops-001.md": qt2,
+                "viking://tickets/opl_proposal/opl-001.md": qt3,
+            }
+            return mapping.get(uri, "")
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_query_backlog")
+
+        ctx = _make_ctx()
+        result = await tool(ctx)
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert "total" in data
+        assert data["total"] == 3
+        assert "counts_by_type" in data
+        assert data["counts_by_type"]["opa"] == 1
+        assert data["counts_by_type"]["ops"] == 1
+        assert data["counts_by_type"]["opl_proposal"] == 1
+        assert "counts_by_expert" in data
+        assert data["counts_by_expert"]["expert_a"] == 2
+        assert data["counts_by_expert"]["expert_b"] == 1
+        assert "items" in data
+        assert len(data["items"]) == 3

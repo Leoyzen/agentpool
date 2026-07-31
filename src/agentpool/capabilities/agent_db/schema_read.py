@@ -1023,6 +1023,178 @@ def build_schema_read_tools(
 
         tools.append(agentdb_get_sub_qts)
 
+        # ---- 10. agentdb_query_signals ----
+        async def agentdb_query_signals(
+            ctx: RunContext[Any],
+            signal_name: str = "",
+            priority: str = "",
+            status: str = "",
+        ) -> ToolReturn:
+            """Scan tickets for signal metadata and return matching signals.
+
+            Scans all ticket subdirectories for .md files whose
+            frontmatter contains a ``signal_name`` field, filters by
+            the provided criteria, and returns a list of SignalInfo
+            objects.
+
+            Args:
+                signal_name: Filter by signal name.
+                priority: Filter by signal priority.
+                status: Filter by ticket status.
+
+            Returns:
+                JSON array of SignalInfo objects.
+            """
+            tickets_base = "viking://tickets/"
+            if not uri_filter.is_allowed(tickets_base):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{tickets_base}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                qt_dirs: tuple[str, ...] = ("opa", "ops", "opl_proposal")
+                signals: list[dict[str, Any]] = []
+                for qd in qt_dirs:
+                    dir_uri = f"{tickets_base}{qd}/"
+                    try:
+                        entries = await client.ls(dir_uri)
+                    except Exception:
+                        entries = []
+                    if not entries:
+                        continue
+                    for entry in entries:
+                        if isinstance(entry, str):
+                            fname = entry
+                        elif isinstance(entry, dict):
+                            fname = entry.get("name", "")
+                        else:
+                            continue
+                        if not fname.endswith(".md"):
+                            continue
+                        file_uri = dir_uri + fname
+                        try:
+                            file_content = await client.read(file_uri)
+                        except Exception:
+                            continue
+                        if not file_content:
+                            continue
+                        fm, _ = parse_frontmatter(file_content)
+                        if "signal_name" not in fm:
+                            continue
+                        if signal_name and str(fm.get("signal_name", "")) != signal_name:
+                            continue
+                        if priority and str(fm.get("signal_priority", "")) != priority:
+                            continue
+                        if status and str(fm.get("ticket_status", "")) != status:
+                            continue
+                        signals.append({
+                            "uri": file_uri,
+                            "signal_name": str(fm.get("signal_name", "")),
+                            "signal_priority": str(fm.get("signal_priority", "")),
+                            "ticket_status": str(fm.get("ticket_status", "")),
+                            "created_at": str(fm.get("created_at", "")),
+                            "qt_type": str(fm.get("type", qd)),
+                        })
+                return ToolReturn(return_value=json.dumps(signals, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_query_signals)
+
+        # ---- 11. agentdb_query_backlog ----
+        async def agentdb_query_backlog(
+            ctx: RunContext[Any],
+            qt_type: str = "",
+            expert_owner: str = "",
+        ) -> ToolReturn:
+            """Aggregate pending QTs into a backlog report.
+
+            Collects all pending QTs (reusing list_pending logic),
+            computes counts by type, expert owner, and priority,
+            and returns a BacklogReport JSON object.
+
+            Args:
+                qt_type: Filter by QT type.
+                expert_owner: Filter by expert owner.
+
+            Returns:
+                JSON with ``total``, ``counts_by_type``, ``counts_by_expert``,
+                ``items``, and ``oldest_pending_days``.
+            """
+            tickets_base = "viking://tickets/"
+            if not uri_filter.is_allowed(tickets_base):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{tickets_base}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                all_qt_dirs: tuple[str, ...] = ("opa", "ops", "opl_proposal")
+                scan_dirs: tuple[str, ...] = all_qt_dirs
+                if qt_type:
+                    scan_dirs = (qt_type,) if qt_type in all_qt_dirs else ()
+                items: list[dict[str, Any]] = []
+                for qd in scan_dirs:
+                    dir_uri = f"{tickets_base}{qd}/"
+                    try:
+                        entries = await client.ls(dir_uri)
+                    except Exception:
+                        entries = []
+                    if not entries:
+                        continue
+                    for entry in entries:
+                        if isinstance(entry, str):
+                            fname = entry
+                        elif isinstance(entry, dict):
+                            fname = entry.get("name", "")
+                        else:
+                            continue
+                        if not fname.endswith(".md"):
+                            continue
+                        file_uri = dir_uri + fname
+                        try:
+                            file_content = await client.read(file_uri)
+                        except Exception:
+                            continue
+                        if not file_content:
+                            continue
+                        fm, _ = parse_frontmatter(file_content)
+                        if expert_owner and str(fm.get("expert_owner", "")) != expert_owner:
+                            continue
+                        items.append({
+                            "uri": file_uri,
+                            "qt_type": str(fm.get("type", qd)),
+                            "title": str(fm.get("title", "")),
+                            "ticket_status": str(fm.get("ticket_status", "")),
+                            "expert_owner": str(fm.get("expert_owner", "")),
+                            "created_at": str(fm.get("created_at", "")),
+                        })
+                # Compute counts
+                counts_by_type: dict[str, int] = {}
+                counts_by_expert: dict[str, int] = {}
+                for item in items:
+                    qt = str(item.get("qt_type", ""))
+                    counts_by_type[qt] = counts_by_type.get(qt, 0) + 1
+                    exp = str(item.get("expert_owner", ""))
+                    if exp:
+                        counts_by_expert[exp] = counts_by_expert.get(exp, 0) + 1
+                result = {
+                    "total": len(items),
+                    "counts_by_type": counts_by_type,
+                    "counts_by_expert": counts_by_expert,
+                    "items": items,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_query_backlog)
+
     return tools
 
 
