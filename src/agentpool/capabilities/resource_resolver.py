@@ -16,6 +16,7 @@ from agentpool.capabilities.resource_protocols import (
     BlobResourceContent,
     TextResourceContent,
 )
+from agentpool.skills.uri_resolver import ResolvedSkillURI, _name_alternatives
 
 
 if TYPE_CHECKING:
@@ -55,6 +56,73 @@ def _extract_skill_name(uri: str) -> str:
     return path.split("/")[0] if path else ""
 
 
+async def _resolve_skill_reference(
+    skill_caps: list[SkillResource],
+    skill_name: str,
+    reference_path: str,
+) -> str | None:
+    """Resolve a skill reference file by looking up the skill's filesystem path.
+
+    Iterates ``SkillResource`` providers, finds the ``SkillEntry`` matching
+    ``skill_name``, and reads the reference file from the skill's ``skill_path``
+    directory on disk.
+
+    Args:
+        skill_caps: List of ``SkillResource`` providers to query.
+        skill_name: The skill name to look up.
+        reference_path: Relative path to the reference file within the skill directory.
+
+    Returns:
+        The reference file content as a string, or ``None`` if the skill or
+        reference file cannot be found.
+    """
+    from upathtools import UPath
+
+    from agentpool.skills.exceptions import SecurityError
+
+    # Defense-in-depth: ResolvedSkillURI.parse() already rejects ".." segments,
+    # but we double-check here in case this helper is called directly.
+    if ".." in reference_path.split("/"):
+        raise SecurityError(f"Path traversal detected in reference path: {reference_path}")
+
+    # Try exact name and underscore/hyphen alternatives
+    candidate_names = [skill_name, *_name_alternatives(skill_name)]
+
+    for skill_cap in skill_caps:
+        try:
+            entries = await skill_cap.list_skills()
+        except Exception:  # noqa: BLE001
+            continue
+
+        for entry in entries:
+            if entry.name not in candidate_names:
+                continue
+
+            # Only filesystem skills (UPath) can have reference files read from disk.
+            # PurePosixPath or None means virtual/remote skill — cannot read files.
+            skill_path = entry.skill_path
+            if not isinstance(skill_path, UPath):
+                continue
+
+            ref_file = skill_path / reference_path
+
+            # Resolve and verify the path is within the skill directory
+            try:
+                resolved_ref = ref_file.resolve()
+                resolved_skill = skill_path.resolve()
+                if not str(resolved_ref).startswith(str(resolved_skill)):
+                    raise SecurityError(f"Reference path escapes skill directory: {reference_path}")
+            except (OSError, ValueError):
+                continue
+
+            if not ref_file.exists():
+                continue
+
+            return ref_file.read_text(encoding="utf-8")
+
+    return None
+
+
 @logfire.instrument("capability.resource_resolver.resolve")
 async def resolve_resource_content(
     uri: str,
@@ -66,7 +134,9 @@ async def resolve_resource_content(
     """Resolve a resource URI and return its content as ``UserContent`` items.
 
     Routes by URI scheme:
-        - ``skill://`` → ``SkillResource`` providers (``read_skill()``)
+        - ``skill://skill-name`` → ``SkillResource.read_skill()`` (SKILL.md content)
+        - ``skill://skill-name/references/file.md`` → reads the reference file
+          from the skill's filesystem directory
         - Other URIs → ``ResourceAccess`` providers (``read_resource()``)
 
     Args:
@@ -81,7 +151,30 @@ async def resolve_resource_content(
     """
     # ---- skill:// routing ----
     if uri.startswith("skill://"):
-        skill_name = _extract_skill_name(uri)
+        resolved = ResolvedSkillURI.parse(uri)
+        skill_name = resolved.skill_name
+
+        # If the URI contains a reference path, read the reference file.
+        # Exception: "SKILL.md" (case-insensitive) is the skill's main file —
+        # use read_skill() for backward compatibility and virtual skill support.
+        if resolved.reference_path is not None and resolved.reference_path.upper() != "SKILL.MD":
+            try:
+                ref_content = await _resolve_skill_reference(
+                    skill_caps, skill_name, resolved.reference_path
+                )
+            except Exception:  # noqa: BLE001
+                logfire.exception(
+                    "Failed to read skill reference '{skill_name}/{ref}'",
+                    skill_name=skill_name,
+                    ref=resolved.reference_path,
+                )
+                return None
+            if ref_content is not None:
+                truncated = _truncate_text(ref_content, max_text_chars)
+                return [f'<resource uri="{uri}">\n{truncated}\n</resource>']
+            return None
+
+        # No reference path — read SKILL.md content
         for skill_cap in skill_caps:
             try:
                 content = await skill_cap.read_skill(skill_name)
