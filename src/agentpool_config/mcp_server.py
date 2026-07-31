@@ -34,6 +34,11 @@ def make_mcp_httpx_client_factory(
     MCP default of 300s. This ensures that a silent proxy or unresponsive
     server triggers a ``ReadTimeout`` rather than hanging indefinitely.
 
+    When created from ``BaseMCPServerConfig.to_transport()``, the
+    ``read_timeout`` is set to the server's configured ``timeout`` value
+    (default 600s), allowing long-running tool calls (e.g., elicitation
+    flows that wait for user input) to complete without premature timeout.
+
     Args:
         read_timeout: Read timeout in seconds.
 
@@ -382,7 +387,7 @@ class SSEMCPServerConfig(BaseMCPServerConfig):
         return SSETransport(
             url=str(self.url),
             headers=self.headers,
-            httpx_client_factory=make_mcp_httpx_client_factory(),
+            httpx_client_factory=make_mcp_httpx_client_factory(read_timeout=self.timeout),
         )
 
 
@@ -452,7 +457,7 @@ class StreamableHTTPMCPServerConfig(BaseMCPServerConfig):
         return StreamableHttpTransport(
             url=str(self.url),
             headers=self.headers,
-            httpx_client_factory=make_mcp_httpx_client_factory(),
+            httpx_client_factory=make_mcp_httpx_client_factory(read_timeout=self.timeout),
         )
 
 
