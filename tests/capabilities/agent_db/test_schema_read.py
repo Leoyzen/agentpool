@@ -682,7 +682,12 @@ def test_build_schema_read_tools_returns_expected_tools(
         "agentdb_get_effective_knowledge",
         "agentdb_query_applicability",
     }
-    expected.add("agentdb_list_pending")
+    expected.update({
+        "agentdb_list_pending",
+        "agentdb_get_qt",
+        "agentdb_get_context",
+        "agentdb_get_sub_qts",
+    })
     assert names == expected
     assert len(tools) == len(expected)
 
@@ -840,3 +845,181 @@ class TestListPending:
         assert isinstance(result, ToolReturn)
         data = json.loads(result.return_value)
         assert data == []
+
+
+# ---- TestGetQT ----
+
+
+class TestGetQT:
+    """Tests for agentdb_get_qt."""
+
+    async def test_get_qt_basic(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Read a QT file and return frontmatter + body + cr_history."""
+        qt_content = (
+            "---\n"
+            "type: opa\n"
+            "title: OPA-001\n"
+            "ticket_status: open\n"
+            "expert_owner: expert_a\n"
+            "created_at: 2026-01-15\n"
+            "description: Test OPA\n"
+            "---\n\n"
+            "## Description\n\nTest OPA body.\n\n"
+            "<!-- cr: 2026-01-16 | action: review | by: expert_b | comment: Looks good -->\n"
+        )
+        mock_client.read = AsyncMock(return_value=qt_content)
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_get_qt")
+
+        ctx = _make_ctx()
+        result = await tool(ctx, qt_uri="viking://tickets/opa/opa-001.md")
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["uri"] == "viking://tickets/opa/opa-001.md"
+        assert data["frontmatter"]["type"] == "opa"
+        assert data["frontmatter"]["title"] == "OPA-001"
+        assert data["frontmatter"]["ticket_status"] == "open"
+        assert "Test OPA body" in data["body"]
+        assert isinstance(data["cr_history"], list)
+        assert len(data["cr_history"]) >= 1
+
+    async def test_get_qt_not_found(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Return error when QT file is empty or not found."""
+        mock_client.read = AsyncMock(return_value="")
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_get_qt")
+
+        ctx = _make_ctx()
+        result = await tool(ctx, qt_uri="viking://tickets/opa/nonexistent.md")
+
+        assert isinstance(result, ToolReturn)
+        assert "not found" in str(result.return_value).lower()
+
+
+# ---- TestGetContext ----
+
+
+class TestGetContext:
+    """Tests for agentdb_get_context."""
+
+    async def test_get_context_basic(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Read QT and related entities, return context with raw_refs and graph_context."""
+        qt_content = (
+            "---\n"
+            "type: opa\n"
+            "title: OPA-001\n"
+            "ticket_status: open\n"
+            "entity_rel:\n"
+            "  - source: wiki/fault/pump_failure\n"
+            "    relation: addresses\n"
+            "---\n\n"
+            "## Description\n\nTest OPA.\n"
+        )
+        crossref_yaml = (
+            "- source: tickets/opa/opa-001.md\n"
+            "  target: wiki/fault/pump_failure\n"
+            "  relation: addresses\n"
+        )
+
+        async def read_side_effect(uri: str) -> str:
+            mapping: dict[str, str] = {
+                "viking://tickets/opa/opa-001.md": qt_content,
+                "viking://graph/entity_rel/crossref.yaml": crossref_yaml,
+            }
+            return mapping.get(uri, "")
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_get_context")
+
+        ctx = _make_ctx()
+        result = await tool(ctx, qt_uri="viking://tickets/opa/opa-001.md")
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["qt_uri"] == "viking://tickets/opa/opa-001.md"
+        assert "raw_refs" in data
+        assert isinstance(data["raw_refs"], list)
+        assert "related_entities" in data
+        assert isinstance(data["graph_context"], dict)
+
+
+# ---- TestGetSubQTs ----
+
+
+class TestGetSubQTs:
+    """Tests for agentdb_get_sub_qts."""
+
+    async def test_get_sub_qts_basic(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """List child QTs that have parent_qt pointing to the parent."""
+        child1_content = (
+            "---\ntype: ops\ntitle: OPS-child-1\nticket_status: open\n"
+            "parent_qt: viking://tickets/opa/opa-001.md\n---\nBody."
+        )
+        child2_content = (
+            "---\ntype: ops\ntitle: OPS-child-2\nticket_status: reviewing\n"
+            "parent_qt: viking://tickets/opa/opa-001.md\n---\nBody."
+        )
+        unrelated_content = (
+            "---\ntype: ops\ntitle: OPS-other\nticket_status: open\n"
+            "parent_qt: viking://tickets/opa/opa-999.md\n---\nBody."
+        )
+
+        async def ls_side_effect(uri: str) -> list[Any]:
+            if uri == "viking://tickets/ops/":
+                return [
+                    {"name": "ops-child-1.md", "is_dir": False},
+                    {"name": "ops-child-2.md", "is_dir": False},
+                    {"name": "ops-other.md", "is_dir": False},
+                ]
+            return []
+
+        mock_client.ls = AsyncMock(side_effect=ls_side_effect)
+
+        async def read_side_effect(uri: str) -> str:
+            mapping: dict[str, str] = {
+                "viking://tickets/ops/ops-child-1.md": child1_content,
+                "viking://tickets/ops/ops-child-2.md": child2_content,
+                "viking://tickets/ops/ops-other.md": unrelated_content,
+            }
+            return mapping.get(uri, "")
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+
+        tools = build_schema_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_get_sub_qts")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            parent_uri="viking://tickets/opa/opa-001.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert isinstance(data, list)
+        assert len(data) == 2
+        titles = {item["title"] for item in data}
+        assert "OPS-child-1" in titles
+        assert "OPS-child-2" in titles
+        assert "OPS-other" not in titles

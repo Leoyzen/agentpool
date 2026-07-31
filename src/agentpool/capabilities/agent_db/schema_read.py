@@ -7,6 +7,7 @@ fault-symptom graph, variant merging, and knowledge applicability structures.
 from __future__ import annotations
 
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai.messages import ToolReturn
@@ -829,6 +830,198 @@ def build_schema_read_tools(
                 return ToolReturn(return_value=f"Error: {e}")
 
         tools.append(agentdb_list_pending)
+
+        # ---- 7. agentdb_get_qt ----
+        async def agentdb_get_qt(
+            ctx: RunContext[Any],
+            qt_uri: str,
+        ) -> ToolReturn:
+            """Read a quality ticket (QT) file and return its full detail.
+
+            Parses the QT file frontmatter and body, extracts CR (change
+            record) history from HTML comments in the body, and returns
+            a QTDetail JSON object.
+
+            Args:
+                qt_uri: URI of the QT file (e.g. ``viking://tickets/opa/opa-001.md``).
+
+            Returns:
+                JSON with ``uri``, ``frontmatter``, ``body``, and ``cr_history``.
+            """
+            if not uri_filter.is_allowed(qt_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{qt_uri}' is not in the allowed "
+                        f"namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                content = await client.read(qt_uri)
+                if not content:
+                    return ToolReturn(return_value=f"QT not found at {qt_uri}")
+                fm, body = parse_frontmatter(content)
+                # Extract CR history from HTML comments: <!-- cr: ... -->
+                cr_history: list[dict[str, str]] = []
+                cr_pattern = re.compile(r"<!--\s*cr:\s*(.+?)\s*-->", re.DOTALL)
+                for m in cr_pattern.finditer(body):
+                    cr_text = m.group(1).strip()
+                    entry: dict[str, str] = {}
+                    for raw_part in cr_text.split("|"):
+                        part = raw_part.strip()
+                        if ":" in part:
+                            key, _, val = part.partition(":")
+                            entry[key.strip()] = val.strip()
+                    if entry:
+                        cr_history.append(entry)
+                result = {
+                    "uri": qt_uri,
+                    "frontmatter": fm,
+                    "body": body,
+                    "cr_history": cr_history,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_get_qt)
+
+        # ---- 8. agentdb_get_context ----
+        async def agentdb_get_context(
+            ctx: RunContext[Any],
+            qt_uri: str,
+        ) -> ToolReturn:
+            """Get the context of a QT including raw references and graph relationships.
+
+            Reads the QT file, extracts raw references from frontmatter
+            ``entity_rel`` field and crossref graph file, and returns
+            a QTContext JSON object.
+
+            Args:
+                qt_uri: URI of the QT file.
+
+            Returns:
+                JSON with ``qt_uri``, ``raw_refs``, ``related_entities``, and
+                ``graph_context``.
+            """
+            if not uri_filter.is_allowed(qt_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{qt_uri}' is not in the allowed "
+                        f"namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                content = await client.read(qt_uri)
+                if not content:
+                    return ToolReturn(return_value=f"QT not found at {qt_uri}")
+                fm, _ = parse_frontmatter(content)
+                # Extract raw_refs from frontmatter entity_rel
+                raw_refs: list[dict[str, Any]] = []
+                entity_rel = fm.get("entity_rel", [])
+                if isinstance(entity_rel, list):
+                    raw_refs = [e for e in entity_rel if isinstance(e, dict)]
+                # Read crossref graph file for related entities
+                related_entities: list[dict[str, Any]] = []
+                graph_context: dict[str, Any] = {}
+                crossref_uri = "viking://graph/entity_rel/crossref.yaml"
+                if uri_filter.is_allowed(crossref_uri):
+                    try:
+                        crossref_content = await client.read(crossref_uri)
+                        if crossref_content:
+                            parsed = yaml.safe_load(crossref_content)
+                            if isinstance(parsed, list):
+                                # Filter edges related to this QT
+                                qt_path = qt_uri.replace("viking://", "")
+                                for edge in parsed:
+                                    if isinstance(edge, dict):
+                                        src = str(edge.get("source", ""))
+                                        tgt = str(edge.get("target", ""))
+                                        if qt_path in src or qt_path in tgt:
+                                            related_entities.append(edge)
+                                graph_context["crossref_edges"] = related_entities
+                    except Exception:
+                        pass
+                result = {
+                    "qt_uri": qt_uri,
+                    "raw_refs": raw_refs,
+                    "related_entities": related_entities,
+                    "graph_context": graph_context,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_get_context)
+
+        # ---- 9. agentdb_get_sub_qts ----
+        async def agentdb_get_sub_qts(
+            ctx: RunContext[Any],
+            parent_uri: str,
+        ) -> ToolReturn:
+            """List child QTs that reference a parent QT.
+
+            Scans all ticket subdirectories for .md files whose
+            ``parent_qt`` frontmatter field matches ``parent_uri``.
+
+            Args:
+                parent_uri: URI of the parent QT.
+
+            Returns:
+                JSON array of QTSummary objects for child QTs.
+            """
+            tickets_base = "viking://tickets/"
+            if not uri_filter.is_allowed(tickets_base):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{tickets_base}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                qt_dirs: tuple[str, ...] = ("opa", "ops", "opl_proposal")
+                children: list[dict[str, Any]] = []
+                for qd in qt_dirs:
+                    dir_uri = f"{tickets_base}{qd}/"
+                    try:
+                        entries = await client.ls(dir_uri)
+                    except Exception:
+                        entries = []
+                    if not entries:
+                        continue
+                    for entry in entries:
+                        if isinstance(entry, str):
+                            fname = entry
+                        elif isinstance(entry, dict):
+                            fname = entry.get("name", "")
+                        else:
+                            continue
+                        if not fname.endswith(".md"):
+                            continue
+                        file_uri = dir_uri + fname
+                        try:
+                            file_content = await client.read(file_uri)
+                        except Exception:
+                            continue
+                        if not file_content:
+                            continue
+                        fm, _ = parse_frontmatter(file_content)
+                        if str(fm.get("parent_qt", "")) == parent_uri:
+                            children.append({
+                                "uri": file_uri,
+                                "qt_type": str(fm.get("type", qd)),
+                                "title": str(fm.get("title", "")),
+                                "ticket_status": str(fm.get("ticket_status", "")),
+                                "parent_qt": str(fm.get("parent_qt", "")),
+                                "created_at": str(fm.get("created_at", "")),
+                            })
+                return ToolReturn(return_value=json.dumps(children, ensure_ascii=False))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_get_sub_qts)
 
     return tools
 
