@@ -375,26 +375,58 @@ class SessionPoolRunsMixin:
             gen = run_handle.start(content)
         # Lock released — the run is now registered and can be steered
         # by concurrent receive_request() calls.
+        #
+        # Consume events from the EventBus subscription ONLY. The run
+        # publishes every event to the EventBus (ProtocolChannel.publish →
+        # event_bus.publish inside RunHandle._execute_turn), so draining
+        # start() directly AND the subscription would deliver each event
+        # twice. Drive start() as a background side-effect (discarding
+        # yields, exactly like SessionController._consume_run) and yield
+        # from the subscription. Tool-published mid-turn events
+        # (e.g. SpawnSessionStart from task() → create_child_session())
+        # arrive on the same single EventBus path, preserving ordering.
+        producer_error: BaseException | None = None
+
+        async def _drive_start() -> None:
+            """Drive start() as a side effect; events go to the EventBus."""
+            nonlocal producer_error
+            try:
+                async for _ in gen:
+                    pass
+            except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+                producer_error = exc
+
+        drive_task = asyncio.ensure_future(_drive_start())
         try:
-            async for evt in gen:
-                # Drain any tool-published events from EventBus before
-                # yielding the start() event. This ensures SpawnSessionStart
-                # and similar events appear before the StreamCompleteEvent.
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    while True:
-                        envelope = bus_queue.get_nowait()
-                        yield envelope.event
-                yield evt
-                if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
+            while True:
+                try:
+                    envelope = await bus_queue.get()
+                except asyncio.QueueShutDown:
+                    break
+                yield envelope.event
+                if isinstance(envelope.event, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
+            # Cancel the driver if the consumer disconnected before the
+            # run finished. gen.aclose() releases session.turn_lock.
+            _cancelled: asyncio.CancelledError | None = None
+            if not drive_task.done():
+                drive_task.cancel()
+                try:
+                    await drive_task
+                except asyncio.CancelledError as e:
+                    _cancelled = e
+                except Exception:
+                    logger.exception("Failed to cancel run driver task")
+            else:
+                with contextlib.suppress(Exception):
+                    await drive_task
             # gen.aclose() and subsequent cleanup may raise CancelledError
             # (a BaseException, not caught by ``except Exception``) or
             # RuntimeError from pydantic-ai's anyio cancel scope cleanup
             # during GeneratorExit. Use save-and-re-raise so cleanup steps
             # always run (run_id cleared, handle removed) and CancelledError
             # is re-raised.
-            _cancelled: asyncio.CancelledError | None = None
             try:
                 await gen.aclose()
             except asyncio.CancelledError as e:
@@ -410,5 +442,7 @@ class SessionPoolRunsMixin:
                 logger.exception("Failed to unsubscribe from EventBus")
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
+            if producer_error is not None and _cancelled is None:
+                raise producer_error
             if _cancelled is not None:
                 raise _cancelled
