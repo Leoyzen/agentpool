@@ -303,3 +303,169 @@ class TestTransitionQT:
         assert isinstance(result, ToolReturn)
         assert "invalid" in str(result.return_value).lower()
         mock_client.write.assert_not_called()
+
+
+# ---- TestMaterialize ----
+
+
+class TestMaterialize:
+    """Tests for agentdb_materialize."""
+
+    async def test_materialize_create(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Materialize an approved OPL proposal with proposal_type=create."""
+        proposal_content = (
+            "---\n"
+            "type: opl_proposal\n"
+            "title: Create fault\n"
+            "proposal_type: create\n"
+            "target_entity: new_fault\n"
+            "entity_type: fault\n"
+            "ticket_status: approved\n"
+            "proposed_content:\n"
+            "  title: 新故障\n"
+            "  description: 新故障描述\n"
+            "---\n\nBody."
+        )
+        mock_client.read = AsyncMock(return_value=proposal_content)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_materialize")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            opl_proposal_uri="viking://tickets/opl_proposal/opl-001.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["status"] == "materialized"
+        assert data["proposal_type"] == "create"
+        # Should write entity file and update proposal
+        assert mock_client.write.call_count >= 2
+
+    async def test_materialize_modify(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Materialize an approved OPL proposal with proposal_type=modify."""
+        proposal_content = (
+            "---\n"
+            "type: opl_proposal\n"
+            "title: Modify fault\n"
+            "proposal_type: modify\n"
+            "target_entity: viking://wiki/fault/pump_failure.md\n"
+            "base_version: 2\n"
+            "ticket_status: approved\n"
+            "proposed_content:\n"
+            "  description: 新描述\n"
+            "---\n\nBody."
+        )
+        existing_entity = (
+            "---\ntitle: 泵故障\ntype: fault\nversion: 2\n---\n\n## 故障描述\n\n旧描述。\n"
+        )
+
+        async def read_side_effect(uri: str) -> str:
+            if "opl_proposal" in uri:
+                return proposal_content
+            if "wiki/fault/pump_failure.md" in uri:
+                return existing_entity
+            return ""
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_materialize")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            opl_proposal_uri="viking://tickets/opl_proposal/opl-002.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["status"] == "materialized"
+        assert data["proposal_type"] == "modify"
+
+    async def test_materialize_not_approved(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Verify OPLNotApproved error when ticket_status is not 'approved'."""
+        proposal_content = (
+            "---\ntype: opl_proposal\nproposal_type: create\nticket_status: proposed\n---\n\nBody."
+        )
+        mock_client.read = AsyncMock(return_value=proposal_content)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_materialize")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            opl_proposal_uri="viking://tickets/opl_proposal/opl-003.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        assert (
+            "oplnotapproved" in str(result.return_value).lower()
+            or "not approved" in str(result.return_value).lower()
+        )
+        mock_client.write.assert_not_called()
+
+    async def test_materialize_version_conflict(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Verify ConcurrentModification error when entity version > base_version."""
+        proposal_content = (
+            "---\n"
+            "type: opl_proposal\n"
+            "proposal_type: modify\n"
+            "target_entity: viking://wiki/fault/pump_failure.md\n"
+            "base_version: 1\n"
+            "ticket_status: approved\n"
+            "proposed_content:\n"
+            "  description: 新描述\n"
+            "---\n\nBody."
+        )
+        existing_entity = (
+            "---\ntitle: 泵故障\ntype: fault\nversion: 3\n---\n\n## 故障描述\n\n已更新描述。\n"
+        )
+
+        async def read_side_effect(uri: str) -> str:
+            if "opl_proposal" in uri:
+                return proposal_content
+            if "wiki/fault/pump_failure.md" in uri:
+                return existing_entity
+            return ""
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_materialize")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            opl_proposal_uri="viking://tickets/opl_proposal/opl-004.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        assert (
+            "concurrent" in str(result.return_value).lower()
+            or "version" in str(result.return_value).lower()
+        )
+        mock_client.write.assert_not_called()

@@ -194,6 +194,7 @@ max-complexity = 15
   "D417",
   "BLE001",
   "PLR0915",
+  "PLR0911",
   "E501",
 ]
 # AgentDB schema_write tests

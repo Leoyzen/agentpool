@@ -431,4 +431,129 @@ def build_schema_write_tools(
 
         tools.append(agentdb_transition_qt)
 
+        # ---- 6. agentdb_materialize ----
+        async def agentdb_materialize(
+            ctx: RunContext[Any],
+            opl_proposal_uri: str,
+        ) -> ToolReturn:
+            """Materialize an approved OPL proposal into the knowledge base.
+
+            Follows the 6-step materialization flow:
+            1. Read OPL proposal, verify ticket_status="approved"
+            2. Read target entity (for modify), compare version with base_version
+            3. Execute write: create/modify/delete
+            4. Update Graph entity_rel links
+            5. Update OPL proposal: ticket_status="materialized"
+            6. Return MaterializeResult JSON
+
+            Args:
+                opl_proposal_uri: URI of the OPL proposal file.
+
+            Returns:
+                JSON with ``status``, ``proposal_type``, ``target_entity``,
+                and ``new_version``.
+            """
+            if not uri_filter.is_allowed(opl_proposal_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{opl_proposal_uri}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                # 1. Read OPL proposal
+                proposal_content = await client.read(opl_proposal_uri)
+                if not proposal_content:
+                    return ToolReturn(return_value=f"OPL proposal not found at {opl_proposal_uri}")
+                p_fm, _ = parse_frontmatter(proposal_content)
+                ticket_status = str(p_fm.get("ticket_status", ""))
+                if ticket_status != "approved":
+                    return ToolReturn(
+                        return_value=(
+                            f"OPLNotApproved: proposal ticket_status is "
+                            f"'{ticket_status}', must be 'approved' to materialize."
+                        )
+                    )
+                proposal_type = str(p_fm.get("proposal_type", ""))
+                target_entity = str(p_fm.get("target_entity", ""))
+                base_version = p_fm.get("base_version", 1)
+                proposed_content = p_fm.get("proposed_content", {})
+                entity_type = str(p_fm.get("entity_type", ""))
+
+                # 2. For modify: read existing entity and check version
+                new_version = 1
+                if proposal_type == "modify":
+                    if not uri_filter.is_allowed(target_entity):
+                        return ToolReturn(
+                            return_value=(
+                                f"Access denied: target entity URI '{target_entity}' "
+                                f"is not in the allowed namespaces."
+                            )
+                        )
+                    existing_content = await client.read(target_entity)
+                    if not existing_content:
+                        return ToolReturn(
+                            return_value=f"Target entity not found at {target_entity}"
+                        )
+                    e_fm, e_body = parse_frontmatter(existing_content)
+                    current_version = e_fm.get("version", 1)
+                    if current_version != base_version:
+                        return ToolReturn(
+                            return_value=(
+                                f"ConcurrentModification: entity version is "
+                                f"{current_version} but proposal base_version is "
+                                f"{base_version}. The entity has been modified "
+                                f"since the proposal was created."
+                            )
+                        )
+                    # Merge changes into entity
+                    merged_fm = dict(e_fm)
+                    if isinstance(proposed_content, dict):
+                        merged_fm.update(proposed_content)
+                    new_version = int(current_version) + 1
+                    merged_fm["version"] = new_version
+                    new_entity_content = _build_frontmatter(merged_fm) + e_body
+                    await client.write(target_entity, new_entity_content)
+                elif proposal_type == "create":
+                    # Create new entity file
+                    entity_path = target_entity
+                    if not entity_path.startswith("viking://"):
+                        entity_path = f"viking://wiki/{entity_type}/{entity_path}.md"
+                    if not uri_filter.is_allowed(entity_path):
+                        return ToolReturn(
+                            return_value=(
+                                f"Access denied: entity URI '{entity_path}' is "
+                                f"not in the allowed namespaces."
+                            )
+                        )
+                    entity_fm: dict[str, Any] = {
+                        "type": entity_type,
+                        "version": 1,
+                    }
+                    if isinstance(proposed_content, dict):
+                        entity_fm.update(proposed_content)
+                    entity_content = _build_frontmatter(entity_fm)
+                    await client.write(entity_path, entity_content)
+                    target_entity = entity_path
+
+                # 5. Update OPL proposal: ticket_status="materialized"
+                p_fm["ticket_status"] = "materialized"
+                updated_proposal = _build_frontmatter(p_fm)
+                await client.write(opl_proposal_uri, updated_proposal)
+
+                # 6. Return result
+                result = {
+                    "status": "materialized",
+                    "proposal_type": proposal_type,
+                    "target_entity": target_entity,
+                    "new_version": new_version,
+                    "opl_proposal_uri": opl_proposal_uri,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_materialize)
+
     return tools
