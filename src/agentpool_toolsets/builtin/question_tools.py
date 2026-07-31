@@ -310,12 +310,12 @@ class QuestionTools(FunctionToolsetCapability):
         ctx: AgentContext,
         questions: str,
     ) -> ToolResult:
-        """Present a questionnaire to the user and collect responses.
+        """Present questions to the user and collect responses.
 
         Parses questions from XML format, presents them as a form via MCP Elicit,
         and returns the user's answers.
 
-        XML Format (use SINGLE QUOTES for attributes to avoid JSON escaping issues):
+        XML Format (use SINGLE QUOTES for attributes to avoid JSON encoding issues):
             <questions>
                 <question header='...' type='enum|multi|input' required='true'>
                     <text>Question text</text>
@@ -331,7 +331,7 @@ class QuestionTools(FunctionToolsetCapability):
         try:
             parsed = parse_questionnaire(questions)
         except Exception as e:
-            raise ModelRetry(f"Error parsing questionnaire: {e!s}") from e
+            raise ModelRetry(f"Error parsing questions: {e!s}") from e
         schema = _build_acp_schema(parsed)
         message = "Please answer the following questions:"
         if parsed:

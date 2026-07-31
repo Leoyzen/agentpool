@@ -597,11 +597,12 @@ def sanitize_tool_call_args_in_messages(
     """
     from pydantic_ai.messages import ModelResponse
 
-    for idx, msg in enumerate(messages):
+    for msg in messages:
         if not isinstance(msg, ModelResponse):
             continue
-        new_parts: list[Any] | None = None
-        for i, part in enumerate(msg.parts):
+        needs_repair = False
+        new_parts = list(msg.parts)
+        for i, part in enumerate(new_parts):
             if not isinstance(part, BaseToolCallPart):
                 continue
             if not isinstance(part.args, str):
@@ -618,8 +619,11 @@ def sanitize_tool_call_args_in_messages(
                     "repaired_len": len(repaired),
                 },
             )
-            if new_parts is None:
-                new_parts = list(msg.parts)
+            needs_repair = True
             new_parts[i] = dataclasses.replace(part, args=repaired)
-        if new_parts is not None:
-            messages[idx] = dataclasses.replace(msg, parts=new_parts)
+        if needs_repair:
+            # Assign the full list so the mutation is visible to any reference
+            # holding the same ModelResponse (e.g. a CallToolsNode's
+            # ``model_response`` attribute).  ModelResponse is a non-frozen
+            # dataclass, so attribute assignment is safe.
+            msg.parts = new_parts
