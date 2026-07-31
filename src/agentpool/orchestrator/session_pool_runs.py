@@ -385,48 +385,38 @@ class SessionPoolRunsMixin:
         # from the subscription. Tool-published mid-turn events
         # (e.g. SpawnSessionStart from task() → create_child_session())
         # arrive on the same single EventBus path, preserving ordering.
-        producer_error: BaseException | None = None
-
-        async def _drive_start() -> None:
-            """Drive start() as a side effect; events go to the EventBus."""
-            nonlocal producer_error
-            try:
-                async for _ in gen:
-                    pass
-            except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
-                producer_error = exc
-
-        drive_task = asyncio.ensure_future(_drive_start())
+        # Consume events from the EventBus subscription ONLY. The run
+        # publishes every event to the EventBus (ProtocolChannel.publish →
+        # event_bus.publish inside RunHandle._execute_turn), so yielding
+        # from start() directly AND the subscription would deliver each
+        # event twice. We drive start() in the CURRENT task (no background
+        # task — anyio cancel scopes cannot be exited from a different
+        # task) and drain bus_queue for every event start() produces,
+        # yielding only from the subscription. Tool-published mid-turn
+        # events (e.g. SpawnSessionStart) arrive on the same single path.
         try:
-            while True:
-                try:
-                    envelope = await bus_queue.get()
-                except asyncio.QueueShutDown:
-                    break
-                yield envelope.event
-                if isinstance(envelope.event, StreamCompleteEvent | RunErrorEvent):
+            async for evt in gen:
+                # start() published evt to the EventBus before yielding it
+                # (ProtocolChannel.publish runs before `yield event` in
+                # _execute_turn), so it is already in bus_queue. Drain all
+                # pending bus events — this yields each event exactly once
+                # from the subscription, never from gen directly.
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    while True:
+                        envelope = bus_queue.get_nowait()
+                        yield envelope.event
+                        if isinstance(envelope.event, StreamCompleteEvent | RunErrorEvent):
+                            break
+                if isinstance(evt, StreamCompleteEvent | RunErrorEvent):
                     break
         finally:
-            # Cancel the driver if the consumer disconnected before the
-            # run finished. gen.aclose() releases session.turn_lock.
-            _cancelled: asyncio.CancelledError | None = None
-            if not drive_task.done():
-                drive_task.cancel()
-                try:
-                    await drive_task
-                except asyncio.CancelledError as e:
-                    _cancelled = e
-                except Exception:
-                    logger.exception("Failed to cancel run driver task")
-            else:
-                with contextlib.suppress(Exception):
-                    await drive_task
             # gen.aclose() and subsequent cleanup may raise CancelledError
             # (a BaseException, not caught by ``except Exception``) or
             # RuntimeError from pydantic-ai's anyio cancel scope cleanup
             # during GeneratorExit. Use save-and-re-raise so cleanup steps
             # always run (run_id cleared, handle removed) and CancelledError
             # is re-raised.
+            _cancelled: asyncio.CancelledError | None = None
             try:
                 await gen.aclose()
             except asyncio.CancelledError as e:
@@ -442,7 +432,5 @@ class SessionPoolRunsMixin:
                 logger.exception("Failed to unsubscribe from EventBus")
             session.current_run_id = None
             self.sessions._runs.pop(run_handle.run_id, None)
-            if producer_error is not None and _cancelled is None:
-                raise producer_error
             if _cancelled is not None:
                 raise _cancelled
