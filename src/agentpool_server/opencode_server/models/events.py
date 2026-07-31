@@ -885,7 +885,13 @@ class CommandExecutedProperties(SessionIdProperties):
 
 
 class CommandExecutedEvent(OpenCodeBaseModel):
-    """Command executed event - emitted after a slash command runs."""
+    """Command executed event - emitted after a slash command is dispatched.
+
+    For non-skill commands (e.g. /help), this is emitted after the command
+    completes. For skill commands (category=='skill'), this is emitted after
+    routing (dispatch), not after the model response — the response arrives
+    via SSE events (PartUpdatedEvent, MessageUpdatedEvent, etc.).
+    """
 
     type: Literal["command.executed"] = Field(default="command.executed", init=False)
     properties: CommandExecutedProperties
