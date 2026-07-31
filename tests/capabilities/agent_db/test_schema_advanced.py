@@ -250,6 +250,91 @@ def test_build_advanced_read_tools_returns_expected_tools(
     expected = {
         "agentdb_generate_textbook",
         "agentdb_get_coverage_report",
+        "agentdb_derive_applicability",
     }
     assert names == expected
     assert len(tools) == len(expected)
+
+
+# ---- TestDeriveApplicability ----
+
+
+class TestDeriveApplicability:
+    """Tests for agentdb_derive_applicability."""
+
+    async def test_derive_global_scope(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Entity with no variant overrides → suggested_scope scope_type='global'."""
+        entity_content = (
+            "---\ntitle: 泵故障\ntype: fault\nversion: 2\n---\n\n## 故障描述\n\n通用描述。\n"
+        )
+        mock_client.read = AsyncMock(return_value=entity_content)
+        mock_client.ls = AsyncMock(return_value=[])
+
+        tools = build_advanced_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_derive_applicability")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            entity_uri="viking://wiki/fault/pump_failure.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["suggested_scope"]["scope_type"] == "global"
+        assert data["existing_variants"] == []
+        assert isinstance(data["alternatives"], list)
+
+    async def test_derive_model_scope(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap: AgentDBCapability,
+    ) -> None:
+        """Entity with variant override for specific device → scope_type='catalog_model'."""
+        entity_content = (
+            "---\ntitle: 泵故障\ntype: fault\nversion: 2\n---\n\n## 故障描述\n\n通用描述。\n"
+        )
+        variant_content = (
+            "---\nknowledge: wiki/fault/pump_failure.md\nversion: 1\n---\n\n"
+            "## 故障描述\n\nSY75C 特有描述。\n"
+        )
+
+        async def read_side_effect(uri: str) -> str:
+            if "viking://wiki/fault/pump_failure.md" in uri:
+                return entity_content
+            if "variant" in uri and uri.endswith(".md"):
+                return variant_content
+            return ""
+
+        mock_client.read = AsyncMock(side_effect=read_side_effect)
+
+        async def ls_side_effect(uri: str) -> list[Any]:
+            if uri == "viking://catalog/":
+                return [{"name": "sany/", "is_dir": True}]
+            if uri == "viking://catalog/sany/":
+                return [{"name": "excavator/", "is_dir": True}]
+            if uri == "viking://catalog/sany/excavator/":
+                return [{"name": "sy75c/", "is_dir": True}]
+            if uri == "viking://catalog/sany/excavator/sy75c/variant/":
+                return [{"name": "pump_failure_variant.md", "is_dir": False}]
+            return []
+
+        mock_client.ls = AsyncMock(side_effect=ls_side_effect)
+
+        tools = build_advanced_read_tools(agent_db_cap)
+        tool = _get_tool(tools, "agentdb_derive_applicability")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            entity_uri="viking://wiki/fault/pump_failure.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["suggested_scope"]["scope_type"] == "catalog_model"
+        assert len(data["existing_variants"]) >= 1

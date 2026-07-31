@@ -473,4 +473,150 @@ def build_advanced_read_tools(
 
         tools.append(agentdb_get_coverage_report)
 
+        # ---- 3. agentdb_derive_applicability ----
+        async def agentdb_derive_applicability(
+            ctx: RunContext[Any],
+            entity_uri: str,
+        ) -> ToolReturn:
+            """Derive the suggested applicability scope for a wiki entity.
+
+            Reads the entity, then checks catalog variant directories
+            for overrides targeting this entity. If no variants exist,
+            suggests ``scope_type="global"``. If variants exist for
+            specific devices, suggests ``scope_type="catalog_model"``
+            with the device target.
+
+            Args:
+                entity_uri: Wiki entity URI to check.
+
+            Returns:
+                JSON with ``suggested_scope``, ``alternatives``, and
+                ``existing_variants``.
+            """
+            if not uri_filter.is_allowed(entity_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{entity_uri}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                # Read the entity
+                entity_content = await client.read(entity_uri)
+                if not entity_content:
+                    return ToolReturn(return_value=f"Entity not found at {entity_uri}")
+
+                # Extract entity path for variant matching
+                entity_path = entity_uri.replace("viking://", "")
+
+                # Scan all catalog/*/variant/ directories for variants targeting this entity
+                catalog_base = "viking://catalog/"
+                existing_variants: list[dict[str, Any]] = []
+
+                if uri_filter.is_allowed(catalog_base):
+                    try:
+                        catalog_entries = await client.ls(catalog_base)
+                    except Exception:
+                        catalog_entries = []
+                    for entry in catalog_entries:
+                        if isinstance(entry, str):
+                            brand = entry.rstrip("/")
+                        elif isinstance(entry, dict):
+                            brand = entry.get("name", "").rstrip("/")
+                        else:
+                            continue
+                        if not brand:
+                            continue
+                        # Walk brand/series/model/variant/ tree
+                        brand_uri = f"{catalog_base}{brand}/"
+                        try:
+                            brand_entries = await client.ls(brand_uri)
+                        except Exception:
+                            brand_entries = []
+                        for b_entry in brand_entries:
+                            if isinstance(b_entry, str):
+                                domain = b_entry.rstrip("/")
+                            elif isinstance(b_entry, dict):
+                                domain = b_entry.get("name", "").rstrip("/")
+                            else:
+                                continue
+                            if not domain:
+                                continue
+                            domain_uri = f"{brand_uri}{domain}/"
+                            try:
+                                domain_entries = await client.ls(domain_uri)
+                            except Exception:
+                                domain_entries = []
+                            for d_entry in domain_entries:
+                                if isinstance(d_entry, str):
+                                    model = d_entry.rstrip("/")
+                                elif isinstance(d_entry, dict):
+                                    model = d_entry.get("name", "").rstrip("/")
+                                else:
+                                    continue
+                                if not model:
+                                    continue
+                                model_uri = f"{domain_uri}{model}/"
+                                variant_dir = f"{model_uri}variant/"
+                                try:
+                                    variant_entries = await client.ls(variant_dir)
+                                except Exception:
+                                    variant_entries = []
+                                if not variant_entries:
+                                    continue
+                                for v_entry in variant_entries:
+                                    if isinstance(v_entry, str):
+                                        v_fname = v_entry
+                                    elif isinstance(v_entry, dict):
+                                        v_fname = v_entry.get("name", "")
+                                    else:
+                                        continue
+                                    if not v_fname.endswith(".md"):
+                                        continue
+                                    v_file_uri = variant_dir + v_fname
+                                    try:
+                                        v_content = await client.read(v_file_uri)
+                                    except Exception:
+                                        continue
+                                    if not v_content:
+                                        continue
+                                    v_fm, _ = parse_frontmatter(v_content)
+                                    if str(v_fm.get("knowledge", "")) == entity_path:
+                                        existing_variants.append({
+                                            "variant_uri": v_file_uri,
+                                            "device": f"{brand}/{domain}/{model}",
+                                        })
+
+                # Determine suggested scope
+                if existing_variants:
+                    suggested_scope = {
+                        "scope_type": "catalog_model",
+                        "target": existing_variants[0]["device"],
+                    }
+                else:
+                    suggested_scope = {
+                        "scope_type": "global",
+                        "target": None,
+                    }
+
+                alternatives: list[dict[str, Any]] = []
+                for v in existing_variants[1:]:
+                    alternatives.append({
+                        "scope_type": "catalog_model",
+                        "target": v["device"],
+                    })
+
+                result = {
+                    "entity_uri": entity_uri,
+                    "suggested_scope": suggested_scope,
+                    "alternatives": alternatives,
+                    "existing_variants": existing_variants,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_derive_applicability)
+
     return tools
