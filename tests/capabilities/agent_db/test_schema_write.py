@@ -148,3 +148,158 @@ def test_build_schema_write_tools_empty_in_read_mode(
     """build_schema_write_tools returns empty list in read mode."""
     tools = build_schema_write_tools(agent_db_cap)
     assert tools == []
+
+
+# ---- TestCreateQT ----
+
+
+class TestCreateQT:
+    """Tests for agentdb_create_qt."""
+
+    async def test_create_qt_opa(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Create an OPA file with correct frontmatter."""
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_create_qt")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            qt_type="opa",
+            qt_data={"title": "OPA-001", "description": "Test OPA", "expert_owner": "expert_a"},
+            qt_id="opa-001",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["qt_uri"] == "viking://tickets/opa/opa-001.md"
+        assert data["status"] == "created"
+        mock_client.write.assert_called_once()
+        # Verify written content contains correct frontmatter
+        written_content = mock_client.write.call_args.args[1]
+        assert "type: opa" in written_content
+        assert "ticket_status: open" in written_content
+
+    async def test_create_qt_with_parent(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Create a QT with parent_qt field in frontmatter."""
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_create_qt")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            qt_type="ops",
+            qt_data={"title": "OPS-001", "description": "Test OPS"},
+            qt_id="ops-001",
+            parent_qt="viking://tickets/opa/opa-001.md",
+        )
+
+        assert isinstance(result, ToolReturn)
+        written_content = mock_client.write.call_args.args[1]
+        assert "parent_qt:" in written_content
+        assert "viking://tickets/opa/opa-001.md" in written_content
+
+
+# ---- TestCreateSubQT ----
+
+
+class TestCreateSubQT:
+    """Tests for agentdb_create_sub_qt."""
+
+    async def test_create_sub_qt(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Create a child QT with parent_qt pointing to parent."""
+        # Mock parent exists
+        parent_content = "---\ntype: opa\ntitle: OPA-001\nticket_status: open\n---\nBody."
+        mock_client.read = AsyncMock(return_value=parent_content)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_create_sub_qt")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            parent_qt="viking://tickets/opa/opa-001.md",
+            qt_type="ops",
+            qt_data={"title": "OPS-child", "description": "Child QT"},
+            qt_id="ops-child-001",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["status"] == "created"
+        written_content = mock_client.write.call_args.args[1]
+        assert "parent_qt:" in written_content
+        assert "viking://tickets/opa/opa-001.md" in written_content
+
+
+# ---- TestTransitionQT ----
+
+
+class TestTransitionQT:
+    """Tests for agentdb_transition_qt."""
+
+    async def test_transition_qt_approve(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Transition a QT from reviewing to approved."""
+        current_content = "---\ntype: opa\ntitle: OPA-001\nticket_status: reviewing\n---\n\nBody."
+        mock_client.read = AsyncMock(return_value=current_content)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_transition_qt")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            qt_uri="viking://tickets/opa/opa-001.md",
+            action="approve",
+        )
+
+        assert isinstance(result, ToolReturn)
+        data = json.loads(result.return_value)
+        assert data["new_status"] == "approved"
+        assert data["old_status"] == "reviewing"
+        mock_client.write.assert_called_once()
+
+    async def test_transition_qt_invalid(
+        self,
+        mock_client: AsyncMock,
+        agent_db_cap_write: AgentDBCapability,
+    ) -> None:
+        """Attempt invalid transition, verify InvalidTransition error."""
+        current_content = "---\ntype: opa\ntitle: OPA-001\nticket_status: approved\n---\n\nBody."
+        mock_client.read = AsyncMock(return_value=current_content)
+        mock_client.write = AsyncMock(return_value={"status": "ok"})
+
+        tools = build_schema_write_tools(agent_db_cap_write)
+        tool = _get_tool(tools, "agentdb_transition_qt")
+
+        ctx = _make_ctx()
+        result = await tool(
+            ctx,
+            qt_uri="viking://tickets/opa/opa-001.md",
+            action="approve",
+        )
+
+        assert isinstance(result, ToolReturn)
+        assert "invalid" in str(result.return_value).lower()
+        mock_client.write.assert_not_called()

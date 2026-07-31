@@ -35,6 +35,23 @@ _VALID_ENTITY_TYPES = frozenset({
 
 _VALID_QT_TYPES = frozenset({"opa", "ops", "opl_proposal"})
 
+# State machine: allowed transitions
+_transitions: dict[str, frozenset[str]] = {
+    "open": frozenset({"reviewing", "rejected"}),
+    "reviewing": frozenset({"approved", "rejected", "reworked"}),
+    "approved": frozenset({"materialized"}),
+    "reworked": frozenset({"reviewing", "rejected"}),
+    "rejected": frozenset(),
+    "materialized": frozenset(),
+}
+_action_to_status: dict[str, str] = {
+    "submit_for_review": "reviewing",
+    "approve": "approved",
+    "reject": "rejected",
+    "rework": "reworked",
+    "materialize": "materialized",
+}
+
 
 def _build_frontmatter(data: dict[str, Any]) -> str:
     """Build YAML frontmatter string from a dict.
@@ -198,5 +215,220 @@ def build_schema_write_tools(
                 return ToolReturn(return_value=f"Error: {e}")
 
         tools.append(agentdb_update_entity)
+
+        # ---- 3. agentdb_create_qt ----
+        async def agentdb_create_qt(
+            ctx: RunContext[Any],
+            qt_type: str,
+            qt_data: dict[str, Any],
+            qt_id: str,
+            parent_qt: str = "",
+        ) -> ToolReturn:
+            """Create a quality ticket (QT) file.
+
+            Validates the QT type, constructs frontmatter from qt_data
+            with initial ``ticket_status=open``, and writes the file
+            to ``viking://tickets/{qt_type}/{qt_id}.md``.
+
+            Args:
+                qt_type: One of ``"opa"``, ``"ops"``, ``"opl_proposal"``.
+                qt_data: Dict with QT fields (title, description, etc.).
+                qt_id: Unique ID for the QT file.
+                parent_qt: Optional parent QT URI for sub-QTs.
+
+            Returns:
+                JSON with ``qt_uri`` and ``status``.
+            """
+            if qt_type not in _VALID_QT_TYPES:
+                valid_types = ", ".join(sorted(_VALID_QT_TYPES))
+                return ToolReturn(
+                    return_value=(
+                        f"ValidationError: invalid qt_type '{qt_type}'. "
+                        f"Must be one of: {valid_types}"
+                    )
+                )
+            qt_uri = f"viking://tickets/{qt_type}/{qt_id}.md"
+            if not uri_filter.is_allowed(qt_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{qt_uri}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                fm_data: dict[str, Any] = {
+                    "type": qt_type,
+                    "ticket_status": "open",
+                }
+                fm_data.update(qt_data)
+                if parent_qt:
+                    fm_data["parent_qt"] = parent_qt
+                content = _build_frontmatter(fm_data)
+                body = qt_data.get("body", "")
+                if body:
+                    content += body
+                await client.write(qt_uri, content)
+                result = {
+                    "qt_uri": qt_uri,
+                    "status": "created",
+                    "qt_type": qt_type,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_create_qt)
+
+        # ---- 4. agentdb_create_sub_qt ----
+        async def agentdb_create_sub_qt(
+            ctx: RunContext[Any],
+            parent_qt: str,
+            qt_type: str,
+            qt_data: dict[str, Any],
+            qt_id: str,
+        ) -> ToolReturn:
+            """Create a child QT linked to a parent QT.
+
+            Validates that the parent QT exists, then creates a new
+            QT with the ``parent_qt`` field set.
+
+            Args:
+                parent_qt: URI of the parent QT.
+                qt_type: One of ``"opa"``, ``"ops"``, ``"opl_proposal"``.
+                qt_data: Dict with QT fields.
+                qt_id: Unique ID for the child QT.
+
+            Returns:
+                JSON with ``qt_uri`` and ``status``.
+            """
+            if not uri_filter.is_allowed(parent_qt):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{parent_qt}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                # Verify parent exists
+                parent_content = await client.read(parent_qt)
+                if not parent_content:
+                    return ToolReturn(return_value=f"Parent QT not found at {parent_qt}")
+                # Create child QT with parent_qt field
+                qt_uri = f"viking://tickets/{qt_type}/{qt_id}.md"
+                if not uri_filter.is_allowed(qt_uri):
+                    return ToolReturn(
+                        return_value=(
+                            f"Access denied: URI '{qt_uri}' is not in the "
+                            f"allowed namespaces for this agent."
+                        )
+                    )
+                fm_data: dict[str, Any] = {
+                    "type": qt_type,
+                    "ticket_status": "open",
+                    "parent_qt": parent_qt,
+                }
+                fm_data.update(qt_data)
+                content = _build_frontmatter(fm_data)
+                body = qt_data.get("body", "")
+                if body:
+                    content += body
+                await client.write(qt_uri, content)
+                result = {
+                    "qt_uri": qt_uri,
+                    "status": "created",
+                    "parent_qt": parent_qt,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_create_sub_qt)
+
+        # ---- 5. agentdb_transition_qt ----
+
+        async def agentdb_transition_qt(
+            ctx: RunContext[Any],
+            qt_uri: str,
+            action: str,
+            comment: str = "",
+            cr_action: str = "",
+        ) -> ToolReturn:
+            """Transition a QT to a new status.
+
+            Validates the state transition is allowed per the state
+            machine, updates ``ticket_status``, and optionally appends
+            a CR (change record) to the body.
+
+            Args:
+                qt_uri: URI of the QT file.
+                action: Transition action (submit_for_review, approve,
+                    reject, rework, materialize).
+                comment: Optional comment for the CR record.
+                cr_action: Optional CR action label.
+
+            Returns:
+                JSON with ``old_status``, ``new_status``, and ``qt_uri``.
+            """
+            if not uri_filter.is_allowed(qt_uri):
+                return ToolReturn(
+                    return_value=(
+                        f"Access denied: URI '{qt_uri}' is not in the "
+                        f"allowed namespaces for this agent."
+                    )
+                )
+            new_status = _action_to_status.get(action)
+            if new_status is None:
+                return ToolReturn(
+                    return_value=(
+                        f"InvalidTransition: unknown action '{action}'. "
+                        f"Valid actions: {', '.join(sorted(_action_to_status))}"
+                    )
+                )
+            try:
+                client = await cap.viking._ensure_client()
+                content = await client.read(qt_uri)
+                if not content:
+                    return ToolReturn(return_value=f"QT not found at {qt_uri}")
+                fm, body = parse_frontmatter(content)
+                old_status = str(fm.get("ticket_status", ""))
+                # Validate transition
+                allowed = _transitions.get(old_status, frozenset())
+                if new_status not in allowed:
+                    return ToolReturn(
+                        return_value=(
+                            f"InvalidTransition: cannot transition from "
+                            f"'{old_status}' to '{new_status}' via '{action}'."
+                        )
+                    )
+                # Update frontmatter
+                fm["ticket_status"] = new_status
+                # Append CR record to body if requested
+                new_body = body
+                if cr_action or comment:
+                    import datetime as _dt
+
+                    ts = _dt.date.today().isoformat()
+                    cr_parts = [f"cr: {ts}"]
+                    if cr_action:
+                        cr_parts.append(f"action: {cr_action}")
+                    if comment:
+                        cr_parts.append(f"comment: {comment}")
+                    cr_line = f"<!-- {' | '.join(cr_parts)} -->\n"
+                    new_body = body + "\n" + cr_line if body else cr_line
+                new_content = _build_frontmatter(fm) + new_body
+                await client.write(qt_uri, new_content)
+                result = {
+                    "qt_uri": qt_uri,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "action": action,
+                }
+                return ToolReturn(return_value=json.dumps(result, ensure_ascii=False, default=str))
+            except Exception as e:
+                return ToolReturn(return_value=f"Error: {e}")
+
+        tools.append(agentdb_transition_qt)
 
     return tools
