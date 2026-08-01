@@ -217,6 +217,196 @@ async def test_resolve_resource_skill_uri() -> None:
     assert result == ['<resource uri="skill://ponytail/SKILL.md">\ncontent\n</resource>']
 
 
+async def test_resolve_resource_skill_reference_uri(tmp_path: Any) -> None:
+    """``skill://`` URI with reference path reads the reference file, not SKILL.md."""
+    from upathtools import UPath
+
+    # Create a fake skill directory with a reference file
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill\nInstructions here.")
+    ref_dir = skill_dir / "references"
+    ref_dir.mkdir()
+    (ref_dir / "guide.md").write_text("# Guide\nReference content here.")
+
+    skill_entry = SkillEntry(
+        name="my-skill",
+        description="Test skill",
+        uri="skill://my-skill",
+        source="local",
+        skill_path=UPath(str(skill_dir)),
+    )
+
+    class FakeSkillWithRef:
+        """SkillResource that returns a skill with a real filesystem path."""
+
+        async def list_skills(self) -> Sequence[SkillEntry]:
+            return [skill_entry]
+
+        async def read_skill(self, name: str) -> str | None:
+            return "# My Skill\nInstructions here."
+
+        async def skill_exists(self, name: str) -> bool:
+            return name == "my-skill"
+
+    skill_cap = FakeSkillWithRef()
+    result = await resolve_resource_content(
+        "skill://my-skill/references/guide.md",
+        resource_caps=[],
+        skill_caps=[skill_cap],
+    )
+    assert result is not None
+    assert len(result) == 1
+    content: str = result[0]  # type: ignore[assignment]
+    assert "Reference content here." in content
+    assert "Instructions here." not in content  # Should NOT return SKILL.md content
+
+
+async def test_resolve_resource_skill_reference_not_found(tmp_path: Any) -> None:
+    """``skill://`` URI with non-existent reference path returns None."""
+    from upathtools import UPath
+
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill")
+
+    skill_entry = SkillEntry(
+        name="my-skill",
+        description="Test skill",
+        uri="skill://my-skill",
+        source="local",
+        skill_path=UPath(str(skill_dir)),
+    )
+
+    class FakeSkillWithRef:
+        async def list_skills(self) -> Sequence[SkillEntry]:
+            return [skill_entry]
+
+        async def read_skill(self, name: str) -> str | None:
+            return "# My Skill"
+
+        async def skill_exists(self, name: str) -> bool:
+            return name == "my-skill"
+
+    skill_cap = FakeSkillWithRef()
+    result = await resolve_resource_content(
+        "skill://my-skill/references/missing.md",
+        resource_caps=[],
+        skill_caps=[skill_cap],
+    )
+    assert result is None
+
+
+async def test_resolve_resource_skill_reference_virtual_skill() -> None:
+    """``skill://`` URI with reference path but virtual skill (no filesystem) returns None."""
+    from pathlib import PurePosixPath
+
+    skill_entry = SkillEntry(
+        name="virtual-skill",
+        description="Virtual skill",
+        uri="skill://virtual-skill",
+        source="remote",
+        skill_path=PurePosixPath("skill://virtual-skill"),
+    )
+
+    class FakeVirtualSkill:
+        async def list_skills(self) -> Sequence[SkillEntry]:
+            return [skill_entry]
+
+        async def read_skill(self, name: str) -> str | None:
+            return "Virtual content"
+
+        async def skill_exists(self, name: str) -> bool:
+            return name == "virtual-skill"
+
+    skill_cap = FakeVirtualSkill()
+    result = await resolve_resource_content(
+        "skill://virtual-skill/references/guide.md",
+        resource_caps=[],
+        skill_caps=[skill_cap],
+    )
+    assert result is None
+
+
+async def test_resolve_resource_skill_reference_traversal_blocked(tmp_path: Any) -> None:
+    """Path traversal in reference path is blocked by ResolvedSkillURI.parse()."""
+    from upathtools import UPath
+
+    from agentpool.skills.exceptions import SecurityError
+
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill")
+
+    skill_entry = SkillEntry(
+        name="my-skill",
+        description="Test skill",
+        uri="skill://my-skill",
+        source="local",
+        skill_path=UPath(str(skill_dir)),
+    )
+
+    class FakeSkillWithRef:
+        async def list_skills(self) -> Sequence[SkillEntry]:
+            return [skill_entry]
+
+        async def read_skill(self, name: str) -> str | None:
+            return "# My Skill"
+
+        async def skill_exists(self, name: str) -> bool:
+            return name == "my-skill"
+
+    skill_cap = FakeSkillWithRef()
+    # ResolvedSkillURI.parse() raises SecurityError for ".." in path
+    with pytest.raises(SecurityError):
+        await resolve_resource_content(
+            "skill://my-skill/references/../../../etc/passwd",
+            resource_caps=[],
+            skill_caps=[skill_cap],
+        )
+
+
+async def test_resolve_resource_skill_reference_name_alternatives(tmp_path: Any) -> None:
+    """Reference resolution tries underscore/hyphen name alternatives."""
+    from upathtools import UPath
+
+    skill_dir = tmp_path / "my_skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill")
+    ref_dir = skill_dir / "references"
+    ref_dir.mkdir()
+    (ref_dir / "guide.md").write_text("# Guide\nAlt-name content.")
+
+    skill_entry = SkillEntry(
+        name="my_skill",
+        description="Test skill with underscore",
+        uri="skill://my_skill",
+        source="local",
+        skill_path=UPath(str(skill_dir)),
+    )
+
+    class FakeSkillWithRef:
+        async def list_skills(self) -> Sequence[SkillEntry]:
+            return [skill_entry]
+
+        async def read_skill(self, name: str) -> str | None:
+            return "# My Skill"
+
+        async def skill_exists(self, name: str) -> bool:
+            return name == "my_skill"
+
+    skill_cap = FakeSkillWithRef()
+    # URI uses hyphen, skill name uses underscore — should still resolve
+    result = await resolve_resource_content(
+        "skill://my-skill/references/guide.md",
+        resource_caps=[],
+        skill_caps=[skill_cap],
+    )
+    assert result is not None
+    content: str = result[0]  # type: ignore[assignment]
+    assert "Alt-name content." in content
+
+
 async def test_resolve_resource_xml_wrapper_format() -> None:
     r"""Verify exact XML format for text: ``<resource uri="{uri}">\n{content}\n</resource>``."""
     cap = FakeResourceAccess(read_result=[TextResourceContent(text="hello", uri="viking://doc.md")])

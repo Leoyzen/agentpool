@@ -287,6 +287,115 @@ async def test_read_resource_skill_uri() -> None:
     assert "# Ponytail" in result.return_value
 
 
+async def test_read_resource_skill_reference_uri(tmp_path: Any) -> None:
+    """read_resource with skill:// URI containing reference path reads the reference file."""
+    from upathtools import UPath
+
+    # Create a fake skill directory with a reference file
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill\nInstructions here.")
+    ref_dir = skill_dir / "references"
+    ref_dir.mkdir()
+    (ref_dir / "guide.md").write_text("# Guide\nReference content here.")
+
+    sr = FakeSkillResource(
+        skills=[
+            SkillEntry(
+                name="my-skill",
+                description="Test skill",
+                uri="skill://my-skill",
+                source="local",
+                skill_path=UPath(str(skill_dir)),
+            )
+        ],
+        read_content="# My Skill\nInstructions here.",
+        exists_names={"my-skill"},
+    )
+    registry = _make_registry_with_caps(sr)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "skill://my-skill/references/guide.md")
+
+    assert isinstance(result, ToolReturn)
+    assert result.content is not None
+    assert "Reference content here." in result.return_value
+    assert "Instructions here." not in result.return_value
+
+
+async def test_read_resource_skill_reference_not_found(tmp_path: Any) -> None:
+    """read_resource with non-existent reference path returns 'Resource not found'."""
+    from upathtools import UPath
+
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill")
+
+    sr = FakeSkillResource(
+        skills=[
+            SkillEntry(
+                name="my-skill",
+                description="Test skill",
+                uri="skill://my-skill",
+                source="local",
+                skill_path=UPath(str(skill_dir)),
+            )
+        ],
+        read_content="# My Skill",
+        exists_names={"my-skill"},
+    )
+    registry = _make_registry_with_caps(sr)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+    result = await cap.read_resource(ctx, "skill://my-skill/references/missing.md")
+
+    assert isinstance(result, ToolReturn)
+    assert "not found" in result.return_value.lower()
+
+
+async def test_resource_exists_skill_reference_uri(tmp_path: Any) -> None:
+    """resource_exists with skill:// URI containing reference path checks file existence."""
+    from upathtools import UPath
+
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# My Skill")
+    ref_dir = skill_dir / "references"
+    ref_dir.mkdir()
+    (ref_dir / "guide.md").write_text("# Guide")
+
+    sr = FakeSkillResource(
+        skills=[
+            SkillEntry(
+                name="my-skill",
+                description="Test skill",
+                uri="skill://my-skill",
+                source="local",
+                skill_path=UPath(str(skill_dir)),
+            )
+        ],
+        read_content="# My Skill",
+        exists_names={"my-skill"},
+    )
+    registry = _make_registry_with_caps(sr)
+    agent_ctx = _make_agent_context(registry)
+    ctx = _make_ctx(agent_ctx)
+
+    cap = ResourceCapability()
+
+    # Existing reference file → True
+    result = await cap.resource_exists(ctx, "skill://my-skill/references/guide.md")
+    assert result is True
+
+    # Non-existing reference file → False
+    result = await cap.resource_exists(ctx, "skill://my-skill/references/missing.md")
+    assert result is False
+
+
 async def test_read_resource_mcp_uri() -> None:
     """read_resource routes non-skill URIs to ResourceAccess providers with TextResourceContent."""
     ra = FakeResourceAccess(

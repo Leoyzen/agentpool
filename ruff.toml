@@ -155,6 +155,9 @@ max-complexity = 15
 "src/agentpool/capabilities/viking/__init__.py" = ["BLE001", "TRY300"]
 # Viking instructions: E501 for markdown table lines
 "src/agentpool/capabilities/viking/instructions.py" = ["E501"]
+# Resource resolver/capability: PLR0911 for multi-return routing logic, TRY300 for early-return pattern
+"src/agentpool/capabilities/resource_resolver.py" = ["PLR0911"]
+"src/agentpool/capabilities/resource_capability.py" = ["PLR0911", "TRY300"]
 
 [format]
 preview = true

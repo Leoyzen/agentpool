@@ -275,7 +275,11 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         uri: Annotated[
             str,
             Field(
-                description="Resource URI to read (e.g., 'mcp://server/resource' or 'skill://skill-name')"
+                description=(
+                    "Resource URI to read. Supports 'mcp://server/resource', "
+                    "'skill://skill-name' (SKILL.md content), and "
+                    "'skill://skill-name/references/file.md' (reference file content)"
+                )
             ),
         ],
     ) -> ToolReturn:
@@ -334,7 +338,31 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         scope = self._make_scope(agent_ctx)
 
         if uri.startswith("skill://"):
-            skill_name = self._extract_skill_name(uri)
+            from agentpool.skills.uri_resolver import ResolvedSkillURI
+
+            resolved = ResolvedSkillURI.parse(uri)
+            skill_name = resolved.skill_name
+
+            # If URI contains a reference path, check if the reference file exists.
+            # Exception: "SKILL.md" (case-insensitive) is the skill's main file —
+            # use skill_exists() for backward compatibility and virtual skill support.
+            if (
+                resolved.reference_path is not None
+                and resolved.reference_path.upper() != "SKILL.MD"
+            ):
+                from agentpool.capabilities.resource_resolver import _resolve_skill_reference
+
+                try:
+                    ref_content = await _resolve_skill_reference(
+                        registry.get_skill_resources(scope),
+                        skill_name,
+                        resolved.reference_path,
+                    )
+                    return ref_content is not None
+                except Exception:  # noqa: BLE001
+                    return False
+
+            # No reference path — check if the skill itself exists
             for skill_cap in registry.get_skill_resources(scope):
                 try:
                     if await skill_cap.skill_exists(skill_name):
