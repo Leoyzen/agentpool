@@ -276,8 +276,7 @@ async def test_e2e_elicitation_timeout_crash_recovery(  # noqa: PLR0915
     mock_pool.manifest = MagicMock()
     mock_pool.manifest.agents = {}
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
-    mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
+    mock_pool.skill_capabilities = []
 
     # Debug: verify mock_pool.storage is the real storage_manager
     assert mock_pool.storage is storage_manager, "mock_pool.storage should be storage_manager"
@@ -498,8 +497,7 @@ async def test_e2e_resume_without_pending_deferred_calls_resolves_zero(
     mock_pool.manifest = MagicMock()
     mock_pool.manifest.agents = {}
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
-    mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
+    mock_pool.skill_capabilities = []
 
     EventBus()
     session_pool = SessionPool(
@@ -639,8 +637,7 @@ async def test_e2e_elicitation_resume_builds_deferred_tool_results(
     mock_pool.manifest = MagicMock()
     mock_pool.manifest.agents = {}
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
-    mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
+    mock_pool.skill_capabilities = []
 
     EventBus()
     session_pool = SessionPool(
@@ -795,8 +792,7 @@ async def test_e2e_elicitation_resume_maps_tool_call_id_mismatch(
     mock_pool.manifest = MagicMock()
     mock_pool.manifest.agents = {}
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
-    mock_pool.skills_tools_provider.get_capabilities = MagicMock(return_value=[])
+    mock_pool.skill_capabilities = []
 
     EventBus()
     session_pool = SessionPool(

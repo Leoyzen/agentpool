@@ -25,13 +25,11 @@ def _make_host_context(
     *,
     pool: Any | None = None,
     config_file_path: str | None = None,
-    skills_tools_provider: Any | None = _DEFAULT_TOOLS_PROVIDER,
     mcp: Any | None = _DEFAULT_MCP,
 ) -> Any:
     """Build a mock HostContext with common defaults."""
     ctx = MagicMock()
     ctx.config_file_path = config_file_path
-    ctx.skills_tools_provider = skills_tools_provider
     ctx.mcp = mcp if mcp is not None else MagicMock()
     return ctx
 
@@ -121,7 +119,7 @@ def test_compile_does_not_register_skills_tools_provider_at_agent_scope(
 
     factory.compile(
         manifest=manifest,
-        host_context=_make_host_context(skills_tools_provider=skills_provider),
+        host_context=_make_host_context(),
     )
 
     # Check AGENT scope does NOT have skills_provider
@@ -160,7 +158,7 @@ def test_compile_registers_config_capabilities_at_agent_scope(
     with patch("agentpool.models.agents.NativeAgentConfig", (type(cfg),)):
         factory.compile(
             manifest=manifest,
-            host_context=_make_host_context(skills_tools_provider=None),
+            host_context=_make_host_context(),
         )
 
     agent_scope = Scope(level=ScopeLevel.AGENT, agent_name="test_agent")
@@ -258,10 +256,7 @@ async def test_create_session_agent_native_main_no_pool_providers(minimal_pool: 
     """
     agent = _make_agent_mock()
     cfg = _make_native_cfg(agent=agent)
-    skills_tools = MagicMock()
-    host_context = _make_host_context(
-        skills_tools_provider=skills_tools,
-    )
+    host_context = _make_host_context()
 
     factory = AgentFactory(pool=minimal_pool)
 

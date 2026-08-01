@@ -1,7 +1,7 @@
 """Integration tests for AgentPool skill integration.
 
-Tests cover skill_resolver property, skill_provider property,
-skill resolution through pool, and provider aggregation.
+Tests cover skill_resolver property, skill_capabilities property,
+skill resolution through pool, and provider registration.
 """
 
 from __future__ import annotations
@@ -12,9 +12,8 @@ import pytest
 from upathtools import UPath
 
 from agentpool import AgentPool, AgentsManifest, NativeAgentConfig
-from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
 from agentpool.capabilities.resource_protocols import SkillResource
-from agentpool.skills.exceptions import SkillNotFoundError
+from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.uri_resolver import SkillURIResolver
 from agentpool_config.skills import SkillsConfig
 
@@ -151,8 +150,6 @@ class TestSkillResolverProperty:
             assert resolver is not None
 
             providers = resolver.list_providers()
-            # Provider list may be empty if no MCP servers configured,
-            # or may contain MCP providers if configured
             assert isinstance(providers, list)
 
     async def test_skill_resolver_exists_without_skills(
@@ -173,42 +170,41 @@ class TestSkillResolverProperty:
 
 
 # =============================================================================
-# Test Class: SkillProviderProperty
+# Test Class: SkillCapabilitiesProperty
 # =============================================================================
 
 
 @pytest.mark.integration
-class TestSkillProviderProperty:
-    """Test AgentPool.skill_provider property."""
+class TestSkillCapabilitiesProperty:
+    """Test AgentPool.skill_capabilities property (replaces skill_provider)."""
 
-    async def test_skill_provider_available_when_skills_configured(
+    async def test_skill_capabilities_available_when_skills_configured(
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that skill_provider is available when skills are configured."""
+        """Test that skill_capabilities is available when skills are configured."""
         async with AgentPool(manifest_with_skills) as pool:
-            assert pool.skill_provider is not None
+            assert len(pool.skill_capabilities) > 0
 
-    async def test_skill_provider_is_aggregating_provider(
+    async def test_skill_capabilities_contains_skill_manager_cap(
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that skill_provider is an CombinedToolsetCapability."""
+        """Test that skill_capabilities contains a SkillManagerCap instance."""
         async with AgentPool(manifest_with_skills) as pool:
-            assert isinstance(pool.skill_provider, CombinedToolsetCapability)
+            caps = pool.skill_capabilities
+            assert len(caps) > 0
+            assert isinstance(caps[0], SkillManagerCap)
 
-    async def test_skill_provider_has_capabilities(
+    async def test_skill_capabilities_has_local_skills(
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that skill_provider has capabilities list."""
+        """Test that the SkillManagerCap has local skills loaded."""
         async with AgentPool(manifest_with_skills) as pool:
-            provider = pool.skill_provider
-            assert provider is not None
-
-            # CombinedToolsetCapability exposes capabilities property
-            caps = provider.capabilities
-            assert isinstance(caps, list)
+            cap = pool.skill_capabilities[0]
+            assert isinstance(cap, SkillManagerCap)
+            assert "test-skill" in cap.local_skills
 
 
 # =============================================================================
@@ -268,39 +264,6 @@ class TestSkillResolutionThroughPool:
 
 
 # =============================================================================
-# Test Class: ProviderAggregation
-# =============================================================================
-
-
-@pytest.mark.integration
-class TestProviderAggregation:
-    """Test provider aggregation in AgentPool."""
-
-    async def test_skill_provider_has_capabilities_list(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that skill_provider has a capabilities list."""
-        async with AgentPool(manifest_with_skills) as pool:
-            provider = pool.skill_provider
-            assert provider is not None
-
-            caps = provider.capabilities
-            assert isinstance(caps, list)
-
-    async def test_skills_accessible_via_pool_skills(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that pool.skills provides access to skills."""
-        async with AgentPool(manifest_with_skills) as pool:
-            skills = pool.skills.list_skills()
-            skill_names = {s.name for s in skills}
-
-            assert "test-skill" in skill_names
-
-
-# =============================================================================
 # Test Class: PoolLifecycle
 # =============================================================================
 
@@ -319,15 +282,15 @@ class TestPoolLifecycle:
         async with pool:
             assert pool.skill_resolver is not None
 
-    async def test_provider_initialized_on_enter(
+    async def test_skill_capabilities_initialized_on_enter(
         self,
         manifest_with_skills: AgentsManifest,
     ) -> None:
-        """Test that provider is initialized when pool enters context."""
+        """Test that skill_capabilities is initialized when pool enters context."""
         pool = AgentPool(manifest_with_skills)
 
         async with pool:
-            assert pool.skill_provider is not None
+            assert len(pool.skill_capabilities) > 0
 
     async def test_skills_work_via_manager(
         self,
@@ -344,79 +307,6 @@ class TestPoolLifecycle:
 
 # =============================================================================
 # Test Class: ProviderRegistration
-# =============================================================================
-
-
-@pytest.mark.integration
-class TestProviderRegistration:
-    """Test provider registration in skill_resolver."""
-
-    async def test_can_list_all_providers(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that all providers can be listed."""
-        async with AgentPool(manifest_with_skills) as pool:
-            resolver = pool.skill_resolver
-            assert resolver is not None
-
-            providers = resolver.list_providers()
-            assert isinstance(providers, list)
-
-    async def test_unregistered_provider_returns_none(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that unregistered provider returns None."""
-        async with AgentPool(manifest_with_skills) as pool:
-            resolver = pool.skill_resolver
-            assert resolver is not None
-
-            provider = resolver.get_provider("nonexistent")
-            assert provider is None
-
-    async def test_resolve_fails_for_unregistered_provider(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that resolution fails for unregistered provider."""
-        async with AgentPool(manifest_with_skills) as pool:
-            resolver = pool.skill_resolver
-            assert resolver is not None
-
-            with pytest.raises(SkillNotFoundError, match="not found via ExtensionRegistry"):
-                await resolver.resolve("skill://mcp/some-skill")
-
-
-# =============================================================================
-# Test Class: SkillsChangedIntegration
-# =============================================================================
-
-
-@pytest.mark.integration
-class TestSkillsChangedIntegration:
-    """Test skills_changed signal integration.
-
-    The old skills_changed signal API was removed when CombinedToolsetCapability
-    replaced AggregatingResourceProvider. The new capability API uses on_change()
-    for capability-level change notification. These tests verify the new API.
-    """
-
-    async def test_skill_provider_has_on_change(
-        self,
-        manifest_with_skills: AgentsManifest,
-    ) -> None:
-        """Test that skill_provider has on_change method."""
-        async with AgentPool(manifest_with_skills) as pool:
-            provider = pool.skill_provider
-            assert provider is not None
-
-            # CombinedToolsetCapability has on_change() method
-            assert hasattr(provider, "on_change")
-
-
-# =============================================================================
-# register_skill_provider() / unregister_skill_provider() Tests
 # =============================================================================
 
 

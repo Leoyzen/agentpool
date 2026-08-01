@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from upathtools import UPath
@@ -68,12 +69,32 @@ class _FakeSkillProvider:
         return f"{skill_name} provider instructions"
 
 
+class _FakeCap:
+    """Fake SkillManagerCap for testing."""
+
+    def __init__(self, skills: list[Skill], provider_skills: list[Skill] | None = None) -> None:
+        self.local_skills = {s.name: s for s in skills}
+        self._provider_skills = provider_skills or []
+        self.children: list[Any] = []
+        if provider_skills:
+            self.children = [_FakeSkillProvider(provider_skills)]
+
+    def add_child(self, child: Any) -> None:
+        self.children.append(child)
+
+    def remove_child(self, child: Any) -> bool:
+        if child in self.children:
+            self.children.remove(child)
+            return True
+        return False
+
+
 class _FakePool:
     skill_resolver = None
 
     def __init__(self, skills: list[Skill], provider_skills: list[Skill] | None = None) -> None:
         self.skills = _FakeSkills(skills)
-        self.skill_provider = _FakeSkillProvider(provider_skills) if provider_skills else None
+        self.skill_capabilities = [_FakeCap(skills, provider_skills)]
 
     @staticmethod
     def is_skill_visible_to_node(skill: Skill, node_name: str | None) -> bool:

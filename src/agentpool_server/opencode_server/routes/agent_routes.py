@@ -247,7 +247,9 @@ async def list_commands(state: StateDep) -> list[Command]:
     logger.debug(
         "list_commands debug",
         skill_bridge_exists=state.skill_bridge is not None,
-        skill_provider_exists=state.pool.skill_provider is not None,
+        skill_capabilities_count=len(state.pool.skill_capabilities)
+        if isinstance(state.pool.skill_capabilities, list)
+        else 0,
     )
     if state.skill_bridge is not None:
         for skill_cmd in state.skill_bridge.get_skill_commands():

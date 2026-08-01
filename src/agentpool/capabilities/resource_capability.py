@@ -52,9 +52,9 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
     skills) via the ``ExtensionRegistry`` on ``AgentContextDeps``. The
     capability is stateless — no resources are held between turns.
 
-    Tools route by URI scheme:
-        - ``skill://`` → ``SkillResource`` providers
-        - Other URIs → ``ResourceAccess`` providers
+    Tools route by URI scheme to ``ResourceAccess`` providers. ``skill://``
+    resolution is retained as a silent, non-advertised fallback (see
+    ``resource_resolver.resolve_resource_content``) for protocol consumers.
     """
 
     def __init__(self, *, toolset_id: str = "resource_access") -> None:
@@ -87,7 +87,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
         return (
             "You have access to resource management tools:\n"
             "- list_resources: List available resources from connected MCP "
-            "servers and local skills (paginated, use offset to page through)\n"
+            "servers and local files (paginated, use offset to page through)\n"
             "- read_resource: Read content from a resource by URI (supports "
             "text and binary content; large text is truncated)\n"
             "- resource_exists: Check if a resource exists\n"
@@ -95,8 +95,8 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             "resource discovery (paginated, use offset to page through)\n"
             "- complete_resource_template: Get completion suggestions for "
             "template parameters\n\n"
-            "URI schemes: skill:// for local skills, mcp:// for MCP server "
-            "resources, file:// for file-based resources"
+            "URI schemes: mcp:// for MCP server resources, file:// for "
+            "file-based resources"
         )
 
     @logfire.instrument("capability.resource_capability.get_toolset")
@@ -193,7 +193,7 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             Field(description="Number of resources to skip for pagination"),
         ] = 0,
     ) -> str:
-        """List available resources from connected MCP servers and local skills.
+        """List available resources from connected MCP servers and local files.
 
         Results are paginated. Use ``offset`` to page through large result sets.
 
@@ -225,23 +225,6 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
                 f"{source:<25} {entry.uri:<45} {entry.name:<20} "
                 f"{entry.description:<30} {entry.mime_type:<15}"
                 for entry in resource_entries
-            )
-
-        # SkillResource providers
-        for skill_cap in registry.get_skill_resources(scope):
-            source = type(skill_cap).__name__
-            try:
-                skill_entries = await skill_cap.list_skills()
-            except Exception:  # noqa: BLE001
-                logfire.warning(
-                    "Failed to list skills from {source}",
-                    source=source,
-                )
-                continue
-            rows.extend(
-                f"{source:<25} {str(s_entry.skill_path or s_entry.uri) or '':<45} "
-                f"{s_entry.name:<20} {s_entry.description:<30} {'':<15}"
-                for s_entry in skill_entries
             )
 
         if not rows:
@@ -276,17 +259,16 @@ class ResourceCapability(AbstractCapability[AgentDepsT]):
             str,
             Field(
                 description=(
-                    "Resource URI to read. Supports 'mcp://server/resource', "
-                    "'skill://skill-name' (SKILL.md content), and "
-                    "'skill://skill-name/references/file.md' (reference file content)"
+                    "Resource URI to read, e.g. 'mcp://server/resource' or 'file://path/to/file'"
                 )
             ),
         ],
     ) -> ToolReturn:
         """Read content from a resource by URI.
 
-        Supports text and binary content. Routes by URI scheme:
-        ``skill://`` → skill providers, other URIs → resource providers.
+        Supports text and binary content. Routes by URI scheme; ``skill://``
+        URIs are additionally resolved as a non-advertised fallback via
+        ``resource_resolver.resolve_resource_content``.
 
         Args:
             ctx: The run context providing agent dependencies.

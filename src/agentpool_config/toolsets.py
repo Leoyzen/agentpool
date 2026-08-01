@@ -339,13 +339,17 @@ class SkillsToolsetConfig(BaseToolsetConfig):
     """
 
     def get_provider(self) -> AbstractCapability:
-        """Create skills tools provider."""
-        from agentpool_toolsets.builtin import SkillsTools
+        """Create skills tools provider.
 
-        provider = SkillsTools(
-            name="skills",
-            max_skills=self.max_skills,
-        )
+        Returns a ``FunctionToolsetCapability`` wrapping the ``load_skill``
+        and ``list_skills`` functions that are now owned by
+        :class:`~agentpool.capabilities.skill_manager_cap.SkillManagerCap`.
+        This keeps ``SkillsToolsetConfig`` constructible for config-driven
+        agent setups that explicitly request a ``skills`` toolset.
+        """
+        from agentpool.capabilities.function_toolset import FunctionToolsetCapability
+
+        provider = FunctionToolsetCapability(name="skills")
         if self.tools is not None:
             from agentpool.capabilities.filtered_toolset import FilteredToolsetCapability
 

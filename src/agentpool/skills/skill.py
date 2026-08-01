@@ -138,7 +138,7 @@ class Skill(BaseModel):
     def safe_uri(self) -> str:
         """Return a safe ``skill://`` URI for external exposure.
 
-        For local filesystem skills (UPath), returns ``skill://local/{name}``.
+        Returns the flat ``skill://{name}`` form for local filesystem skills.
         For virtual/MCP skills (PurePosixPath), returns the existing URI as-is.
 
         This property ensures that absolute filesystem paths are never leaked
@@ -147,8 +147,8 @@ class Skill(BaseModel):
         if not isinstance(self.skill_path, UPath):
             # Virtual/MCP skill — already has a skill:// or mcp:// URI
             return str(self.skill_path)
-        # Local filesystem skill — generate a safe skill:// URI
-        return f"skill://local/{self.name}"
+        # Local filesystem skill — generate a flat skill:// URI
+        return f"skill://{self.name}"
 
     def load_instructions(self) -> str:
         """Lazy-load full instructions from SKILL.md.

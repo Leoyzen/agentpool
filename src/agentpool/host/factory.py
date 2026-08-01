@@ -859,8 +859,9 @@ def _inject_pool_providers(
 ) -> None:
     """Inject pool-level providers into an agent (transitional).
 
-    The ``skills_tools_provider`` is injected here so that child session
-    agents have ``load_skill`` and ``list_skills`` tools available.
+    The ``skills_tools_provider`` injection has been removed — ``load_skill``
+    and ``list_skills`` are now owned by ``SkillManagerCap`` which is
+    registered at pool scope and automatically available to all agents.
 
     What remains on the old path:
     - MCP aggregating provider (child only): Used for connection
@@ -876,9 +877,6 @@ def _inject_pool_providers(
     """
     if pool is None:
         return
-    # Pool-level skills tools provider — load_skill/list_skills tools.
-    if host_context.skills_tools_provider is not None:
-        agent._external_capabilities.append(host_context.skills_tools_provider)
     # MCP aggregating provider — only for child sessions (connection
     # inheritance).
     if include_aggregating:
