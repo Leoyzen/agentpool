@@ -32,68 +32,53 @@ skills:
   
   # Instruction injection configuration
   instruction:
-    # Injection mode: off, metadata, or full
-    mode: metadata
+    # Full-instruction injection mode: description, matcher, or all
+    inject: description
     # Maximum number of skills to inject (default: 20)
     max_skills: 20
 ```
 
 ### Injection Modes
 
-| Mode | Description | Use Case |
-|------|-------------|----------|
-| `off` | No skill injection (default) | Disable automatic injection |
-| `metadata` | Skill names and descriptions only | Quick reference without full content |
-| `full` | Complete skill instructions | When skills contain critical instructions |
+The static `<available-skills>` catalog (skill name + description) is **always**
+emitted when the pool loads skills. The `inject` field controls whether the full
+skill instructions (`<skill_content>`) are also placed into the system prompt,
+which costs more tokens.
+
+| Mode | Behavior | Use Case |
+|------|----------|----------|
+| `description` (default) | Catalog only — NO full `<skill_content>`. Full instructions are loaded on demand via `load_skill`. | Token-saving; the common default |
+| `matcher` | Catalog + full instructions for skills selected by a runtime `matcher_fn` | Agents that should auto-load relevant skills without waiting for a tool call |
+| `all` | Catalog + full instructions for every skill | When skills contain critical instructions that must always be present |
 
 ## Agent-Specific Overrides
 
-Override global settings for specific agents using the skills toolset:
-
-```yaml
-agents:
-  expert_coder:
-    model: openai:gpt-4o
-    system_prompt: "You are an expert developer"
-    tools:
-      - type: skills
-        # Override global injection mode for this agent
-        injection_mode: full
-        max_skills: 10
-```
+Per-agent overrides are handled by the (deprecated) `type: skills` toolset, which
+is a no-op since skills tools are auto-provided by `SkillManagerCap`. The
+`inject`/`max_skills` settings are global; there is no per-agent
+`injection_mode` override.
 
 ## XML Output Format
 
-When skills injection is enabled, agents receive structured XML in their system prompt:
+When skills injection is enabled, agents receive a skill catalog in their system prompt:
 
 ```xml
 <available-skills>
-  <skill id="python-style-guide" name="Python Style Guide" description="PEP 8 coding conventions">
-    <instructions>
-      ## Python Style Guide
-      
-      Follow PEP 8 conventions:
-      - Use 4 spaces for indentation
-      - Maximum line length of 88 characters
-      - Use snake_case for functions and variables
-      - Use PascalCase for classes
-    </instructions>
-    <base_directory>/home/user/.config/agentpool/skills/python-style-guide/</base_directory>
-  </skill>
-  <skill id="refactoring" name="Code Refactoring" description="Safe refactoring techniques">
-    <instructions>
-      ## Code Refactoring
-      
-      Always follow these steps:
-      1. Understand the existing code
-      2. Run tests before changes
-      3. Make small, focused changes
-      4. Run tests after each change
-      5. Commit incrementally
-    </instructions>
-    <base_directory>/home/user/.config/agentpool/skills/refactoring/</base_directory>
-  </skill>
+  <skill name="python-style-guide" description="PEP 8 coding conventions" />
+  <skill name="refactoring" description="Safe refactoring techniques" />
 </available-skills>
+```
+
+With `inject: all` (or matcher-selected skills), full content is also injected:
+
+```xml
+<skill_content name="python-style-guide">
+  ## Python Style Guide
+
+  Follow PEP 8 conventions:
+  - Use 4 spaces for indentation
+  - Maximum line length of 100 characters
+</skill_content>
 ```
 
 ## Complete Example
@@ -106,45 +91,21 @@ skills:
     - ./project-skills
   include_default: true
   
-  # Default: metadata-only injection for all agents
+  # Default: catalog-only injection for all agents (token-saving)
   instruction:
-    mode: metadata
+    inject: description
     max_skills: 20
-
-agents:
-  # Appends /skills to tool names (default: false)
-  append_tools_namespace: true
-
-  # Standard agent - uses global metadata injection
-  assistant:
-    model: openai:gpt-4o-mini
-    system_prompt: "You are a helpful assistant"
-    tools:
-      - type: skills
-  
-  # Expert agent - uses full skill content
-  expert:
-    model: openai:gpt-4o
-    system_prompt: "You are an expert developer"
-    tools:
-      - type: skills
-        injection_mode: full
-        max_skills: 10
-  
-  # Minimal agent - no skills injection
-  minimal:
-    model: openai:gpt-4o-mini
-    system_prompt: "Keep responses brief"
-    tools: []  # No skills tool
 ```
 
-## Backward Compatibility
+## Behavior Notes
 
-By default, skills injection is **disabled** (`mode: off`). This ensures:
-
-- Existing configurations continue to work unchanged
-- Agents without explicit configuration see no skill injection
-- Opt-in required to enable automatic injection
+- The `<available-skills>` catalog is emitted whenever the pool has visible
+  skills — this is not disabled by default.
+- `inject: matcher` requires a programmatically-provided `matcher_fn` (it is not
+  serializable in YAML). Without one it falls back to `description` and logs a
+  warning.
+- Full instructions are always available on demand via the `load_skill` tool,
+  regardless of the `inject` mode.
 
 ## Related Configuration
 

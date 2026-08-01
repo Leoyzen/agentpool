@@ -193,13 +193,6 @@ def _visible_model_skills(
     ]
 
 
-def _node_name_for_scope(pool: AgentPool[Any] | None, node_name: str | None = None) -> str | None:
-    """Resolve the node name for skill scope checks."""
-    if node_name is not None:
-        return node_name
-    return None
-
-
 # ---------------------------------------------------------------------------
 # SkillManagerCap
 # ---------------------------------------------------------------------------
@@ -359,25 +352,33 @@ class SkillManagerCap(
         return resolve_agent_context_from_deps(ctx.deps, capability_name="SkillManagerCap")
 
     @staticmethod
-    def _resolve_pool(ctx: RunContext[AgentDepsT]) -> AgentPool[Any] | None:
-        """Extract the ``AgentPool`` from the run context deps if available.
+    def _resolve_pool(ctx: RunContext[AgentDepsT]) -> tuple[AgentPool[Any] | None, str | None]:
+        """Extract the ``AgentPool`` and current node name from the run context deps.
 
         In production, ``ctx.deps`` is ``AgentContext`` (which extends
-        ``NodeContext`` and has a ``pool`` field). In tests, ``ctx.deps``
-        may be ``AgentContextDeps`` directly (no pool).
+        ``NodeContext`` and exposes ``.node`` — the agent node carrying a
+        ``name``) plus a ``pool`` field. In tests, ``ctx.deps`` may be an
+        ``AgentContextDeps`` directly (no pool/node).
+
+        The node name is used for package-scoped skill visibility
+        (``pool.is_skill_visible_to_node``); passing ``None`` would resolve
+        against the default (host) scope and leak/withhold scoped skills.
 
         Args:
             ctx: The pydantic-ai run context.
 
         Returns:
-            The ``AgentPool`` instance if available, ``None`` otherwise.
+            A tuple of (``AgentPool`` if available else ``None``, node name
+            if available else ``None``).
         """
         from agentpool.agents.context import AgentContext as RuntimeAgentContext
 
         deps = ctx.deps
         if isinstance(deps, RuntimeAgentContext):
-            return deps.pool
-        return None
+            node = deps.node
+            node_name = getattr(node, "name", None)
+            return deps.pool, node_name
+        return None, None
 
     # ---- Per-skill tool import (D2) ----
 
@@ -455,9 +456,6 @@ class SkillManagerCap(
            with imported Python tools.
         3. Creates ``PrefixedToolset("{skill_name}__mcp__")`` for each
            per-skill ``McpServerCap`` child.
-        4. Guards against collisions: if a prefixed skill tool name collides
-           with a built-in tool name, the built-in wins and the conflicting
-           skill tool is dropped with a warning (D10).
         """
         toolsets: list[AbstractToolset[AgentDepsT]] = []
         cap = self
@@ -527,76 +525,32 @@ class SkillManagerCap(
             [load_skill, list_skills],
             id=f"{self._name}__builtin",
         )
-        # Built-in tool names for collision detection.
-        builtin_names: set[str] = {"load_skill", "list_skills"}
-
         toolsets.append(builtin_ts)
 
         # 1. Python tools: PrefixedToolset per skill.
         for skill_name, tools in self._skill_tools.items():
             pa_tools: list[Any] = [t.to_pydantic_ai() for t in tools]
             if pa_tools:
-                prefixed_ts = PrefixedToolset(
-                    wrapped=FunctionToolset(pa_tools),
-                    prefix=f"{skill_name}__tool__",
+                toolsets.append(
+                    PrefixedToolset(
+                        wrapped=FunctionToolset(pa_tools),
+                        prefix=f"{skill_name}__tool__",
+                    )
                 )
-                # Collision guard: check if any prefixed tool name collides
-                # with a built-in name.
-                self._guard_collisions(prefixed_ts, f"{skill_name}__tool__", builtin_names)
-                toolsets.append(prefixed_ts)
 
         # 2. Per-skill McpServerCap children: PrefixedToolset per skill.
         for skill_name, child_caps in self._skill_mcp_children.items():
             for child in child_caps:
                 child_ts = child.get_toolset()
                 if child_ts is not None:
-                    prefixed_ts = PrefixedToolset(
-                        wrapped=child_ts,
-                        prefix=f"{skill_name}__mcp__",
+                    toolsets.append(
+                        PrefixedToolset(
+                            wrapped=child_ts,
+                            prefix=f"{skill_name}__mcp__",
+                        )
                     )
-                    self._guard_collisions(prefixed_ts, f"{skill_name}__mcp__", builtin_names)
-                    toolsets.append(prefixed_ts)
 
         return CombinedToolset(toolsets=toolsets)
-
-    @staticmethod
-    def _guard_collisions(
-        prefixed_ts: PrefixedToolset[AgentDepsT],
-        prefix: str,
-        builtin_names: set[str],
-    ) -> None:
-        """Warn if any tool in a prefixed toolset collides with a built-in name.
-
-        This is a defensive guard — prefixed tool names include the prefix
-        by construction, so collisions should not occur. If they do (e.g.,
-        a skill named ``load_skill`` producing ``load_skill__tool__...``),
-        the built-in tool wins and the colliding skill tool is logged.
-
-        Args:
-            prefixed_ts: The prefixed toolset to check.
-            prefix: The prefix string applied to the toolset.
-            builtin_names: Set of built-in tool names to check against.
-        """
-        # PrefixedToolset applies the prefix to all tool names, so
-        # e.g. "my_tool" with prefix "skill1__tool__" becomes
-        # "skill1__tool__my_tool". A collision would require the
-        # FULL prefixed name to equal a built-in name, which is
-        # extremely unlikely. We still check defensively.
-        try:
-            inner_ts = prefixed_ts._wrapped  # type: ignore[attr-defined]
-            inner_tools: dict[str, Any] | None = getattr(inner_ts, "_tools", None)
-            if inner_tools is not None:
-                for tool_name in inner_tools:
-                    full_name = f"{prefix}{tool_name}"
-                    if full_name in builtin_names:
-                        logger.warning(
-                            "Built-in tool %r collides with skill tool %r; "
-                            "dropping skill tool (built-in wins)",
-                            full_name,
-                            full_name,
-                        )
-        except Exception:  # noqa: BLE001
-            pass
 
     # ---- get_wrapper_toolset() override (D4) ----
 
@@ -783,6 +737,8 @@ class SkillManagerCap(
         ctx: RunContext[AgentDepsT],
         skill_name: str,
         arguments: str | None = None,
+        *,
+        node_name: str | None = None,
     ) -> str:
         """Implementation for the ``load_skill`` agent tool.
 
@@ -793,8 +749,11 @@ class SkillManagerCap(
             ctx: The run context providing agent dependencies.
             skill_name: Skill name or skill:// URI.
             arguments: Optional space-separated arguments for substitution.
+            node_name: Optional node name override for package-scoped skill
+                visibility. Defaults to the node carried by ``ctx``.
         """
-        pool = self._resolve_pool(ctx)
+        pool, resolved_node = self._resolve_pool(ctx)
+        node_name_effective = node_name if node_name is not None else resolved_node
 
         # Determine if this is a URI or bare skill name
         is_uri = skill_name.startswith("skill://")
@@ -814,8 +773,8 @@ class SkillManagerCap(
                 skill = await resolver.resolve(skill_name)
             except Exception as e:  # noqa: BLE001
                 return f"Failed to resolve skill URI {skill_name!r}: {e}"
-            if not _is_skill_visible_to_node(pool, skill, None):
-                available = await self._available_skill_names(pool)
+            if not _is_skill_visible_to_node(pool, skill, node_name_effective):
+                available = await self._available_skill_names(pool, node_name_effective)
                 return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
 
             # Check for reference path first
@@ -832,9 +791,11 @@ class SkillManagerCap(
                 instructions = skill.instructions or ""
         else:
             # Bare-name loading: check local skills first, then children.
-            loaded = await self._load_visible_bare_skill(pool, resolved.skill_name)
+            loaded = await self._load_visible_bare_skill(
+                pool, node_name_effective, resolved.skill_name
+            )
             if loaded is None:
-                available = await self._available_skill_names(pool)
+                available = await self._available_skill_names(pool, node_name_effective)
                 return f"Skill {resolved.skill_name!r} not found. Available skills: {available}"
             skill, instructions = loaded
 
@@ -905,11 +866,11 @@ class SkillManagerCap(
         Args:
             ctx: The run context providing agent dependencies.
         """
-        pool = self._resolve_pool(ctx)
+        pool, node_name = self._resolve_pool(ctx)
 
         # Get local skills from the cap's own _local_skills
         local_skill_list = list(self._local_skills.values())
-        visible_local = _visible_model_skills(pool, local_skill_list, None)
+        visible_local = _visible_model_skills(pool, local_skill_list, node_name)
 
         # Get remote skills from child SkillResource providers
         remote_skills: list[Skill] = []
@@ -928,7 +889,7 @@ class SkillManagerCap(
                     for entry in entries
                 )
 
-        visible_remote = _visible_model_skills(pool, remote_skills, None)
+        visible_remote = _visible_model_skills(pool, remote_skills, node_name)
 
         # Deduplicate by name: local skills take priority
         seen: set[str] = {s.name for s in visible_local}
@@ -973,21 +934,25 @@ class SkillManagerCap(
     async def _load_visible_bare_skill(
         self,
         pool: AgentPool[Any] | None,
+        node_name: str | None,
         skill_name: str,
     ) -> tuple[Skill, str] | None:
         """Load a bare skill name from local skills or remote children.
 
-        Local skills take precedence. Remote skills are fetched from child
-        ``SkillResource`` providers.
+        Local skills take precedence. A local skill that exists but is not
+        visible to the current node does NOT shadow a matching visible remote
+        skill — the lookup falls through to remote children (see
+        ``test_hidden_package_skill_does_not_shadow_visible_provider_skill``).
 
         Args:
             pool: Optional AgentPool for visibility checks.
+            node_name: The current node name for package-scoped visibility.
             skill_name: The bare skill name to load.
 
         Returns:
             Tuple of (Skill, instructions) if found, ``None`` otherwise.
         """
-        # Local skills first
+        # Local skills first.
         local_skill = self._local_skills.get(skill_name)
         if local_skill is None:
             # Fuzzy match: try underscore↔hyphen alternatives.
@@ -996,14 +961,14 @@ class SkillManagerCap(
                 if local_skill is not None:
                     break
 
-        if local_skill is not None:
-            if not _is_skill_visible_to_node(pool, local_skill, None):
-                return None
+        if local_skill is not None and _is_skill_visible_to_node(pool, local_skill, node_name):
             try:
                 instructions = local_skill.load_instructions()
             except (ValueError, OSError):
                 instructions = ""
             return local_skill, instructions
+        # Local skill found but not visible to this node — fall through to
+        # check remote children so a visible remote skill is not shadowed.
 
         # Remote skills from children
         for child in self._children:
@@ -1023,7 +988,7 @@ class SkillManagerCap(
                 )
                 for entry in provider_entries
             ]
-            visible_skills = _visible_model_skills(pool, provider_skills, None)
+            visible_skills = _visible_model_skills(pool, provider_skills, node_name)
             matching_skill = next(
                 (s for s in visible_skills if s.name == skill_name),
                 None,
@@ -1049,17 +1014,22 @@ class SkillManagerCap(
 
         return None
 
-    async def _available_skill_names(self, pool: AgentPool[Any] | None) -> str:
+    async def _available_skill_names(
+        self,
+        pool: AgentPool[Any] | None,
+        node_name: str | None,
+    ) -> str:
         """Return a comma-separated list of available skill names.
 
         Args:
             pool: Optional AgentPool for visibility checks.
+            node_name: The current node name for skill package visibility.
 
         Returns:
             Sorted comma-separated string of skill names.
         """
         local_skill_list = list(self._local_skills.values())
-        visible_local = _visible_model_skills(pool, local_skill_list, None)
+        visible_local = _visible_model_skills(pool, local_skill_list, node_name)
 
         remote_skills: list[Skill] = []
         for child in self._children:
@@ -1077,7 +1047,7 @@ class SkillManagerCap(
                     for entry in entries
                 )
 
-        visible_remote = _visible_model_skills(pool, remote_skills, None)
+        visible_remote = _visible_model_skills(pool, remote_skills, node_name)
         all_names = {skill.name for skill in [*visible_local, *visible_remote]}
         return ", ".join(sorted(all_names))
 

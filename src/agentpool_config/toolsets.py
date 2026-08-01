@@ -302,11 +302,17 @@ class ProcessManagementToolsetConfig(BaseToolsetConfig):
 
 
 class SkillsToolsetConfig(BaseToolsetConfig):
-    """Configuration for skills toolset.
+    """Configuration for the skills toolset (deprecated).
 
-    Provides tools to discover and load Claude Code Skills from the pool's
-    skills registry. Skills are discovered from configured directories
-    (e.g., ~/.claude/skills/, .claude/skills/).
+    Skills are now auto-provided by
+    :class:`~agentpool.capabilities.skill_manager_cap.SkillManagerCap`, which
+    the pool registers at every agent. An explicit ``type: skills``
+    toolset is therefore a no-op: ``get_provider()`` returns an empty
+    capability so config-driven setups keep working without error, and the
+    ``tools``/``max_skills`` fields are no longer honored.
+
+    Prefer relying on the automatically-injected ``load_skill`` /
+    ``list_skills`` tools. Emits a ``DeprecationWarning`` when requested.
     """
 
     model_config = ConfigDict(
@@ -321,32 +327,45 @@ class SkillsToolsetConfig(BaseToolsetConfig):
 
     tools: dict[SkillsToolName, bool] | None = Field(
         default=None,
-        title="Tool filter",
+        title="Tool filter (unused)",
     )
-    """Optional tool filter to enable/disable specific tools."""
+    """(Unused) Tool filter for the legacy skills toolset.
+
+    Skills tools are owned by ``SkillManagerCap``; this filter has no effect.
+    """
 
     max_skills: int | None = Field(
         default=None,
         ge=1,
         le=100,
-        title="Maximum skills",
+        title="Maximum skills (unused)",
         examples=[10, 20, 50],
     )
-    """Maximum number of skills to inject.
+    """(Unused) Maximum number of skills to inject.
 
-    If set, overrides the global SkillsInstructionConfig.max_skills for this toolset.
-    Limits the number of skills included in prompts to prevent excessive token usage.
+    Skill injection is controlled by
+    :class:`~agentpool_config.skills.SkillsInstructionConfig.inject` and
+    ``max_skills``; this per-toolset override has no effect since
+    ``SkillManagerCap`` owns injection.
     """
 
     def get_provider(self) -> AbstractCapability:
-        """Create skills tools provider.
+        """Return an empty skills provider (no-op).
 
-        Returns a ``FunctionToolsetCapability`` wrapping the ``load_skill``
-        and ``list_skills`` functions that are now owned by
-        :class:`~agentpool.capabilities.skill_manager_cap.SkillManagerCap`.
-        This keeps ``SkillsToolsetConfig`` constructible for config-driven
-        agent setups that explicitly request a ``skills`` toolset.
+        The ``load_skill``/``list_skills`` tools are auto-provided by the
+        pool's ``SkillManagerCap``, so an explicit ``skills`` toolset is a
+        no-op. An empty ``FunctionToolsetCapability`` is returned so that
+        existing configs requesting a ``type: skills`` toolset keep loading.
         """
+        import warnings
+
+        warnings.warn(
+            "The 'type: skills' toolset is a no-op: skills are automatically "
+            "provided by SkillManagerCap. Remove the skills toolset from your "
+            "configuration.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from agentpool.capabilities.function_toolset import FunctionToolsetCapability
 
         provider = FunctionToolsetCapability(name="skills")

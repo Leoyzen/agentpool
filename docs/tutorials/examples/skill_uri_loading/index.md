@@ -14,8 +14,8 @@ This example demonstrates how to load skills using the `skill://` URI scheme int
 The skill URI system provides unified access to skills from both local filesystem and MCP servers:
 
 - **Short name loading**: `load_skill(ctx, "python-expert")` - auto-routes to first provider
-- **Full URI loading**: `load_skill(ctx, "skill://local/python-expert")` - explicit provider selection
-- **Reference loading**: `load_skill(ctx, "skill://local/python-expert/references/guide.md")`
+- **Full URI loading**: `load_skill(ctx, "skill://python-expert")` - explicit provider selection
+- **Reference loading**: `load_skill(ctx, "skill://python-expert/references/guide.md")`
 - **Argument substitution**: Pass arguments like `load_skill(ctx, "greeting", "Alice Company formal")`
 
 ## Files
@@ -149,9 +149,9 @@ agents:
 
       Available loading methods:
       1. By short name: "python-expert" (auto-routes to first provider with match)
-      2. By full URI: "skill://local/python-expert" (explicit provider)
+      2. By full URI: "skill://python-expert" (explicit provider)
       3. With arguments: "greeting" with "Alice Company formal"
-      4. Reference content: "skill://local/python-expert/references/guide.md"
+      4. Reference content: "skill://python-expert/references/guide.md"
 
       When asked to load a skill, use the load_skill tool with the appropriate format.
     tools:

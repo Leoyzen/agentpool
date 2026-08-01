@@ -8,6 +8,12 @@ icon: material/lightning-bolt
 
 Load and execute skills - reusable prompt-based capabilities.
 
+!!! warning "Deprecated"
+    The skills toolset is now **auto-provided** by `SkillManagerCap`, which
+    the pool registers for every agent. An explicit `type: skills` toolset is a
+    no-op and can be removed from your configuration. The `load_skill` and
+    `list_skills` tools are always available when the pool has skills.
+
 ## Basic Usage
 
 ```yaml
@@ -17,17 +23,20 @@ agents:
       - type: skills
 ```
 
-## Available Tools
+The `type: skills` toolset is deprecated and redundant — the `load_skill` /
+`list_skills` tools are auto-provided by `SkillManagerCap`. You can remove it.
 
-```python exec="true"
-from agentpool_toolsets.builtin.skills import SkillsTools
-from agentpool.docs.utils import generate_tool_docs
+## Tool Discovery
 
-toolset = SkillsTools()
-print(generate_tool_docs(toolset))
-```
+`load_skill` and `list_skills` are provided automatically by
+[`SkillManagerCap`](../../../explanation/skills-system.md) whenever the
+pool loads skills. Call them directly; no separate toolset is needed.
 
 ## Configuration Reference
+
+/// mknodes
+{{ "agentpool_config.toolsets.SkillsToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}
+///
 
 /// mknodes
 {{ "agentpool_config.toolsets.SkillsToolsetConfig" | schema_to_markdown(display_mode="yaml", header_style="pymdownx", wrapped_in="toolsets", header_level=3) }}

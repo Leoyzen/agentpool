@@ -17,6 +17,7 @@ from upathtools import to_upath
 from agentpool.capabilities.combined_toolset import _NamedCapability
 from agentpool.capabilities.extension_registry import ExtensionRegistry
 from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
 from agentpool.skills.uri_resolver import SkillURIResolver
@@ -515,7 +516,7 @@ class AgentPool[TPoolDeps = None]:
                 self._skill_resolver.register_provider(name, provider)
             # Also add to SkillManagerCap children for load_skill access.
             for cap in self._skill_capabilities:
-                if hasattr(cap, "add_child"):
+                if isinstance(cap, SkillManagerCap):
                     cap.add_child(provider)
         else:
             if not hasattr(self, "_pending_skill_providers"):
@@ -536,7 +537,7 @@ class AgentPool[TPoolDeps = None]:
             self._skill_resolver.unregister_provider(name)
         # Also remove from SkillManagerCap children.
         for cap in self._skill_capabilities:
-            if hasattr(cap, "remove_child"):
+            if isinstance(cap, SkillManagerCap):
                 cap.remove_child(provider)
 
         pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
@@ -641,7 +642,6 @@ class AgentPool[TPoolDeps = None]:
         - During ``__aenter__`` after skill discovery completes.
         """
         from agentpool.capabilities.extension_registry import Scope, ScopeLevel
-        from agentpool.capabilities.skill_manager_cap import SkillManagerCap
         from agentpool.skills.skill_tool_manager import SkillToolManager
 
         # Build local skills dict from SkillsManager.

@@ -28,12 +28,11 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def mock_agent_context():
     """Create a mock agent context with pool that has MCP-based skills."""
-    ctx = MagicMock()
-    ctx.pool = MagicMock()
+    ctx_pool = MagicMock()
 
     # Mock local skills (empty - simulating no local skills)
-    ctx.pool.skills.list_skills.return_value = []
-    ctx.pool.skills.get_skill_instructions.return_value = ""
+    ctx_pool.skills.list_skills.return_value = []
+    ctx_pool.skills.get_skill_instructions.return_value = ""
 
     # Mock MCP-based skills as SkillEntry objects (returned by SkillResource.list_skills())
     mcp_skill_hyphen = Skill(
@@ -75,12 +74,26 @@ def mock_agent_context():
     )
     mock_child_provider.skill_exists = AsyncMock(return_value=True)
 
-    mock_cap = MagicMock()
-    mock_cap.local_skills = {}  # No local skills
-    mock_cap.children = [mock_child_provider]
     # Make isinstance(mock_child_provider, SkillResource) return True
-    mock_child_provider.__class__ = type("FakeSkillResource", (SkillResource,), {})
-    ctx.pool.skill_capabilities = [mock_cap]
+    # and give it a real get_serialization_name used by SkillManagerCap.list_skills.
+    class _FakeSkillResource(SkillResource):
+        def get_serialization_name(self) -> str:
+            return "mcp_provider"
+
+        async def list_skills(self):
+            return mcp_entries
+
+        async def read_skill(self, skill_name: str) -> str | None:
+            return "# Troubleshooting Guide\n\nFollow these steps..."
+
+        async def skill_exists(self, skill_name: str) -> bool:
+            return True
+
+    fake_child = _FakeSkillResource()
+    from agentpool.capabilities.skill_manager_cap import SkillManagerCap
+
+    mock_cap = SkillManagerCap(local_skills={}, children=[fake_child], name="pool-skills")
+    ctx_pool.skill_capabilities = [mock_cap]
 
     # Mock skill_resolver
     mock_resolver = MagicMock()
@@ -102,7 +115,13 @@ def mock_agent_context():
         raise ValueError(f"Skill not found: {uri}")
 
     mock_resolver.resolve = mock_resolve
-    ctx.pool.skill_resolver = mock_resolver
+    ctx_pool.skill_resolver = mock_resolver
+
+    from types import SimpleNamespace
+
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    ctx = RuntimeAgentContext(node=SimpleNamespace(name="test"), pool=ctx_pool)
 
     return ctx, mcp_skill_hyphen, mcp_skill_from_underscore
 

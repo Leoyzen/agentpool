@@ -12,6 +12,7 @@ from pathlib import PurePosixPath
 from typing import Any, Self
 from unittest.mock import MagicMock
 
+from pydantic_ai.capabilities import AbstractCapability
 import pytest
 
 from agentpool.capabilities.resource_protocols import (
@@ -28,7 +29,7 @@ pytestmark = pytest.mark.unit
 # ---- Mock MCP server capability ----
 
 
-class MockMcpServerCap(SkillResource):
+class MockMcpServerCap(SkillResource, AbstractCapability[Any]):
     """Mock McpServerCap that implements SkillResource for integration testing."""
 
     def __init__(
@@ -43,6 +44,15 @@ class MockMcpServerCap(SkillResource):
         self._content_map = content_map or {}
         self._fail = fail_on_connect
         self._entered = False
+
+    async def for_run(self, ctx: Any) -> MockMcpServerCap:
+        """Return a fresh per-run copy (mock)."""
+        return MockMcpServerCap(
+            name=self.name,
+            skills=list(self._skills),
+            content_map=dict(self._content_map),
+            fail_on_connect=self._fail,
+        )
 
     def get_serialization_name(self) -> str:
         return self.name
@@ -104,7 +114,7 @@ async def test_skill_with_mcp_instructions_and_remote_skills() -> None:
 
     cap = SkillManagerCap(
         local_skills={"my-skill": local_skill},
-        children=[mcp_child],  # type: ignore[arg-type]
+        children=[mcp_child],
     )
 
     # get_instructions returns [metadata_str, dynamic_callable]
@@ -140,7 +150,7 @@ async def test_mcp_child_lifecycle_enter_exit() -> None:
     mcp_child = MockMcpServerCap(name="lifecycle-mcp")
     cap = SkillManagerCap(
         local_skills={},
-        children=[mcp_child],  # type: ignore[arg-type]
+        children=[mcp_child],
     )
 
     assert not mcp_child._entered
@@ -169,7 +179,7 @@ async def test_partial_failure_mcp_fails_skill_still_works() -> None:
 
     cap = SkillManagerCap(
         local_skills={"resilient-skill": local_skill},
-        children=[failing_mcp],  # type: ignore[arg-type]
+        children=[failing_mcp],
     )
 
     # Local skill instructions still available
@@ -209,7 +219,7 @@ async def test_get_instructions_dynamic_callable_produces_skill_content() -> Non
     mcp_child = MockMcpServerCap(name="present-mcp")
     cap = SkillManagerCap(
         local_skills={"injected-skill": local_skill},
-        children=[mcp_child],  # type: ignore[arg-type]
+        children=[mcp_child],
         inject_mode="all",
     )
 
@@ -478,11 +488,11 @@ async def test_remove_child_removes_from_children() -> None:
     mcp_child = MockMcpServerCap(name="removable-mcp")
     cap = SkillManagerCap(
         local_skills={},
-        children=[mcp_child],  # type: ignore[arg-type]
+        children=[mcp_child],
     )
 
     assert len(cap.children) == 1
-    assert cap.remove_child(mcp_child)  # type: ignore[arg-type]
+    assert cap.remove_child(mcp_child)
     assert len(cap.children) == 0
     assert not cap.remove_child(mcp_child)  # already removed
 
@@ -515,7 +525,7 @@ async def test_remote_skills_not_auto_injected() -> None:
 
     cap = SkillManagerCap(
         local_skills={"local-only": local_skill},
-        children=[mcp_child],  # type: ignore[arg-type]
+        children=[mcp_child],
         inject_mode="all",
     )
 
