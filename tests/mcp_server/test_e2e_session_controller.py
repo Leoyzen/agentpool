@@ -47,7 +47,7 @@ def _make_mock_pool() -> MagicMock:
     )
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
+    mock_pool.skill_capabilities = []
     mock_pool.mcp = MCPManager(name="pool-mcp")
     return mock_pool
 
@@ -94,7 +94,7 @@ async def test_full_create_session_chain_populates_mcp_session_context() -> None
     mock_pool.manifest = manifest
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
+    mock_pool.skill_capabilities = []
     mock_pool.mcp = agent.mcp  # Use the agent's own MCPManager
     mock_pool.get_context.return_value = MagicMock()
 

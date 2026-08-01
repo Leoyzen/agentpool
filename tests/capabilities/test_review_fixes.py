@@ -246,6 +246,7 @@ class TestMatcherFnBackwardCompat:
         cap = SkillManagerCap(
             local_skills={"test-skill": skill},
             matcher_fn=matcher_2arg,
+            inject_mode="matcher",
         )
 
         # get_instructions returns [metadata, callable]
@@ -287,6 +288,7 @@ class TestMatcherFnBackwardCompat:
         cap = SkillManagerCap(
             local_skills={"test-skill": skill},
             matcher_fn=matcher_1arg,
+            inject_mode="matcher",
         )
 
         # get_instructions returns [metadata, callable]

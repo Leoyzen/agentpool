@@ -333,11 +333,9 @@ class SessionPool(
                 pool=self.pool,
             )
 
-        # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot -> get_capabilities() ->
-        # MCPToolset, not through agent._all_capabilities.
-        if self.pool is not None:
-            agent._external_capabilities.append(self.pool.skills_tools_provider)
+        # Pool-level skill tools (load_skill/list_skills) are now owned by
+        # SkillManagerCap, registered at pool scope in ExtensionRegistry.
+        # No explicit injection needed here.
 
         await agent.__aenter__()
         return agent
@@ -377,11 +375,9 @@ class SessionPool(
                 pool=self.pool,
             )
 
-        # Add pool-level providers (non-MCP only).
-        # MCP tools are handled via McpConfigSnapshot -> get_capabilities() ->
-        # MCPToolset, not through agent._all_capabilities.
-        if self.pool is not None:
-            agent._external_capabilities.append(self.pool.skills_tools_provider)
+        # Pool-level skill tools (load_skill/list_skills) are now owned by
+        # SkillManagerCap, registered at pool scope in ExtensionRegistry.
+        # No explicit injection needed here.
 
         await agent.__aenter__()
         return agent

@@ -1,10 +1,11 @@
-"""Tests for load_skill/list_skills tool propagation.
+"""Tests for _inject_pool_providers behavior.
 
 Verifies that:
-- 5.2: ``_inject_pool_providers()`` with a non-None ``skills_tools_provider``
-  injects it into ``agent._external_capabilities``.
-- 5.3: ``_inject_pool_providers()`` with ``skills_tools_provider=None`` does
-  not inject and does not error.
+- _inject_pool_providers() no longer injects skills_tools_provider
+  (consolidated into SkillManagerCap, unify-skill-loading).
+- _inject_pool_providers() with include_aggregating=True injects the MCP
+  aggregating provider.
+- _inject_pool_providers() with pool=None returns early without error.
 """
 
 from __future__ import annotations
@@ -36,10 +37,8 @@ class FakeHostContext:
 
     def __init__(
         self,
-        skills_tools_provider: Any | None = None,
         mcp_aggregating_provider: Any | None = None,
     ) -> None:
-        self.skills_tools_provider = skills_tools_provider
         self._mcp_aggregating = mcp_aggregating_provider
 
         class FakeMcp:
@@ -49,76 +48,38 @@ class FakeHostContext:
         self.mcp = FakeMcp()
 
 
-def test_inject_pool_providers_with_skills_tools(minimal_pool: AgentPool) -> None:
-    """Provider is injected when skills_tools_provider is set.
+def test_inject_pool_providers_no_skills_injection(minimal_pool: AgentPool) -> None:
+    """Skills tools are NOT injected (owned by SkillManagerCap now).
 
-    Given a host context with skills_tools_provider set, When
-    _inject_pool_providers is called, Then the provider is appended to
-    agent._external_capabilities.
+    Given a host context, When _inject_pool_providers is called with
+    include_aggregating=False, Then no providers are injected.
     """
-    provider = MagicMock(name="skills_tools_provider")
     agent = FakeAgent()
-    host_context = FakeHostContext(skills_tools_provider=provider)
+    host_context = FakeHostContext()
     pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
 
-    assert provider in agent._external_capabilities
-
-
-def test_inject_pool_providers_without_skills_tools(minimal_pool: AgentPool) -> None:
-    """No injection when skills_tools_provider is None.
-
-    Given a host context with skills_tools_provider=None, When
-    _inject_pool_providers is called, Then no skills provider is injected
-    and no error occurs.
-    """
-    agent = FakeAgent()
-    host_context = FakeHostContext(skills_tools_provider=None)
-    pool = minimal_pool
-
-    _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
-
-    # No skills provider injected.
     assert len(agent._external_capabilities) == 0
 
 
 def test_inject_pool_providers_pool_none_returns_early() -> None:
-    """No injection when pool is None.
-
-    Given pool=None, When _inject_pool_providers is called, Then nothing is
-    injected and no error occurs.
-    """
-    provider = MagicMock(name="skills_tools_provider")
+    """No injection when pool is None."""
     agent = FakeAgent()
-    host_context = FakeHostContext(skills_tools_provider=provider)
+    host_context = FakeHostContext()
 
     _inject_pool_providers(agent, host_context, None, include_aggregating=False)
 
     assert len(agent._external_capabilities) == 0
 
 
-def test_inject_pool_providers_includes_both_skills_and_mcp(minimal_pool: AgentPool) -> None:
-    """Both skills and MCP providers injected when configured.
-
-    Given both skills_tools_provider and include_aggregating=True, When
-    _inject_pool_providers is called, Then both providers are appended to
-    _external_capabilities.
-    """
-    skills_provider = MagicMock(name="skills_tools_provider")
+def test_inject_pool_providers_includes_mcp_aggregating(minimal_pool: AgentPool) -> None:
+    """MCP aggregating provider injected when include_aggregating=True."""
     mcp_provider = MagicMock(name="mcp_aggregating_provider")
     agent = FakeAgent()
-    host_context = FakeHostContext(
-        skills_tools_provider=skills_provider,
-        mcp_aggregating_provider=mcp_provider,
-    )
+    host_context = FakeHostContext(mcp_aggregating_provider=mcp_provider)
     pool = minimal_pool
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=True)
 
-    assert skills_provider in agent._external_capabilities
     assert mcp_provider in agent._external_capabilities
-    # Skills provider should be injected before MCP provider.
-    assert agent._external_capabilities.index(skills_provider) < (
-        agent._external_capabilities.index(mcp_provider)
-    )

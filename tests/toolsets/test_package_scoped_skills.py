@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from upathtools import UPath
 
-from agentpool.capabilities.resource_protocols import SkillEntry
+from agentpool.capabilities.resource_protocols import SkillEntry, SkillResource
+from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill, load_skill_for_node
 
@@ -21,25 +23,14 @@ def _write_skill(root, name: str, description: str) -> Skill:
     return Skill.from_skill_dir(UPath(skill_dir))
 
 
-class _FakeSkills:
+class _FakeSkillResource(SkillResource):
+    """In-memory remote skill provider implementing SkillResource."""
+
     def __init__(self, skills: list[Skill]) -> None:
         self._skills = skills
 
-    def list_skills(self) -> list[Skill]:
-        return self._skills
-
-    def get_skill_instructions(self, skill_name: str) -> str:
-        return next(skill for skill in self._skills if skill.name == skill_name).load_instructions()
-
-
-class _FakeSkillProvider:
-    def __init__(self, skills: list[Skill]) -> None:
-        self._skills = skills
-
-    @property
-    def capabilities(self) -> list[_FakeSkillProvider]:
-        """Return self as the sole capability, matching real provider interface."""
-        return [self]
+    def get_serialization_name(self) -> str:
+        return "scratchpad"
 
     async def list_skills(self) -> list[SkillEntry]:
         return [
@@ -61,29 +52,35 @@ class _FakeSkillProvider:
     async def skill_exists(self, skill_name: str) -> bool:
         return any(s.name == skill_name for s in self._skills)
 
-    async def get_skills(self) -> list[Skill]:
-        return self._skills
-
-    async def get_skill_instructions(self, skill_name: str) -> str:
-        return f"{skill_name} provider instructions"
-
 
 class _FakePool:
+    """Minimal pool exposing scope functions + a real SkillManagerCap."""
+
     skill_resolver = None
 
     def __init__(self, skills: list[Skill], provider_skills: list[Skill] | None = None) -> None:
-        self.skills = _FakeSkills(skills)
-        self.skill_provider = _FakeSkillProvider(provider_skills) if provider_skills else None
+        self._provider_skills = provider_skills or []
+        children = [_FakeSkillResource(self._provider_skills)] if self._provider_skills else []
+        self.skill_capabilities = [
+            SkillManagerCap(
+                local_skills={s.name: s for s in skills},
+                children=children,
+                name="pool-skills",
+            )
+        ]
 
-    @staticmethod
-    def is_skill_visible_to_node(skill: Skill, node_name: str | None) -> bool:
+    def is_skill_visible_to_node(self, skill: Skill, node_name: str | None) -> bool:
         if node_name == "rebuttal_agent":
             return True
         return skill.metadata.get("scope") != "rebuttal_agent"
 
 
-def _ctx(pool: _FakePool, node_name: str):
-    return SimpleNamespace(pool=pool, node=SimpleNamespace(name=node_name))
+def _ctx(pool: _FakePool, node_name: str) -> Any:
+    """Build a RuntimeAgentContext (AgentContext) deps with pool + node name."""
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    node = SimpleNamespace(name=node_name)
+    return RuntimeAgentContext(node=node, pool=pool)
 
 
 @pytest.mark.unit

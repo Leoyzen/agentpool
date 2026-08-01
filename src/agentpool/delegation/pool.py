@@ -14,9 +14,10 @@ import anyio
 import logfire
 from upathtools import to_upath
 
-from agentpool.capabilities.combined_toolset import CombinedToolsetCapability, _NamedCapability
+from agentpool.capabilities.combined_toolset import _NamedCapability
 from agentpool.capabilities.extension_registry import ExtensionRegistry
 from agentpool.capabilities.resource_protocols import SkillResource
+from agentpool.capabilities.skill_manager_cap import SkillManagerCap
 from agentpool.delegation.message_flow_tracker import MessageFlowTracker
 from agentpool.log import get_logger
 from agentpool.skills.uri_resolver import SkillURIResolver
@@ -178,14 +179,8 @@ class AgentPool[TPoolDeps = None]:
                 config=self.manifest.skills,
                 config_file_path=self._config_file_path,
             )
-            from agentpool_toolsets.builtin.skills import SkillsTools
-
-            self.skills_tools_provider = SkillsTools(
-                max_skills=self.manifest.skills.instruction.max_skills,
-            )
             self._tasks = TaskRegistry()
             self._skill_resolver: SkillURIResolver | None = None
-            self._skill_provider: CombinedToolsetCapability | None = None
             self._skill_capabilities: list[Any] = []  # SkillManagerCap instances
             # Pool-level ExtensionRegistry for global capability scoping.
             self._extension_registry: ExtensionRegistry = ExtensionRegistry()
@@ -249,7 +244,6 @@ class AgentPool[TPoolDeps = None]:
                 connection_registry=self.connection_registry,
                 mcp=self.mcp,
                 skills_registry=self.skills,
-                skills_tools_provider=self.skills_tools_provider,
                 prompt_manager=self.prompt_manager,
                 process_manager=self.process_manager,
                 file_ops=self.file_ops,
@@ -374,8 +368,7 @@ class AgentPool[TPoolDeps = None]:
                 # Await any in-flight checkpoint operations before cleanup
                 await self._session_pool._await_inflight_checkpoints()
                 self._session_pool = None
-                # Clean up skill provider and resolver
-                self._skill_provider = None
+                # Clean up skill resolver
                 self._skill_resolver = None
                 await self.cleanup()
 
@@ -506,22 +499,13 @@ class AgentPool[TPoolDeps = None]:
         """
         return self._skill_resolver
 
-    @property
-    def skill_provider(self) -> CombinedToolsetCapability | None:
-        """Get the aggregating skill resource provider.
-
-        Returns the CombinedToolsetCapability that combines all skill sources
-        (local filesystem and MCP servers), or None if not initialized.
-        """
-        return self._skill_provider
-
     def register_skill_provider(self, provider: AbstractCapability) -> None:
         """Register a skill provider dynamically.
 
-        Adds the provider to the URI resolver so that its skills
-        become visible to SkillManagerCap and load_skill.
-        If called before _setup_skills_provider(), the provider is buffered
-        and added when the resolver is created.
+        Adds the provider to the URI resolver and to the ``SkillManagerCap``
+        children so that its skills become visible to ``load_skill`` and
+        ``list_skills``. If called before ``_setup_skills_provider()``, the
+        provider is buffered and added when the resolver is created.
 
         Args:
             provider: The resource provider to register
@@ -530,6 +514,10 @@ class AgentPool[TPoolDeps = None]:
         if self._skill_resolver is not None:
             if isinstance(provider, SkillResource):
                 self._skill_resolver.register_provider(name, provider)
+            # Also add to SkillManagerCap children for load_skill access.
+            for cap in self._skill_capabilities:
+                if isinstance(cap, SkillManagerCap):
+                    cap.add_child(provider)
         else:
             if not hasattr(self, "_pending_skill_providers"):
                 self._pending_skill_providers: list[AbstractCapability] = []
@@ -538,7 +526,8 @@ class AgentPool[TPoolDeps = None]:
     def unregister_skill_provider(self, provider: AbstractCapability) -> None:
         """Unregister a previously registered skill provider.
 
-        Removes the provider from the URI resolver.
+        Removes the provider from the URI resolver and from the
+        ``SkillManagerCap`` children.
 
         Args:
             provider: The resource provider to unregister
@@ -546,6 +535,10 @@ class AgentPool[TPoolDeps = None]:
         name = self._provider_name(provider)
         if self._skill_resolver is not None:
             self._skill_resolver.unregister_provider(name)
+        # Also remove from SkillManagerCap children.
+        for cap in self._skill_capabilities:
+            if isinstance(cap, SkillManagerCap):
+                cap.remove_child(provider)
 
         pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
         if pending:
@@ -603,37 +596,29 @@ class AgentPool[TPoolDeps = None]:
         return os.path.normcase(str(Path(raw_path).resolve())).replace("\\", "/").rstrip("/")
 
     async def _setup_skills_provider(self) -> None:
-        """Initialize the skill provider and resolver.
+        """Initialize the skill resolver.
 
-        Creates a CombinedToolsetCapability that combines MCP capabilities
-        for skill URI resolution. Individual SkillManagerCap instances are
-        created separately by ``_rebuild_skill_capabilities()``.
+        Creates the ``SkillURIResolver`` and registers MCP providers with it.
+        The aggregating ``_skill_provider`` (``CombinedToolsetCapability``) has
+        been removed — bare-name skill lookup now iterates the cap's own
+        children (D8 consolidation).
         """
-        providers: list[AbstractCapability] = []
-
-        # Add MCPCapability for each MCP server
-        providers.extend(self.mcp.providers)
-
-        # Create aggregating provider
-        self._skill_provider = CombinedToolsetCapability(
-            capabilities=providers,
-            name="skills",
-        )
-
         # Create skill URI resolver and register providers
         self._skill_resolver = SkillURIResolver(
             extension_registry=self._extension_registry,
         )
-        for provider in providers:
+        for provider in self.mcp.providers:
             if isinstance(provider, SkillResource):
                 self._skill_resolver.register_provider(self._provider_name(provider), provider)
 
         # Drain any pending skill providers that were registered before setup
         pending: list[AbstractCapability] = getattr(self, "_pending_skill_providers", [])
         if pending:
-            for provider in pending:
-                if isinstance(provider, SkillResource):
-                    self._skill_resolver.register_provider(self._provider_name(provider), provider)
+            for pending_provider in pending:
+                if isinstance(pending_provider, SkillResource):
+                    self._skill_resolver.register_provider(
+                        self._provider_name(pending_provider), pending_provider
+                    )
             self._pending_skill_providers.clear()
 
     async def _rebuild_skill_capabilities(self) -> None:
@@ -657,7 +642,6 @@ class AgentPool[TPoolDeps = None]:
         - During ``__aenter__`` after skill discovery completes.
         """
         from agentpool.capabilities.extension_registry import Scope, ScopeLevel
-        from agentpool.capabilities.skill_manager_cap import SkillManagerCap
         from agentpool.skills.skill_tool_manager import SkillToolManager
 
         # Build local skills dict from SkillsManager.
@@ -688,11 +672,13 @@ class AgentPool[TPoolDeps = None]:
                     logger.warning("Error closing old SkillManagerCap", exc_info=True)
 
         # Create a single SkillManagerCap holding all local skills + MCP children.
+        inject_mode = self.manifest.skills.instruction.inject
         cap = SkillManagerCap(
             local_skills=local_skills,
             children=mcp_children,
             name="pool-skills",
             tool_manager=tool_manager,
+            inject_mode=inject_mode,
         )
         self._skill_capabilities = [cap]
 

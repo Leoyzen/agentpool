@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool.capabilities.resource_protocols import SkillEntry
+from agentpool.capabilities.resource_protocols import SkillEntry, SkillResource
 from agentpool.skills.skill import Skill
 from agentpool_toolsets.builtin.skills import list_skills, load_skill
 
@@ -28,12 +28,11 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def mock_agent_context():
     """Create a mock agent context with pool that has MCP-based skills."""
-    ctx = MagicMock()
-    ctx.pool = MagicMock()
+    ctx_pool = MagicMock()
 
     # Mock local skills (empty - simulating no local skills)
-    ctx.pool.skills.list_skills.return_value = []
-    ctx.pool.skills.get_skill_instructions.return_value = ""
+    ctx_pool.skills.list_skills.return_value = []
+    ctx_pool.skills.get_skill_instructions.return_value = ""
 
     # Mock MCP-based skills as SkillEntry objects (returned by SkillResource.list_skills())
     mcp_skill_hyphen = Skill(
@@ -67,16 +66,34 @@ def mock_agent_context():
         ),
     ]
 
-    # Mock skill_provider with child capabilities implementing SkillResource
-    mock_provider = MagicMock()
+    # Mock skill_capabilities with a fake SkillManagerCap
     mock_child_provider = MagicMock()
     mock_child_provider.list_skills = AsyncMock(return_value=mcp_entries)
     mock_child_provider.read_skill = AsyncMock(
         return_value="# Troubleshooting Guide\n\nFollow these steps..."
     )
     mock_child_provider.skill_exists = AsyncMock(return_value=True)
-    mock_provider.capabilities = [mock_child_provider]
-    ctx.pool.skill_provider = mock_provider
+
+    # Make isinstance(mock_child_provider, SkillResource) return True
+    # and give it a real get_serialization_name used by SkillManagerCap.list_skills.
+    class _FakeSkillResource(SkillResource):
+        def get_serialization_name(self) -> str:
+            return "mcp_provider"
+
+        async def list_skills(self):
+            return mcp_entries
+
+        async def read_skill(self, skill_name: str) -> str | None:
+            return "# Troubleshooting Guide\n\nFollow these steps..."
+
+        async def skill_exists(self, skill_name: str) -> bool:
+            return True
+
+    fake_child = _FakeSkillResource()
+    from agentpool.capabilities.skill_manager_cap import SkillManagerCap
+
+    mock_cap = SkillManagerCap(local_skills={}, children=[fake_child], name="pool-skills")
+    ctx_pool.skill_capabilities = [mock_cap]
 
     # Mock skill_resolver
     mock_resolver = MagicMock()
@@ -98,7 +115,13 @@ def mock_agent_context():
         raise ValueError(f"Skill not found: {uri}")
 
     mock_resolver.resolve = mock_resolve
-    ctx.pool.skill_resolver = mock_resolver
+    ctx_pool.skill_resolver = mock_resolver
+
+    from types import SimpleNamespace
+
+    from agentpool.agents.context import AgentContext as RuntimeAgentContext
+
+    ctx = RuntimeAgentContext(node=SimpleNamespace(name="test"), pool=ctx_pool)
 
     return ctx, mcp_skill_hyphen, mcp_skill_from_underscore
 

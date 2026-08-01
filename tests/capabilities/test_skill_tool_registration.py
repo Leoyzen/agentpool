@@ -215,8 +215,9 @@ def test_skill_without_tools_does_not_register_tools() -> None:
     assert len(cap._skill_tools) == 0
 
     toolset = cap.get_toolset()
-    # No tools -> None or empty.
-    assert toolset is None
+    # Toolset is not None — it always includes built-in load_skill/list_skills.
+    # But no prefixed skill tools are present.
+    assert toolset is not None
 
 
 # =========================================================================

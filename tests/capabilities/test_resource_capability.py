@@ -208,7 +208,8 @@ def test_get_instructions_returns_description() -> None:
     assert "resource_exists" in instructions
     assert "list_resource_templates" in instructions
     assert "complete_resource_template" in instructions
-    assert "skill://" in instructions
+    # skill:// is NOT advertised (D2 — unadvertised fallback)
+    assert "skill://" not in instructions
     assert "mcp://" in instructions
 
 
@@ -222,7 +223,7 @@ async def test_stateless_lifecycle() -> None:
 
 
 async def test_list_resources_with_providers() -> None:
-    """list_resources aggregates resources from ResourceAccess and SkillResource providers."""
+    """list_resources aggregates from ResourceAccess only; skills NOT enumerated (D3)."""
     ra = FakeResourceAccess(
         resources=[
             ResourceEntry(
@@ -253,8 +254,10 @@ async def test_list_resources_with_providers() -> None:
     assert "FakeResourceAccess" in result
     assert "mcp://server/file.txt" in result
     assert "file.txt" in result
-    assert "FakeSkillResource" in result
-    assert "ponytail" in result
+    # Skills are NOT enumerated in list_resources (D3)
+    assert "FakeSkillResource" not in result
+    assert "ponytail" not in result
+    assert "skill://" not in result
 
 
 async def test_list_resources_no_registry() -> None:

@@ -71,7 +71,6 @@ def _make_host_context() -> HostContext:
         connection_registry=connection_registry,
         mcp=mcp,
         skills_registry=skills_registry,
-        skills_tools_provider=None,
         prompt_manager=prompt_manager,
         process_manager=process_manager,
         file_ops=file_ops,

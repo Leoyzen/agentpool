@@ -30,7 +30,6 @@ if TYPE_CHECKING:
     from agentpool.utils.streams import FileOpsTracker
     from agentpool.utils.todos import TodoTracker
     from agentpool.vfs_registry import VFSRegistry
-    from agentpool_toolsets.builtin.skills import SkillsTools
 
 
 @dataclass(frozen=True)
@@ -69,7 +68,6 @@ class HostContext:
     connection_registry: ConnectionRegistry
     mcp: MCPManager
     skills_registry: SkillsManager
-    skills_tools_provider: SkillsTools | None
     prompt_manager: PromptManager
     process_manager: ProcessManager
     file_ops: FileOpsTracker

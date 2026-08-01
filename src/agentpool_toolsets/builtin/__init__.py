@@ -8,7 +8,6 @@ from agentpool_toolsets.builtin.code import CodeTools
 from agentpool_toolsets.builtin.debug import DebugTools
 from agentpool_toolsets.builtin.execution_environment import ProcessManagementTools
 from agentpool_toolsets.builtin.question_tools import QuestionTools
-from agentpool_toolsets.builtin.skills import SkillsTools
 from agentpool_toolsets.builtin.subagent_tools import SubagentTools
 from agentpool_toolsets.builtin.workers import WorkersTools
 
@@ -19,7 +18,6 @@ __all__ = [
     "DebugTools",
     "ProcessManagementTools",
     "QuestionTools",
-    "SkillsTools",
     "SubagentTools",
     "WorkersTools",
 ]
