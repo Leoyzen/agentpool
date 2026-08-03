@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "docs/**"
+      - "*.md"
+      - "schema/config-schema.json"
+      - ".github/workflows/documentation.yml"
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
