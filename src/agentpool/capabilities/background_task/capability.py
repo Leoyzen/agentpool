@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+import contextlib
 import enum
 import logging
 from pathlib import Path
@@ -11,8 +11,8 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from uuid import uuid4
 import weakref
 
+import logfire
 from pydantic_ai import RunContext, Tool
-from pydantic_ai._agent_graph import ModelRequestNode
 from pydantic_ai.capabilities import (
     AbstractCapability,
     AgentNode,
@@ -37,7 +37,10 @@ from agentpool.agents.events import (
     ToolCallStartEvent,
 )
 from agentpool.capabilities.background_task.manager import TERMINAL_STATES, BackgroundTaskManager
-from agentpool.capabilities.background_task.notification import NotificationBatcher
+from agentpool.capabilities.background_task.notification import (
+    NotificationBatcher,
+    _format_duration,
+)
 from agentpool.capabilities.background_task.types import BackgroundTask, SessionTaskState
 from agentpool.orchestrator.core import EventEnvelope
 from agentpool.skills.uri_resolver import ResolvedSkillURI
@@ -52,6 +55,7 @@ if TYPE_CHECKING:
 
     from pydantic_ai._instructions import AgentInstructions
     from pydantic_ai.agent.abstract import AgentModelSettings
+    from pydantic_ai.run import AgentRunResult
     from schemez.functionschema import OpenAIFunctionDefinition
 
     from agentpool.agents.context import AgentRunContext
@@ -119,30 +123,6 @@ def _generate_task_id(description: str) -> str:
         Task ID in format: bg_XXXXXXXXXXXX (12 hex chars)
     """
     return f"bg_{uuid4().hex[:12]}"
-
-
-def _format_duration(started_at: object, completed_at: object) -> str:
-    """Format the duration between two datetime values as a human-readable string.
-
-    Args:
-        started_at: The start datetime (or None)
-        completed_at: The end datetime (or None)
-
-    Returns:
-        A string like "2m 30s", "45s", or "" if inputs are None
-    """
-    if started_at is None or completed_at is None:
-        return ""
-    started = started_at if isinstance(started_at, datetime) else datetime.now(tz=UTC)
-    completed = completed_at if isinstance(completed_at, datetime) else datetime.now(tz=UTC)
-    delta = completed - started
-    total_seconds = int(delta.total_seconds())
-    if total_seconds < 0:
-        return ""
-    minutes, seconds = divmod(total_seconds, 60)
-    if minutes > 0:
-        return f"{minutes}m {seconds}s"
-    return f"{seconds}s"
 
 
 class BackgroundTaskCapability(AbstractCapability[AgentContext]):
@@ -555,13 +535,50 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
         Starts the ``NotificationBatcher`` for this session (must be called
         in an async context).  EventBus subscription is per-task, not per-run;
         subscriptions are established in ``_task_async()`` and cleaned up in
-        ``_run_and_stream``'s finally block.  No ``on_run_ended()`` override —
-        cleanup is solely via per-task try/finally.
+        ``_run_and_stream``'s finally block.
         """
         state = self._get_session_state(ctx)
         state.pending_retrievals.clear()
         state.retrieval_retry_count = 0
         await state.batcher.start()
+
+    async def after_run(
+        self,
+        ctx: RunContext[AgentContext],
+        *,
+        result: AgentRunResult[AgentContext],
+    ) -> AgentRunResult[AgentContext]:
+        """Clean up per-run session state after the agent run ends.
+
+        Evicts the ``_session_states`` entry keyed by ``run_id`` and the
+        corresponding ``id(ctx.deps)`` from ``_ephemeral_states``, then
+        tears down the state's batcher and task manager so their timers
+        and handles do not leak across runs.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            result: The agent run result (passed through unchanged).
+
+        Returns:
+            The unchanged ``result``.
+        """
+        agent_ctx = ctx.deps
+        run_ctx = agent_ctx.run_ctx
+        if run_ctx is not None:
+            state = self._session_states.pop(run_ctx.run_id, None)
+            # Drop any ephemeral fallback state keyed by this context object
+            # so an id() reuse cannot serve a stale state.
+            self._ephemeral_states.pop(id(agent_ctx), None)
+        else:
+            state = self._ephemeral_states.pop(id(agent_ctx), None)
+
+        if state is not None:
+            with contextlib.suppress(Exception):
+                await state.batcher.shutdown()
+            with contextlib.suppress(Exception):
+                await state.task_manager.shutdown()
+
+        return result
 
     async def after_node_run(
         self,
@@ -615,6 +632,21 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             f"</system-reminder>"
         )
 
+        # Deferred import: ModelRequestNode lives in pydantic_ai._agent_graph,
+        # a private (underscore-prefixed) module. We guard the import with a
+        # try/except so a minor pydantic-ai upgrade that moves or renames the
+        # module doesn't silently break — the error is logged and re-raised
+        # with a helpful message pointing at the version pin.
+        try:
+            from pydantic_ai._agent_graph import ModelRequestNode
+        except ImportError as e:
+            msg = (
+                "Failed to import ModelRequestNode from pydantic_ai._agent_graph. "
+                "This private API may have moved in a newer pydantic-ai version. "
+                "Check the pydantic-ai-slim pin in pyproject.toml (>=2.12.0)."
+            )
+            raise ImportError(msg) from e
+
         return ModelRequestNode[AgentContext, Any](
             request=ModelRequest(parts=[UserPromptPart(content=prompt)]),
         )
@@ -638,6 +670,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
 
     # ---- Tool methods (moved from BackgroundTaskProvider) ----
 
+    @logfire.instrument("background_task.capability.task")
     async def _task(
         self,
         ctx: RunContext[AgentContext],
@@ -764,6 +797,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             tool_call_id=tool_call_id,
         )
 
+    @logfire.instrument("background_task.capability.task_sync")
     async def _task_sync(
         self,
         ctx: AgentContext,
@@ -867,6 +901,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
 
         return final_result if final_result else "Error: No result produced"
 
+    @logfire.instrument("background_task.capability.task_async")
     async def _task_async(
         self,
         ctx: AgentContext,
@@ -947,6 +982,14 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             only monitors the bus to write incremental output and terminal
             results to the internal filesystem.
             """
+            with logfire.span(
+                "background_task.capability.run_and_stream",
+                task_id=task_id,
+                child_session_id=child_session_id,
+            ):
+                await _run_and_stream_inner()
+
+        async def _run_and_stream_inner() -> None:
             content_parts: list[str] = []
 
             assert ctx.pool is not None
@@ -1077,8 +1120,17 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
                 if task_error is not None:
                     raise RuntimeError(task_error)
             except asyncio.CancelledError:
-                cancel_msg = f"Task {task_id} ({mode}) was cancelled"
-                fs.pipe(output_path, f"# Task Cancelled\n\n{cancel_msg}".encode())
+                # Distinguish timeout from explicit cancellation: the manager
+                # marks the task model ``timed_out`` *before* cancelling the
+                # coroutine (see ``BackgroundTaskManager._run_with_timeout``),
+                # so we can inspect the status here to pick the right message.
+                task = state.task_manager.get_task(task_id)
+                if task is not None and task.status == "timed_out":
+                    timeout_msg = f"Task {task_id} ({mode}) timed out"
+                    fs.pipe(output_path, f"# Task Timed Out\n\n{timeout_msg}".encode())
+                else:
+                    cancel_msg = f"Task {task_id} ({mode}) was cancelled"
+                    fs.pipe(output_path, f"# Task Cancelled\n\n{cancel_msg}".encode())
                 raise
             except (ValueError, RuntimeError, TypeError, KeyError, AttributeError) as e:
                 error_msg = f"Task {task_id} ({mode}) failed: {type(e).__name__}: {e}"
@@ -1154,6 +1206,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             f"the result when ready."
         )
 
+    @logfire.instrument("background_task.capability.background_output")
     async def _background_output(
         self,
         ctx: RunContext[AgentContext],
@@ -1290,6 +1343,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             f"Session ID: {task_model.child_session_id}"
         )
 
+    @logfire.instrument("background_task.capability.background_cancel")
     async def _background_cancel(
         self,
         ctx: RunContext[AgentContext],
@@ -1364,6 +1418,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
         # If task not found or not cancelled, return the raw result
         return cancel_result
 
+    @logfire.instrument("background_task.capability.steer_task")
     async def _steer_task(
         self,
         ctx: RunContext[AgentContext],

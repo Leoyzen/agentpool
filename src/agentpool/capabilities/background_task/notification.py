@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import anyio
+import logfire
 
 
 if TYPE_CHECKING:
@@ -97,6 +98,7 @@ class NotificationBatcher:
     # Lifecycle
     # ------------------------------------------------------------------
 
+    @logfire.instrument("background_task.notification.start")
     async def start(self) -> None:
         """Enter the CancelScope for timeout protection.
 
@@ -112,6 +114,7 @@ class NotificationBatcher:
     # Submission (SYNC)
     # ------------------------------------------------------------------
 
+    @logfire.instrument("background_task.notification.submit")
     def submit(self, task: BackgroundTask) -> None:
         """Submit a completed task for batched notification.
 
@@ -179,6 +182,7 @@ class NotificationBatcher:
     # Flush (ASYNC)
     # ------------------------------------------------------------------
 
+    @logfire.instrument("background_task.notification.flush")
     async def _flush(self, session_id: str) -> None:
         """Pop pending tasks atomically, format, and deliver.
 
@@ -211,8 +215,15 @@ class NotificationBatcher:
         except asyncio.CancelledError:
             logger.debug("deliver_callback cancelled for session %s", session_id)
             raise
+        except Exception:
+            logger.exception(
+                "deliver_callback failed for session %s (%d tasks)",
+                session_id,
+                len(sorted_tasks),
+            )
 
-        # Mark tasks as delivered
+        # Mark tasks as delivered regardless of success/failure so the batch
+        # is never re-delivered (e.g. via submit() dedup or shutdown flush).
         for task in sorted_tasks:
             self._delivered.add(task.id)
 
@@ -303,8 +314,7 @@ class NotificationBatcher:
         """Flush remaining pending tasks, cancel timers, and tear down.
 
         Cancels all ``asyncio.TimerHandle`` objects, flushes any remaining
-        pending tasks, then cancels the ``CancelScope`` and exits the
-        ``TaskGroup``.
+        pending tasks, then cancels in-flight flush tasks.
         """
         # Cancel all pending timers
         for handle in self._timers.values():
@@ -332,6 +342,11 @@ class NotificationBatcher:
                     "deliver_callback cancelled during shutdown for session %s", session_id
                 )
                 raise
+            except Exception:
+                logger.exception(
+                    "deliver_callback failed during shutdown for session %s",
+                    session_id,
+                )
 
             for task in sorted_tasks:
                 self._delivered.add(task.id)

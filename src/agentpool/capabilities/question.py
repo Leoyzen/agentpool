@@ -11,9 +11,11 @@ can reference it in YAML config as ``type: question``.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import logfire
 from pydantic_ai import RunContext, Tool
 from pydantic_ai.capabilities import (
     AbstractCapability,
@@ -27,6 +29,7 @@ from agentpool.agents.context import AgentContext
 from agentpool.tools.base import ToolResult  # noqa: TC001
 from agentpool.utils.tool_schema import apply_params_schema, load_tool_schema
 from agentpool_config.context import get_config_dir
+from agentpool_toolsets.builtin.question_tools import QuestionTools
 
 
 if TYPE_CHECKING:
@@ -63,6 +66,9 @@ class QuestionCapability(AbstractCapability[AgentContext]):
                 Expected value: ``"question"``.
         """
         self._schemas = schemas or {}
+
+        # Single canonical QuestionTools instance shared across tool invocations.
+        self._question_tools = QuestionTools(name="question_tools")
 
         # Schema loading
         self._question_schema: OpenAIFunctionDefinition | None = None
@@ -144,16 +150,20 @@ class QuestionCapability(AbstractCapability[AgentContext]):
     # This wraps the canonical tool function from agentpool's QuestionTools,
     # adapting RunContext[AgentContext] → AgentContext for direct invocation.
 
+    @logfire.instrument("question.capability.question")
     async def _question(
         self,
         ctx: RunContext[AgentContext],
         questions: str,
     ) -> ToolResult:
         """Wrap ``QuestionTools.question`` to accept ``RunContext``."""
-        from agentpool_toolsets.builtin.question_tools import QuestionTools
-
-        question_tools = QuestionTools(name="question_tools")
-        return await question_tools.question(ctx.deps, questions)
+        agent_ctx = replace(
+            ctx.deps,
+            tool_name=ctx.tool_name,
+            tool_call_id=ctx.tool_call_id,
+            tool_input={"questions": questions},
+        )
+        return await self._question_tools.question(agent_ctx, questions)
 
 
 __all__ = ["QuestionCapability"]

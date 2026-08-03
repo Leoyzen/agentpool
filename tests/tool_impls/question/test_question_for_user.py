@@ -1,4 +1,4 @@
-"""Unit tests for the question tool (formerly question_for_user)."""
+"""Unit tests for the question tool."""
 
 from __future__ import annotations
 
@@ -780,14 +780,14 @@ def test_format_response_non_dict_content() -> None:
 
 
 # =============================================================================
-# Integration Tests (question_for_user with mocked handle_elicitation)
+# Integration Tests (question with mocked handle_elicitation)
 # =============================================================================
 
 
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_accept_response_single() -> None:
-    """Test question_for_user with single enum accept response."""
+    """Test question with single enum accept response."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 
@@ -811,7 +811,7 @@ async def test_accept_response_single() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_accept_response_multi() -> None:
-    """Test question_for_user with multi-select accept response."""
+    """Test question with multi-select accept response."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 
@@ -835,7 +835,7 @@ async def test_accept_response_multi() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_cancel_response() -> None:
-    """Test question_for_user with cancel action raises RunAbortedError."""
+    """Test question with cancel action raises RunAbortedError."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 
@@ -851,7 +851,7 @@ async def test_cancel_response() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_decline_response() -> None:
-    """Test question_for_user with decline action returns ToolResult."""
+    """Test question with decline action returns ToolResult."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 
@@ -871,7 +871,7 @@ async def test_decline_response() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_error_data_response() -> None:
-    """Test question_for_user raises ModelRetry on ErrorData from elicitation.
+    """Test question raises ModelRetry on ErrorData from elicitation.
 
     Previously this returned a ToolResult (which pydantic-ai treated as success,
     causing ACP to report status="completed" instead of "failed").
@@ -902,7 +902,7 @@ async def test_error_data_response_via_format_response() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_xml_parse_error_raises_model_retry() -> None:
-    """Test question_for_user raises ModelRetry on invalid XML.
+    """Test question raises ModelRetry on invalid XML.
 
     Previously this returned a ToolResult (success), but XML parse errors
     should signal failure to the model so it can retry with corrected XML.
@@ -918,8 +918,8 @@ async def test_xml_parse_error_raises_model_retry() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_question_for_user_multiple() -> None:
-    """Test question_for_user with multiple questions."""
+async def test_question_multiple() -> None:
+    """Test question with multiple questions."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 
@@ -941,8 +941,8 @@ async def test_question_for_user_multiple() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_question_for_user_params_check() -> None:
-    """Verify question_for_user calls handle_elicitation with correct params."""
+async def test_question_params_check() -> None:
+    """Verify question calls handle_elicitation with correct params."""
     mock_ctx = MagicMock()
     mock_ctx.handle_elicitation = AsyncMock()
 

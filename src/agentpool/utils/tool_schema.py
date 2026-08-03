@@ -52,14 +52,14 @@ def load_tool_schema(path: str | Path | None) -> OpenAIFunctionDefinition | None
 
     try:
         if suffix in (".yaml", ".yml"):
-            return cast(OpenAIFunctionDefinition, yaml.safe_load(content))
+            return _build_definition(yaml.safe_load(content))
         if suffix == ".json":
             return _build_definition(json.loads(content))
         # Try JSON first, then YAML if extension is unclear
         try:
             return _build_definition(json.loads(content))
         except json.JSONDecodeError:
-            return cast(OpenAIFunctionDefinition, yaml.safe_load(content))
+            return _build_definition(yaml.safe_load(content))
     except (yaml.YAMLError, json.JSONDecodeError) as e:
         raise ValueError(f"Failed to parse tool schema file {file_path}: {e}") from e
 
@@ -73,10 +73,22 @@ def _build_definition(data: Any) -> OpenAIFunctionDefinition:
 
     Returns:
         A validated ``OpenAIFunctionDefinition``.
+
+    Raises:
+        ValueError: If ``data`` is not a mapping, or is missing the required
+            ``name`` key.
     """
-    raw = cast(dict[str, Any], data)
+    try:
+        raw = cast(dict[str, Any], data)
+        name = cast(str, raw["name"])
+    except (KeyError, TypeError) as e:
+        if not isinstance(data, dict):
+            msg = f"Tool schema must be a mapping with a 'name' key, got {type(data).__name__}"
+        else:
+            msg = "Tool schema is missing required key 'name'"
+        raise ValueError(msg) from e
     return OpenAIFunctionDefinition(
-        name=cast(str, raw["name"]),
+        name=name,
         description=cast(str, raw.get("description", "")),
         parameters=cast(Any, raw.get("parameters", {})),
     )

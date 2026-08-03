@@ -10,6 +10,8 @@ import traceback
 from typing import TYPE_CHECKING, Any
 import uuid
 
+import logfire
+
 from agentpool.capabilities.background_task.types import (
     BackgroundTask,
     TaskHandle,
@@ -18,7 +20,7 @@ from agentpool.capabilities.background_task.types import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +85,7 @@ class BackgroundTaskManager:
     def start_task(
         self,
         task_id: str,
-        coro: Any,
+        coro: Coroutine[Any, Any, None],
         on_completed: Callable[[], None] | None = None,
     ) -> None:
         """Transition a registered task to running and begin execution.
@@ -100,18 +102,20 @@ class BackgroundTaskManager:
                 This allows the callback to inspect ``blocking_waiter_id``
                 while the blocking waiter is still registered.
         """
-        existing_handle = self._handles.get(task_id)
-        if existing_handle is not None and not existing_handle.task.done():
-            msg = f"Task {task_id!r} is already running"
-            raise ValueError(msg)
-        atask = asyncio.create_task(self._execute_task(task_id, coro))
-        handle = TaskHandle(task=atask, on_completed=on_completed)
-        self._handles[task_id] = handle
+        with logfire.span("background_task.manager.start_task", task_id=task_id):
+            existing_handle = self._handles.get(task_id)
+            if existing_handle is not None and not existing_handle.task.done():
+                msg = f"Task {task_id!r} is already running"
+                raise ValueError(msg)
+            atask = asyncio.create_task(self._execute_task(task_id, coro))
+            handle = TaskHandle(task=atask, on_completed=on_completed)
+            self._handles[task_id] = handle
 
+    @logfire.instrument("background_task.manager.execute_task")
     async def _execute_task(
         self,
         task_id: str,
-        coro: Any,
+        coro: Coroutine[Any, Any, None],
     ) -> None:
         """Wrap a user coroutine with semaphore, timeout, and state management."""
         task_model = self._tasks[task_id]
@@ -140,7 +144,7 @@ class BackgroundTaskManager:
             task_model.started_at = datetime.now(tz=UTC)
 
             try:
-                result = await asyncio.wait_for(coro, timeout=self._timeout_seconds)
+                result = await self._run_with_timeout(task_model, coro)
                 # Status may have been changed to "cancelling" by another task
                 # during the await, so we can't let mypy narrow it to "running".
                 current_status: TaskStatus = task_model.status
@@ -164,7 +168,7 @@ class BackgroundTaskManager:
                     task_model.error = str(exc)
                     task_model.completed_at = datetime.now(tz=UTC)
                     logger.error(  # noqa: TRY400
-                        "DEBUG_TASK_MGR: Task exception: %s\n%s",
+                        "Task exception: %s\n%s",
                         exc,
                         traceback.format_exc(),
                     )
@@ -177,7 +181,7 @@ class BackgroundTaskManager:
                     task_model.error = f"{type(exc).__name__}: {exc}"
                     task_model.completed_at = datetime.now(tz=UTC)
                     logger.error(  # noqa: TRY400
-                        "DEBUG_TASK_MGR: Task unexpected exception: %s\n%s",
+                        "Task unexpected exception: %s\n%s",
                         exc,
                         traceback.format_exc(),
                     )
@@ -188,29 +192,80 @@ class BackgroundTaskManager:
                 # the callback can inspect ``blocking_waiter_id`` while the
                 # blocking waiter is still registered.
                 if handle.on_completed is not None:
-                    logger.error(
-                        "DEBUG_TASK_MGR: Calling on_completed for task_id=%s",
+                    logger.debug(
+                        "Calling on_completed for task_id=%s",
                         task_id,
                     )
                     try:
                         handle.on_completed()
-                        logger.error(
-                            "DEBUG_TASK_MGR: on_completed returned for task_id=%s",
+                        logger.debug(
+                            "on_completed returned for task_id=%s",
                             task_id,
                         )
                     except Exception:  # noqa: BLE001
                         logger.error(  # noqa: TRY400
-                            "DEBUG_TASK_MGR: on_completed FAILED for task_id=%s\n%s",
+                            "on_completed FAILED for task_id=%s\n%s",
                             task_id,
                             traceback.format_exc(),
                         )
                 handle.completion_event.set()
             self._schedule_cleanup(task_id)
-            logger.error(
-                "DEBUG_TASK_MGR: _execute_task finished for task_id=%s status=%s",
+            logger.debug(
+                "_execute_task finished for task_id=%s status=%s",
                 task_id,
                 task_model.status,
             )
+
+    async def _run_with_timeout(
+        self,
+        task_model: BackgroundTask,
+        coro: Coroutine[Any, Any, None],
+    ) -> Any:
+        """Run ``coro`` under ``self._timeout_seconds``, distinguishing timeout from cancel.
+
+        ``asyncio.wait_for`` cancels the inner coroutine *before* raising
+        ``TimeoutError``, so a cancelled coroutine cannot tell whether the
+        cancellation came from a timeout or an explicit ``cancel_task`` call.
+        This helper marks the task model ``timed_out`` *before* cancelling the
+        inner coroutine, letting the coroutine's ``CancelledError`` handler
+        observe the terminal status and write the correct output message.
+        """
+        inner_task = asyncio.create_task(coro)
+        timeout_task = asyncio.create_task(asyncio.sleep(self._timeout_seconds))
+        try:
+            _done, _pending = await asyncio.wait(
+                {inner_task, timeout_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except asyncio.CancelledError:
+            # Explicit cancellation of this manager task: propagate to the
+            # inner coroutine and clean up the timeout sleeper.
+            inner_task.cancel()
+            timeout_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await inner_task
+            with contextlib.suppress(asyncio.CancelledError):
+                await timeout_task
+            raise
+        finally:
+            if not timeout_task.done():
+                timeout_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await timeout_task
+
+        if inner_task not in _done:
+            # Timeout fired first — mark timed_out BEFORE cancelling so the
+            # coroutine's CancelledError handler can distinguish the two cases.
+            if task_model.status not in TERMINAL_STATES:
+                task_model.status = "timed_out"
+                task_model.error = f"Task timed out after {self._timeout_seconds}s"
+                task_model.completed_at = datetime.now(tz=UTC)
+            inner_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await inner_task
+            raise TimeoutError
+
+        return inner_task.result()
 
     # ------------------------------------------------------------------
     # Cancellation
@@ -222,6 +277,10 @@ class BackgroundTaskManager:
         Returns a descriptive message about what happened.  Terminal-state
         tasks are not modified.
         """
+        with logfire.span("background_task.manager.cancel_task", task_id=task_id):
+            return await self._cancel_task_impl(task_id)
+
+    async def _cancel_task_impl(self, task_id: str) -> str:
         task_model = self._tasks.get(task_id)
         if task_model is None:
             return f"Task {task_id!r} not found"
@@ -235,6 +294,10 @@ class BackgroundTaskManager:
             task_model.completed_at = datetime.now(tz=UTC)
             handle = self._handles.get(task_id)
             if handle is not None:
+                # Fire on_completed before setting the event, matching the
+                # running path (where _execute_task's finally fires it).
+                if handle.on_completed is not None:
+                    handle.on_completed()
                 handle.completion_event.set()
             self._schedule_cleanup(task_id)
             return f"Task {task_id!r} cancelled while pending"
@@ -366,6 +429,18 @@ class BackgroundTaskManager:
         ``asyncio.wait`` does NOT use cancellation internally, so it is
         safe.
         """
+        with logfire.span(
+            "background_task.manager.wait_for_task",
+            task_id=task_id,
+            timeout_seconds=timeout_seconds,
+        ):
+            return await self._wait_for_task_impl(task_id, timeout_seconds)
+
+    async def _wait_for_task_impl(
+        self,
+        task_id: str,
+        timeout_seconds: float,
+    ) -> BackgroundTask | None:
         task_model = self._tasks.get(task_id)
         if task_model is None:
             return None
@@ -415,10 +490,15 @@ class BackgroundTaskManager:
             self._handles.pop(task_id, None)
             self._cleanup_scheduled.discard(task_id)
 
-        cleanup_task = asyncio.create_task(_cleanup())
-        self._cleanup_tasks.add(cleanup_task)
-        cleanup_task.add_done_callback(self._cleanup_tasks.discard)
+        with logfire.span(
+            "background_task.manager.schedule_cleanup",
+            task_id=task_id,
+        ):
+            cleanup_task = asyncio.create_task(_cleanup())
+            self._cleanup_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(self._cleanup_tasks.discard)
 
+    @logfire.instrument("background_task.manager.shutdown")
     async def shutdown(self) -> None:
         """Cancel all running tasks, await completion, and clear registries."""
         for task_id in list(self._tasks.keys()):
