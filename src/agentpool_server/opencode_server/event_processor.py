@@ -872,10 +872,15 @@ class EventProcessor:
         else:
             # Merge accumulated diff text (from DiffContentItem in progress events)
             # into completion metadata so the TUI Edit component can render it.
+            # Also set diagnostics=[] when diff content exists: this triggers the
+            # Write component's code-block branch (props.metadata.diagnostics !==
+            # undefined) so the written content is visible instead of "Preparing
+            # write...". An empty diagnostics array renders no error messages.
             diff_text = ctx.tool_diffs.pop(tool_call_id, "")
             merged_metadata: dict[str, Any] = dict(event_metadata or {})
             if diff_text:
                 merged_metadata["diff"] = diff_text
+                merged_metadata.setdefault("diagnostics", [])
             new_state = ToolStateCompleted(
                 title="Completed",
                 input=tool_input,

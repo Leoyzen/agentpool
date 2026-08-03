@@ -114,6 +114,8 @@ class TestDiffContentItemToUnifiedDiff:
         assert isinstance(diff, str), f"metadata.diff must be a string, got {type(diff)}"
         assert "viking://test.md" in diff
         assert "new content" in diff
+        # diagnostics=[] triggers Write component's code-block branch
+        assert metadata.get("diagnostics") == []
 
     @pytest.mark.asyncio
     async def test_edit_diff_carries_old_and_new(
