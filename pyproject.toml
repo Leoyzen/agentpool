@@ -103,7 +103,8 @@ subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
 skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
 combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
 code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
-question = "agentpool_toolsets.builtin.question_tools:QuestionTools"
+question = "agentpool.capabilities.question:QuestionCapability"
+background_task = "agentpool.capabilities.background_task:BackgroundTaskCapability"
 
 [project.entry-points."fsspec.specs"]
 acp = "acp.filesystem:ACPFileSystem"
