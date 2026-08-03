@@ -8,6 +8,7 @@ state, enabling stateless recursive processing.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import difflib
 from typing import TYPE_CHECKING, Any
 
 from pydantic_ai import FunctionToolCallEvent
@@ -22,6 +23,7 @@ from pydantic_ai.messages import (
 )
 
 from agentpool.agents.events import (
+    DiffContentItem,
     ElicitationDeferredEvent,
     FileContentItem,
     LocationContentItem,
@@ -754,6 +756,29 @@ class EventProcessor:
                     new_output += content
                 case LocationContentItem():
                     pass
+                case DiffContentItem(path=path, old_text=old, new_text=new):
+                    # Convert structured diff to unified diff text for TUI rendering.
+                    # The opencode TUI Edit component reads metadata.diff as a string
+                    # (createTwoFilesPatch format). Accumulate per tool_call_id;
+                    # _process_tool_complete merges it into ToolStateCompleted.metadata.
+                    #
+                    # Use lineterm="" + splitlines(keepends=False) so no line carries
+                    # an embedded \n. Join with \n and add trailing \n to ensure every
+                    # line is properly terminated — the npm "diff" parser strictly
+                    # validates hunk line counts and fails on missing terminators.
+                    old_str = old or ""
+                    new_str = new or ""
+                    diff_iter = difflib.unified_diff(
+                        old_str.splitlines(keepends=False),
+                        new_str.splitlines(keepends=False),
+                        fromfile=path,
+                        tofile=path,
+                        lineterm="",
+                    )
+                    diff_text = "\n".join(diff_iter)
+                    if diff_text:
+                        diff_text += "\n"
+                    ctx.tool_diffs[tool_call_id] = diff_text
 
         if new_output:
             ctx.append_tool_output(tool_call_id, new_output)
@@ -845,11 +870,17 @@ class EventProcessor:
             error_string = str(result.get("error", "Unknown error"))
             new_state = ToolStateError(error=error_string, input=tool_input, time=t)
         else:
+            # Merge accumulated diff text (from DiffContentItem in progress events)
+            # into completion metadata so the TUI Edit component can render it.
+            diff_text = ctx.tool_diffs.pop(tool_call_id, "")
+            merged_metadata: dict[str, Any] = dict(event_metadata or {})
+            if diff_text:
+                merged_metadata["diff"] = diff_text
             new_state = ToolStateCompleted(
                 title="Completed",
                 input=tool_input,
                 output=result_str,
-                metadata=event_metadata or {},
+                metadata=merged_metadata,
                 time=TimeStartEndCompacted(start=start, end=now_ms()),
             )
 
