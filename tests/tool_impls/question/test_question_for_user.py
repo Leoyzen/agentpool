@@ -1,4 +1,4 @@
-"""Unit tests for the question_for_user tool."""
+"""Unit tests for the question tool (formerly question_for_user)."""
 
 from __future__ import annotations
 
@@ -800,7 +800,7 @@ async def test_accept_response_single() -> None:
         '<question header="Model" type="enum"><text>What model?</text>'
         "<suggest>SY215C</suggest><suggest>SY235C</suggest></question>"
     )
-    result = await QuestionTools().question_for_user(mock_ctx, xml)
+    result = await QuestionTools().question(mock_ctx, xml)
     metadata: dict[str, list[list[str]]] = cast(dict[str, Any], result.metadata)
 
     assert metadata["answers"] == [["SY215C"]]
@@ -824,7 +824,7 @@ async def test_accept_response_multi() -> None:
         '<question header="Symptoms" type="multi"><text>Select symptoms</text>'
         "<suggest>A</suggest><suggest>B</suggest><suggest>C</suggest></question>"
     )
-    result = await QuestionTools().question_for_user(mock_ctx, xml)
+    result = await QuestionTools().question(mock_ctx, xml)
     metadata: dict[str, list[list[str]]] = cast(dict[str, Any], result.metadata)
 
     assert metadata["answers"] == [["A", "B", "C"]]
@@ -845,7 +845,7 @@ async def test_cancel_response() -> None:
 
     xml = '<question header="Test"><text>Q</text><suggest>A</suggest></question>'
     with pytest.raises(RunAbortedError, match="cancelled"):
-        await QuestionTools().question_for_user(mock_ctx, xml)
+        await QuestionTools().question(mock_ctx, xml)
 
 
 @pytest.mark.asyncio
@@ -860,7 +860,7 @@ async def test_decline_response() -> None:
     mock_ctx.handle_elicitation.return_value = mock_result
 
     xml = '<question header="Test"><text>Q</text><suggest>A</suggest></question>'
-    result = await QuestionTools().question_for_user(mock_ctx, xml)
+    result = await QuestionTools().question(mock_ctx, xml)
     content = cast(str, result.content)
     metadata: dict[str, list[list[str]]] = cast(dict[str, Any], result.metadata)
 
@@ -884,7 +884,7 @@ async def test_error_data_response() -> None:
 
     xml = '<question header="Test"><text>Q</text><suggest>A</suggest></question>'
     with pytest.raises(ModelRetry, match="Server error"):
-        await QuestionTools().question_for_user(mock_ctx, xml)
+        await QuestionTools().question(mock_ctx, xml)
 
 
 @pytest.mark.asyncio
@@ -913,7 +913,7 @@ async def test_xml_parse_error_raises_model_retry() -> None:
     invalid_xml = "<<<not valid xml>>>"
 
     with pytest.raises(ModelRetry, match="Error parsing questions"):
-        await QuestionTools().question_for_user(mock_ctx, invalid_xml)
+        await QuestionTools().question(mock_ctx, invalid_xml)
 
 
 @pytest.mark.asyncio
@@ -933,7 +933,7 @@ async def test_question_for_user_multiple() -> None:
         "<suggest>SY215C</suggest></question>"
         '<question header="Notes" type="input"><text>Notes?</text></question>'
     )
-    result = await QuestionTools().question_for_user(mock_ctx, xml)
+    result = await QuestionTools().question(mock_ctx, xml)
     metadata: dict[str, list[list[str]]] = cast(dict[str, Any], result.metadata)
 
     assert metadata["answers"] == [["SY215C"], ["Notes here"]]
@@ -955,7 +955,7 @@ async def test_question_for_user_params_check() -> None:
         '<question header="Test Question" type="enum"><text>Select option</text>'
         "<suggest>A</suggest><suggest>B</suggest></question>"
     )
-    await QuestionTools().question_for_user(mock_ctx, xml)
+    await QuestionTools().question(mock_ctx, xml)
 
     mock_ctx.handle_elicitation.assert_called_once()
     params = mock_ctx.handle_elicitation.call_args[0][0]

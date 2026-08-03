@@ -103,8 +103,8 @@ class QuestionToolConfig(BaseToolConfig):
 
     .. deprecated::
         Use ``capabilities: [{type: question}]`` instead of ``tools: [{type: question}]``.
-        The ``QuestionCapability`` provides ``question``, ``question_for_user``,
-        and ``ask_followup_question`` tools with YAML schema override support.
+        The ``QuestionCapability`` provides the ``question`` tool with YAML
+        schema override support.
 
     Example:
         ```yaml
@@ -127,7 +127,7 @@ class QuestionToolConfig(BaseToolConfig):
         warnings.warn(
             "tools: [{type: question}] is deprecated. "
             "Use capabilities: [{type: question}] instead, which provides "
-            "question, question_for_user, and ask_followup_question tools.",
+            "the question tool.",
             DeprecationWarning,
             stacklevel=2,
         )
