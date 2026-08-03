@@ -1,0 +1,33 @@
+description: |-
+  Send a steering message to a running background task. The message is injected
+  into the task's active turn (interrupt) or queued for its next turn (advisory),
+  allowing you to redirect its research or provide new context without cancelling it.
+  Use advisory mode (default) for supplementary information that refines the research
+  direction. Use interrupt mode sparingly — only when the subagent's current direction
+  must be immediately corrected.
+
+name: steer_task
+parameters:
+  type: object
+  properties:
+    task_id:
+      type: string
+      description: The ID of the background task to steer.
+    message:
+      type: string
+      description: |-
+        The steering message to inject into the subagent. Provide new facts,
+        confirmed boundary conditions, or context that should refine the
+        subagent's research direction. Do not use this to completely change
+        the task's objective — cancel and re-launch instead.
+    mode:
+      type: string
+      enum: ["advisory", "interrupt"]
+      description: |-
+        "advisory" (default): queues the message for the subagent's next turn.
+        Non-interrupting — the subagent finishes its current turn before seeing
+        the message. "interrupt": injects the message into the active turn
+        immediately. Use sparingly — only when the current direction must be
+        corrected before more output is produced.
+      default: "advisory"
+  required: ["task_id", "message"]
