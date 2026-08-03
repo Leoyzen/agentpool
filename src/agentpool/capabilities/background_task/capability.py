@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from schemez.functionschema import OpenAIFunctionDefinition
 
     from agentpool.agents.context import AgentRunContext
+    from agentpool.orchestrator.session_pool import SessionPool
 
 
 MAX_DELEGATION_DEPTH = 5
@@ -336,7 +337,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
     def _create_session_state(
         self,
         run_ctx: AgentRunContext | None,
-        session_pool: object | None = None,
+        session_pool: SessionPool | None = None,
     ) -> SessionTaskState:
         """Create a new ``SessionTaskState`` with task manager and batcher.
 
@@ -374,7 +375,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
     def _make_deliver_callback(
         self,
         run_ctx: AgentRunContext,
-        session_pool: object | None,
+        session_pool: SessionPool | None,
     ) -> Callable[[str, list[BackgroundTask], str], Awaitable[None]]:
         """Create a deliver callback for the notification batcher.
 
@@ -406,11 +407,10 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             # 1. Queue notification via followup() (always next-turn, never mid-turn)
             delivered = False
             if rc._run_handle is not None:
-                delivered = rc._run_handle.followup(notice)
+                delivered = rc._run_handle.followup(notice) is not None
             elif session_pool is not None:
-                # Fallback: delegate to SessionPool.followup()
-                result = await session_pool.followup(parent_session_id, notice)  # pyright: ignore[reportAny]
-                delivered = bool(result)
+                result = await session_pool.followup(parent_session_id, notice)
+                delivered = result is not None
 
             if not delivered:
                 logger.debug(
@@ -681,10 +681,7 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             return f"Error: Agent '{mode}' not found. Available: {available}"
 
         assert agent_ctx.pool.session_pool is not None, "SessionPool required"
-        config = agent_ctx.pool.manifest.agents.get(mode)
         source_type: Literal["agent", "team_parallel", "team_sequential"] = "agent"
-        if config is not None and config.type == "team":
-            source_type = "team_parallel"
 
         # Handle delegation depth
         current_depth = 0
@@ -1342,8 +1339,8 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
             raise ToolError(msg)
 
         # Get task description before cancelling (for formatted output)
-        task_model = state.task_manager.get_task(task_id)
-        description = task_model.description if task_model else task_id
+        task_before = state.task_manager.get_task(task_id)
+        description = task_before.description if task_before else task_id
 
         cancel_result = await state.task_manager.cancel_task(task_id)
 

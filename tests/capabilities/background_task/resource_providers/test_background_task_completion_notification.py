@@ -43,6 +43,19 @@ from agentpool.delegation import AgentPool
 pytestmark = pytest.mark.anyio
 
 
+async def _wait_until_called(mock_obj: Any, timeout: float = 3.0, interval: float = 0.05) -> None:
+    """Poll until a Mock has been called at least once, or timeout.
+
+    More reliable than fixed ``asyncio.sleep`` under CI load where the
+    event loop may be busy and debounce timers fire late.
+    """
+    elapsed = 0.0
+    while mock_obj.call_count == 0 and elapsed < timeout:
+        await asyncio.sleep(interval)
+        elapsed += interval
+    assert mock_obj.call_count > 0, f"Mock was not called within {timeout}s"
+
+
 def _wrap_in_run_context(agent_ctx):
     """Wrap an AgentContext in a mock RunContext for capability tool methods.
 
@@ -269,7 +282,7 @@ async def test_inject_when_no_blocking_waiter():
         )
 
     # Wait for background task to complete + 500ms debounce
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # followup SHOULD have been called (no blocking waiter)
     pool.session_pool.followup.assert_called_once()
@@ -328,7 +341,7 @@ async def test_nonblocking_output_does_not_suppress_inject():
     assert "Task Result" in status or "Task Error" in status or "running" in status.lower()
 
     # Wait for task to finish + 500ms debounce
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # followup should have been called
     pool.session_pool.followup.assert_called_once()
@@ -431,7 +444,7 @@ async def test_inject_prompt_queues_and_triggers_auto_resume():
         )
 
     # Wait for background task to complete + 500ms debounce
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # followup should have been called
     pool.session_pool.followup.assert_called_once()
@@ -500,7 +513,7 @@ async def test_auto_resume_triggered_when_inject_prompt_returns_false():
         )
 
     # Wait for background task to complete + 500ms debounce
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # followup should have been called
     pool.session_pool.followup.assert_called_once()
@@ -563,7 +576,7 @@ async def test_inject_prompt_safe_when_no_run_context():
             async_mode=True,
         )
 
-    await asyncio.sleep(0.8)
+    await asyncio.sleep(1.0)
 
     # With no run_ctx, the ephemeral state uses a no-op deliver callback.
     # followup should NOT have been called (no real delivery path).
@@ -661,8 +674,8 @@ async def test_debounce_window_no_notification_before_timeout():
     # followup should NOT have been called yet (debounce window not expired)
     pool.session_pool.followup.assert_not_called()
 
-    # Wait for the debounce to expire (total > 500ms)
-    await asyncio.sleep(0.5)
+    # Wait for the debounce to expire
+    await _wait_until_called(pool.session_pool.followup)
 
     # Now followup SHOULD have been called exactly once
     pool.session_pool.followup.assert_called_once()
@@ -735,7 +748,7 @@ async def test_multiple_tasks_batched_in_debounce_window():
         task_ids.append(match2.group(1))
 
     # Wait for tasks to complete + debounce to expire
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # followup should have been called exactly once (single batched notification)
     pool.session_pool.followup.assert_called_once()

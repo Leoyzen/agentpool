@@ -141,7 +141,10 @@ class BackgroundTaskManager:
 
             try:
                 result = await asyncio.wait_for(coro, timeout=self._timeout_seconds)
-                if task_model.status not in TERMINAL_STATES and task_model.status != "cancelling":
+                # Status may have been changed to "cancelling" by another task
+                # during the await, so we can't let mypy narrow it to "running".
+                current_status: TaskStatus = task_model.status
+                if current_status not in TERMINAL_STATES and current_status != "cancelling":
                     task_model.status = "completed"
                     task_model.result = str(result) if result is not None else None
                     task_model.completed_at = datetime.now(tz=UTC)
@@ -275,9 +278,11 @@ class BackgroundTaskManager:
 
         # Task completed (either via CancelledError in _execute_task or
         # finished normally before cancellation took effect).
-        if task_model.status == "cancelled":
+        # Re-read status into a local to avoid mypy narrowing from "cancelling".
+        post_cancel_status: TaskStatus = task_model.status
+        if post_cancel_status == "cancelled":
             return f"Task {task_id!r} cancelled successfully"
-        if task_model.status in TERMINAL_STATES:
+        if post_cancel_status in TERMINAL_STATES:
             return (
                 f"Task {task_id!r} completed as {task_model.status} before cancellation took effect"
             )

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from schemez.functionschema import OpenAIFunctionDefinition
 import yaml
@@ -52,16 +52,34 @@ def load_tool_schema(path: str | Path | None) -> OpenAIFunctionDefinition | None
 
     try:
         if suffix in (".yaml", ".yml"):
-            return yaml.safe_load(content)
+            return cast(OpenAIFunctionDefinition, yaml.safe_load(content))
         if suffix == ".json":
-            return OpenAIFunctionDefinition(**json.loads(content))
+            return _build_definition(json.loads(content))
         # Try JSON first, then YAML if extension is unclear
         try:
-            return OpenAIFunctionDefinition(**json.loads(content))
+            return _build_definition(json.loads(content))
         except json.JSONDecodeError:
-            return OpenAIFunctionDefinition(**yaml.safe_load(content))
+            return cast(OpenAIFunctionDefinition, yaml.safe_load(content))
     except (yaml.YAMLError, json.JSONDecodeError) as e:
         raise ValueError(f"Failed to parse tool schema file {file_path}: {e}") from e
+
+
+def _build_definition(data: Any) -> OpenAIFunctionDefinition:
+    """Construct an ``OpenAIFunctionDefinition`` from parsed JSON/YAML data.
+
+    Args:
+        data: The parsed data (must be a dict with ``name``, ``description``,
+            and ``parameters`` keys).
+
+    Returns:
+        A validated ``OpenAIFunctionDefinition``.
+    """
+    raw = cast(dict[str, Any], data)
+    return OpenAIFunctionDefinition(
+        name=cast(str, raw["name"]),
+        description=cast(str, raw.get("description", "")),
+        parameters=cast(Any, raw.get("parameters", {})),
+    )
 
 
 def apply_params_schema(
@@ -82,5 +100,8 @@ def apply_params_schema(
     if schema is not None:
         params = schema.get("parameters")
         if params is not None:
-            tool.function_schema = replace(tool.function_schema, json_schema=params)
+            tool.function_schema = replace(
+                tool.function_schema,
+                json_schema=dict[str, Any](params),
+            )
     return tool

@@ -42,6 +42,14 @@ from agentpool.delegation import AgentPool
 pytestmark = pytest.mark.anyio
 
 
+async def _wait_until_called(mock_obj: Any, timeout: float = 3.0, interval: float = 0.05) -> None:
+    elapsed = 0.0
+    while mock_obj.call_count == 0 and elapsed < timeout:
+        await asyncio.sleep(interval)
+        elapsed += interval
+    assert mock_obj.call_count > 0, f"Mock was not called within {timeout}s"
+
+
 def _wrap_in_run_context(agent_ctx):
     """Wrap an AgentContext in a mock RunContext for capability tool methods."""
     run_ctx = MagicMock(spec=RunContext)
@@ -599,7 +607,7 @@ async def test_async_task_completion_callback_injects_prompt():
         )
 
     # Wait for background task and callback to complete + 500ms debounce
-    await asyncio.sleep(0.8)
+    await _wait_until_called(pool.session_pool.followup)
 
     # Verify followup was called (not steer)
     pool.session_pool.followup.assert_awaited()

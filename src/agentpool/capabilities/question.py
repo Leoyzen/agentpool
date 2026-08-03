@@ -28,6 +28,7 @@ from pydantic_ai.capabilities import (
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.agents.context import AgentContext
+from agentpool.tools.base import ToolResult
 from agentpool.utils.tool_schema import apply_params_schema, load_tool_schema
 from agentpool_config.context import get_config_dir
 
@@ -180,14 +181,10 @@ class QuestionCapability(AbstractCapability[AgentContext]):
 
         if "question" in self._enabled_tools:
             name = (
-                self._question_schema.get("name")
-                if self._question_schema
-                else None
+                self._question_schema.get("name") if self._question_schema else None
             ) or "question"
             description = (
-                self._question_schema.get("description")
-                if self._question_schema
-                else None
+                self._question_schema.get("description") if self._question_schema else None
             ) or "Ask the user a clarifying question."
             tool = Tool(
                 self._question,
@@ -209,7 +206,9 @@ class QuestionCapability(AbstractCapability[AgentContext]):
     # These wrap the canonical tool functions from agentpool's QuestionTools,
     # adapting RunContext[AgentContext] → AgentContext for direct invocation.
 
-    async def _question_for_user(self, ctx: RunContext[AgentContext], questionnaire: str):
+    async def _question_for_user(
+        self, ctx: RunContext[AgentContext], questionnaire: str
+    ) -> ToolResult:
         """Wrap ``question_for_user`` to accept ``RunContext``."""
         from agentpool_toolsets.builtin.question_tools import QuestionTools
 
@@ -221,7 +220,7 @@ class QuestionCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         question: str,
         follow_up: str,
-    ):
+    ) -> ToolResult:
         """Wrap ``ask_followup_question`` to accept ``RunContext``."""
         from agentpool_toolsets.builtin.question_tools import QuestionTools
 
@@ -233,7 +232,7 @@ class QuestionCapability(AbstractCapability[AgentContext]):
         ctx: RunContext[AgentContext],
         prompt: str,
         response_schema: dict[str, Any] | None = None,
-    ):
+    ) -> ToolResult:
         """Simple single-question tool (replaces legacy QuestionTool).
 
         Args:
@@ -244,7 +243,6 @@ class QuestionCapability(AbstractCapability[AgentContext]):
         from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
 
         from agentpool.tasks.exceptions import RunAbortedError
-        from agentpool.tools.base import ToolResult
 
         schema = response_schema or {"type": "string"}
         params = ElicitRequestFormParams(message=prompt, requestedSchema=schema)
