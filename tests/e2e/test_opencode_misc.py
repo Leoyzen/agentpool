@@ -168,6 +168,9 @@ async def test_get_health(subprocess_server: SubprocessServer) -> None:
     strict=False,
 )
 @pytest.mark.known_bug
+# Known to hang until the per-test timeout fires; cap it so CI doesn't burn the
+# full 60s (the job-level timeout) just to reach the xfail.
+@pytest.mark.timeout(10)
 @pytest.mark.parametrize("subprocess_server", [_OPENCODE_PARAMS], indirect=True)
 async def test_post_init(subprocess_server: SubprocessServer) -> None:
     """C10.2: POST /session/{session_id}/init, verify 200."""

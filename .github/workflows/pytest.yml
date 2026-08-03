@@ -31,6 +31,13 @@ env:
   OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
   TEST_DEFAULT_MODEL: ${{ secrets.TEST_DEFAULT_MODEL }}
 
+# Free up runners sooner: every push to a PR supersedes its in-flight PR run,
+# so the old run (and its queued e2e jobs) are cancelled instead of consuming
+# runner capacity that delays new commits.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
 
   lint:
@@ -271,9 +278,12 @@ jobs:
         run: python tests/check_no_mock_in_integration.py
         continue-on-error: true
 
-  e2e-smoke:
-    # L4a smoke: ~30s, PR-blocking. Runs in parallel with other test stages.
-    name: E2E smoke (L4a)
+  e2e-acp:
+    # L4a smoke: ACP protocol servers (stdio / streamable-http / WS).
+    # Runs in parallel with the opencode/misc e2e jobs; each job owns its own
+    # subprocess server cache instance, so wall-clock ≈ the slowest bucket
+    # instead of the serial sum.
+    name: E2E smoke (L4a · ACP)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: smoke
@@ -289,19 +299,71 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: uv sync --all-extras --no-group lint
-      - name: L4a smoke tests
-        run: uv run pytest -m "e2e and not slow" --timeout=60 --tb=short --no-cov -q
+      - name: L4a smoke tests (ACP)
+        run: uv run pytest tests/e2e/test_acp*.py -m "e2e and not slow" --timeout=60 --tb=short --no-cov -q
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: e2e-smoke-results
+          name: e2e-acp-results
+          path: /tmp/pytest-*.txt
+          retention-days: 3
+
+  e2e-opencode:
+    name: E2E smoke (L4a · OpenCode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: L4a smoke tests (OpenCode)
+        run: uv run pytest tests/e2e/test_opencode*.py -m "e2e and not slow" --timeout=60 --tb=short --no-cov -q
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-opencode-results
+          path: /tmp/pytest-*.txt
+          retention-days: 3
+
+  e2e-misc:
+    name: E2E smoke (L4a · AG-UI/APIs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+          cache-suffix: py3.13
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: uv sync --all-extras --no-group lint
+      - name: L4a smoke tests (AG-UI / APIs)
+        run: uv run pytest tests/e2e/test_agui*.py tests/e2e/test_openai*.py tests/e2e/test_user*.py tests/e2e/test_turn_split_e2e.py tests/e2e/test_team_mode_smoke.py -m "e2e and not slow" --timeout=60 --tb=short --no-cov -q
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-misc-results
           path: /tmp/pytest-*.txt
           retention-days: 3
 
   report:
     name: CI Report
     runs-on: ubuntu-latest
-    needs: [lint, format, typecheck, import-linter, smoke, unit, integration, core, vcr, cassette-hygiene, e2e-smoke]
+    needs: [lint, format, typecheck, import-linter, smoke, unit, integration, core, vcr, cassette-hygiene, e2e-acp, e2e-opencode, e2e-misc]
     if: always()
     steps:
       - name: Build summary table
@@ -320,7 +382,9 @@ jobs:
           echo '| Core tests | ${{ needs.core.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| VCR tests (L3 replay) | ${{ needs.vcr.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '| Cassette hygiene | ${{ needs.cassette-hygiene.result }} |' >> $GITHUB_STEP_SUMMARY
-          echo '| E2E smoke (L4a) | ${{ needs.e2e-smoke.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| E2E smoke (ACP) | ${{ needs.e2e-acp.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| E2E smoke (OpenCode) | ${{ needs.e2e-opencode.result }} |' >> $GITHUB_STEP_SUMMARY
+          echo '| E2E smoke (AG-UI/APIs) | ${{ needs.e2e-misc.result }} |' >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           if [ '${{ needs.lint.result }}' = 'failure' ] || \
              [ '${{ needs.format.result }}' = 'failure' ] || \
@@ -332,7 +396,9 @@ jobs:
              [ '${{ needs.core.result }}' = 'failure' ] || \
              [ '${{ needs.vcr.result }}' = 'failure' ] || \
              [ '${{ needs.cassette-hygiene.result }}' = 'failure' ] || \
-             [ '${{ needs.e2e-smoke.result }}' = 'failure' ]; then
+             [ '${{ needs.e2e-acp.result }}' = 'failure' ] || \
+             [ '${{ needs.e2e-opencode.result }}' = 'failure' ] || \
+             [ '${{ needs.e2e-misc.result }}' = 'failure' ]; then
             echo '### Some checks failed' >> $GITHUB_STEP_SUMMARY
             echo 'Download the artifact for test details.' >> $GITHUB_STEP_SUMMARY
           else
