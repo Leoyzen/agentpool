@@ -424,16 +424,15 @@ async def test_cancel_scope_cancellation_stops_timers():
     batcher._timers.clear()
     batcher._pending.clear()
     batcher._started = False
-    batcher._tg = None
 
 
 # ---------------------------------------------------------------------------
-# 9. TaskGroup orphan prevention
+# 9. Orphan prevention
 # ---------------------------------------------------------------------------
 
 
 async def test_no_orphaned_tasks_after_shutdown():
-    """After shutdown, no orphaned tasks remain in the TaskGroup."""
+    """After shutdown, no orphaned flush tasks remain."""
     delivered: list[tuple[str, list[BackgroundTask], str]] = []
 
     async def deliver(sid: str, tasks: list[BackgroundTask], notice: str) -> None:
@@ -447,8 +446,8 @@ async def test_no_orphaned_tasks_after_shutdown():
 
     await batcher.shutdown()
 
-    # TaskGroup should be None after shutdown
-    assert batcher._tg is None
+    assert len(batcher._flush_tasks) == 0
+    assert not batcher._started
 
 
 # ---------------------------------------------------------------------------

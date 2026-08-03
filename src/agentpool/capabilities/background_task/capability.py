@@ -682,6 +682,11 @@ class BackgroundTaskCapability(AbstractCapability[AgentContext]):
 
         assert agent_ctx.pool.session_pool is not None, "SessionPool required"
         source_type: Literal["agent", "team_parallel", "team_sequential"] = "agent"
+        config = agent_ctx.pool.manifest.agents.get(mode)
+        if config is not None:
+            config_type = str(config.type)  # pyright: ignore[reportAny]
+            if config_type == "team":
+                source_type = "team_parallel"
 
         # Handle delegation depth
         current_depth = 0

@@ -1,8 +1,7 @@
-"""Notification batcher with anyio structured concurrency.
+"""Notification batcher with debounce and timeout protection.
 
 Debounces and batches background-task completion notifications before
 delivering them to the lead agent.  Uses ``anyio.CancelScope`` and
-``anyio.create_task_group`` for structured concurrency, with
 ``anyio.fail_after`` for delivery timeout protection.
 """
 
@@ -86,15 +85,11 @@ class NotificationBatcher:
         self._pending_count_callback = pending_count_callback or (lambda: 0)
         self._deliver_timeout = deliver_timeout
 
-        # anyio primitives — created in start() (requires async context)
         self._cancel_scope: anyio.CancelScope | None = None
-        self._tg: anyio.abc.TaskGroup | None = None
 
-        # Per-session pending tasks
         self._pending: dict[str, list[BackgroundTask]] = {}
-        # Per-session debounce timer handles
         self._timers: dict[str, asyncio.TimerHandle] = {}
-        # Global set of delivered task IDs (UUID-based, no collision)
+        self._flush_tasks: set[asyncio.Task[None]] = set()
         self._delivered: set[str] = set()
         self._started: bool = False
 
@@ -103,9 +98,8 @@ class NotificationBatcher:
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Enter the CancelScope and create the TaskGroup.
+        """Enter the CancelScope for timeout protection.
 
-        Must be called before or automatically on first ``submit()``.
         Safe to call multiple times — only enters once.
         """
         if self._started:
@@ -113,8 +107,6 @@ class NotificationBatcher:
         self._started = True
         self._cancel_scope = anyio.CancelScope()
         self._cancel_scope.__enter__()
-        self._tg = anyio.create_task_group()
-        await self._tg.__aenter__()
 
     # ------------------------------------------------------------------
     # Submission (SYNC)
@@ -174,13 +166,14 @@ class NotificationBatcher:
     def _schedule_flush(self, session_id: str) -> None:
         """Schedule an async flush for the given session.
 
-        Called by ``loop.call_later`` — must be synchronous to avoid
-        RuntimeWarning about un-awaited coroutines.
+        Called by ``loop.call_later`` — must be synchronous.
+        Uses ``asyncio.ensure_future`` instead of ``anyio.TaskGroup.start_soon``
+        because ``call_later`` callbacks run outside the anyio sniffio context.
         """
-        # Remove the timer handle since it has fired
         self._timers.pop(session_id, None)
-        if self._tg is not None:
-            self._tg.start_soon(self._flush, session_id)
+        task = asyncio.ensure_future(self._flush(session_id))
+        self._flush_tasks.add(task)
+        task.add_done_callback(self._flush_tasks.discard)
 
     # ------------------------------------------------------------------
     # Flush (ASYNC)
@@ -347,14 +340,14 @@ class NotificationBatcher:
         if self._pending_count_callback() == 0:
             self._delivered.clear()
 
-        # Cancel the CancelScope
         if self._cancel_scope is not None:
             self._cancel_scope.cancel()
 
-        # Exit TaskGroup
-        if self._tg is not None:
-            with contextlib.suppress(Exception):
-                await self._tg.__aexit__(None, None, None)
-            self._tg = None
+        for ft in list(self._flush_tasks):
+            ft.cancel()
+        for ft in list(self._flush_tasks):
+            with contextlib.suppress(asyncio.CancelledError):
+                await ft
+        self._flush_tasks.clear()
 
         self._started = False
