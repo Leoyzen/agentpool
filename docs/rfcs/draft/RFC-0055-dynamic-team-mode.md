@@ -914,6 +914,19 @@ The initial implementation revealed three collaboration pain points that were ad
 
 Tool count increased from 14 to 15 with the addition of `task_create_batch`.
 
+### Skill Injection (2026-08-03)
+
+`team_create` and `team_add_member` gained an optional `skills` parameter (per-member `skills` key in the `team_create` member dicts, a top-level `skills: list[str]` argument on `team_add_member`, and a matching `MemberSpec.skills` in `team_mode.defaults.members`). When set, each named skill is loaded via `load_skill_for_node` and rendered as a `<skill-instruction name="...">` XML block prepended to the member's `## Your Assignment` section — letting the lead embed skill guidance into member prompts at team-creation time instead of relying on members discovering and calling `load_skill` themselves.
+
+Key semantics:
+
+1. **Instruction-only injection**: skills contribute prompt guidance text only. No MCP servers are connected, no Python tools are imported — the `_load_skill` path runs with `include_assembly=False`, and the injected text carries no `## Activated Tools` / `## Activated MCP Servers` appendix.
+2. **Visibility checked against the member**: `load_skill_for_node` is called with `node_name=<member_agent>` so package-scope visibility is evaluated for the member node, not the lead.
+3. **Graceful degradation**: a skill that is invisible to the member, does not exist, or fails to load renders as readable error text inside the instructions; member/team creation always succeeds. Skill loading never raises into the caller.
+4. **Deduplication**: duplicate skill names in one member's list are injected exactly once, preserving first-occurrence order.
+5. **Bare names and URIs**: both bare skill names and `skill://` URIs (including reference paths such as `skill://name/references/guide.md`) are supported; reference-path URIs inject only the referenced file.
+6. **Defaults parity**: `team_mode.defaults.members[].skills` is applied when `team_create` falls back to configured defaults. This change also fixed a pre-existing bug where `MemberSpec.instructions` was silently dropped by that defaults fallback.
+
 ### Tool API
 
 #### Universal Tools (all team members)
@@ -959,8 +972,12 @@ team_status(watch: bool = False, timeout: int = 300, watch_task_ids: list[str] |
 
 ```python
 team_create(name: str, members: list[dict], prompt: str = "") -> str
-    """Create a team. members: [{"agent": "...", "name": "...", "instructions": "..."}]"""
+    """Create a team. members: [{"agent": "...", "name": "...", "instructions": "...", "skills": [...]}]"""
     # instructions: per-member role text injected as ## Your Assignment section
+    # skills: optional list of skill names / skill:// URIs injected as
+    #         <skill-instruction> blocks BEFORE the instructions (instruction-only,
+    #         no tool/MCP assembly; duplicates deduplicated; visibility checked
+    #         against the member agent's node scope)
     # Returns: "Team '{name}' created with {N} members. team_id={id}"
 
 team_delete() -> str
@@ -972,8 +989,9 @@ delete_blackboard(key: str) -> str
 shutdown_request(member_name: str) -> str
     """Request shutdown of a specific teammate."""
 
-team_add_member(name: str, agent: str, prompt: str = "", lifecycle: str = "persistent", notify: str = "", instructions: str = "") -> str
+team_add_member(name: str, agent: str, prompt: str = "", lifecycle: str = "persistent", notify: str = "", instructions: str = "", skills: list[str] | None = None) -> str
     """Add a new member to an existing team."""
+    # skills: optional — same semantics as team_create member dict "skills" key
 
 task_create_batch(tasks: list[dict]) -> str
     """Create multiple tasks atomically with inter-task dependencies."""
@@ -1013,6 +1031,7 @@ agents:
           - name: researcher
             agent: researcher
             instructions: "You gather research data. Write findings to blackboard key 'research_data'."
+            skills: ["skill://lodestone"]
           - name: coder
             agent: coder
             instructions: "You implement code based on research. Read blackboard key 'research_data' before starting."

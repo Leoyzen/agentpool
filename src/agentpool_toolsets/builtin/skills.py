@@ -261,9 +261,17 @@ async def load_skill_for_node(
     skill_name: str,
     node_name: str,
     arguments: str | None = None,
+    *,
+    include_assembly: bool = True,
 ) -> str:
     """Load a skill using a target node's package-level skill scope."""
-    return await _load_skill(ctx, skill_name, arguments, node_name=node_name)
+    return await _load_skill(
+        ctx,
+        skill_name,
+        arguments,
+        node_name=node_name,
+        include_assembly=include_assembly,
+    )
 
 
 async def load_skill(
@@ -292,6 +300,7 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     arguments: str | None = None,
     *,
     node_name: str | None = None,
+    include_assembly: bool = True,
 ) -> str:
     if ctx.pool is None:
         return "No agent pool available - skills require pool context"
@@ -353,17 +362,21 @@ async def _load_skill(  # noqa: PLR0911, PLR0915
     # Apply argument substitution
     instructions = _substitute_arguments(instructions, arguments)
 
-    # Activate MCP servers and tools declared in the skill
+    # Activate MCP servers and tools declared in the skill.
+    # When ``include_assembly`` is False (e.g. instruction-only injection into
+    # a team member prompt), skip the MCP/tool status appendix entirely —
+    # tools are NOT assembled or imported (importing a tool's module runs its
+    # module-level side effects, which is out of scope for prompt injection).
     mcp_lines: list[str] = []
     tool_lines: list[str] = []
 
-    if skill.mcp_servers:
+    if include_assembly and skill.mcp_servers:
         # MCP server preparation is now handled by SkillManagerCap.
         for server_name, config in skill.mcp_servers.items():
             server_desc = config.command or config.url or "configured"
             mcp_lines.append(f"- `{server_name}`: {server_desc}")
 
-    if skill.tools:
+    if include_assembly and skill.tools:
         tool_manager = SkillToolManager()
         for tool_config in skill.tools:
             result = tool_manager.import_tool(tool_config)
