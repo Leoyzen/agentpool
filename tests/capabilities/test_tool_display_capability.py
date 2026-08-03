@@ -57,7 +57,8 @@ async def test_get_wrapper_toolset_applies_rename() -> None:
     )
     wrapped = cap.get_wrapper_toolset(MagicMock())  # type: ignore[arg-type]
     assert isinstance(wrapped, RenamedToolset)
-    assert wrapped.name_map == {"viking_write": "write"}
+    # name_map is {original: display} in config, inverted to {display: original} for RenamedToolset
+    assert wrapped.name_map == {"write": "viking_write"}
 
 
 def test_get_wrapper_toolset_rename_disabled() -> None:

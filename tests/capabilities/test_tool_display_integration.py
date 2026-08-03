@@ -96,7 +96,8 @@ def test_assembled_rename_changes_tool_names() -> None:
     assert wrapped is not None
 
     assert isinstance(wrapped, RenamedToolset)
-    assert "viking_write" in wrapped.name_map
+    # name_map is {original: display} in config, inverted to {display: original} for RenamedToolset
+    assert "write" in wrapped.name_map
 
 
 def test_wrap_execute_passes_through_for_untouched_tool() -> None:

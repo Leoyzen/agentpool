@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+import logfire
 from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AbstractToolset, RenamedToolset
 
@@ -39,6 +40,7 @@ from agentpool.agents.events import DiffContentItem
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping
 
+    from pydantic_ai._run_context import RunContext
     from pydantic_ai.messages import ToolCallPart
     from pydantic_ai.tools import ToolDefinition
 
@@ -97,12 +99,16 @@ class ToolDisplayCapability(AbstractCapability[Any]):
     Attributes:
         rename_mode: Enable tool name mapping via ``name_map``. When
             ``False``, tools keep their native names (ACP-style display).
-        name_map: Mapping of native tool name to display name.
+        name_map: Mapping of **original** tool name to **display** name
+            (what the user writes in YAML). Internally inverted before
+            passing to ``RenamedToolset``, which expects ``{new: original}``.
         emit_diff: Enable diff event injection after tool execution.
             When ``False``, rely on tools' own diff emission.
-        emit_diff_for: Set of tool names eligible for diff event
-            injection. Empty means no injection.
-        id: Optional capability id (defaults to ``"tool_display"``).
+        emit_diff_for: Set of **original** tool names eligible for diff
+            event injection. Empty means no injection. When rename is
+            active, display names are resolved back to originals before
+            matching.
+        id: Optional capability id.
     """
 
     id: str | None = None
@@ -111,8 +117,22 @@ class ToolDisplayCapability(AbstractCapability[Any]):
     emit_diff: bool = True
     emit_diff_for: set[str] = field(default_factory=set)
 
+    def __post_init__(self) -> None:
+        """Coerce ``emit_diff_for`` to ``set`` if a list was provided via YAML."""
+        if isinstance(self.emit_diff_for, list):
+            self.emit_diff_for = set(self.emit_diff_for)
+
+    @property
+    def _reverse_name_map(self) -> dict[str, str]:
+        """Display → original lookup, derived from ``name_map`` (original → display)."""
+        return {v: k for k, v in self.name_map.items()}
+
     def get_wrapper_toolset(self, toolset: AbstractToolset[Any]) -> AbstractToolset[Any] | None:
         """Wrap the assembled toolset with ``RenamedToolset`` when enabled.
+
+        ``name_map`` is stored as ``{original: display}`` (user-facing
+        convention) but ``RenamedToolset`` expects ``{new: original}``,
+        so we invert before construction.
 
         Args:
             toolset: The agent's fully assembled toolset.
@@ -123,11 +143,14 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         """
         if not self.rename_mode or not self.name_map:
             return None
-        return RenamedToolset(wrapped=toolset, name_map=dict(self.name_map))
+        # RenamedToolset.name_map is {new_name: original_name}.
+        # Our name_map is {original: display} → invert to {display: original}.
+        inverted = {v: k for k, v in self.name_map.items()}
+        return RenamedToolset(wrapped=toolset, name_map=inverted)
 
     async def wrap_tool_execute(
         self,
-        ctx: Any,
+        ctx: RunContext[Any],
         *,
         call: ToolCallPart,
         tool_def: ToolDefinition,
@@ -143,6 +166,18 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         context's ``events`` emitter — the same channel fsspec tools use,
         which reaches ACP converters as ``FileEditToolCallContent``.
 
+        Two critical steps before emitting:
+
+        1. **Populate ``ctx.deps.tool_call_id`` / ``tool_name``** —
+           capability tools (viking, fsspec, …) bypass
+           ``tool_wrapping.py``, so these fields are ``None``. Without
+           them, ``StreamEventEmitter`` reads ``""`` and the ACP
+           converter drops the event (``if tool_call_id:`` guard fails).
+        2. **Resolve display → original name** — when rename is active,
+           ``call.tool_name`` is the *display* name. ``emit_diff_for``
+           contains *original* names. We reverse-lookup through
+           ``name_map`` before matching.
+
         Args:
             ctx: The pydantic-ai run context (carries ``deps`` → agentpool
                 ``AgentContext`` with the ``events`` emitter).
@@ -154,30 +189,45 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         Returns:
             The tool execution result, unchanged.
         """
-        result = await handler(args)
+        with logfire.span("capability.tool_display.wrap_tool_execute", tool_name=call.tool_name):
+            result = await handler(args)
 
-        if not self.emit_diff or not self.emit_diff_for:
-            return result
-        if call.tool_name not in self.emit_diff_for:
-            return result
+            if not self.emit_diff or not self.emit_diff_for:
+                return result
 
-        path, old_text, new_text = _parse_diff_fields(args, result)
-        if path is None or new_text is None:
-            return result
+            # Resolve display name → original for emit_diff_for matching.
+            # When rename is active, call.tool_name is the display name;
+            # emit_diff_for contains original names.
+            original_name = self._reverse_name_map.get(call.tool_name, call.tool_name)
+            if original_name not in self.emit_diff_for:
+                return result
 
-        deps = getattr(ctx, "deps", None)
-        events = getattr(deps, "events", None)
-        if events is None:
-            return result
+            path, old_text, new_text = _parse_diff_fields(args, result)
+            if path is None or new_text is None:
+                return result
 
-        await events.tool_call_progress(
-            title=f"Modified: {path}",
-            items=[
-                DiffContentItem(
-                    path=path,
-                    old_text=old_text,
-                    new_text=new_text,
-                )
-            ],
-        )
-        return result
+            # Populate ctx.deps.tool_call_id / tool_name for capability tools.
+            # tool_wrapping.py only does this for legacy direct tools (agent.py:1044-1052);
+            # capability tools (AbstractCapability) skip that path, leaving these as None.
+            # StreamEventEmitter reads self._context.tool_call_id → "" → ACP converter drops.
+            deps = ctx.deps
+            if hasattr(deps, "tool_call_id"):
+                deps.tool_call_id = call.tool_call_id
+            if hasattr(deps, "tool_name"):
+                deps.tool_name = original_name
+
+            events = getattr(deps, "events", None)
+            if events is None:
+                return result
+
+            await events.tool_call_progress(
+                title=f"Modified: {path}",
+                items=[
+                    DiffContentItem(
+                        path=path,
+                        old_text=old_text,
+                        new_text=new_text,
+                    )
+                ],
+            )
+            return result
