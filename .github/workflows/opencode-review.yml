@@ -23,6 +23,7 @@ permissions:
   issues: write
 
 concurrency:
+  # One group per PR across all three trigger paths; new run cancels stale review run
   group: opencode-review-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr_number }}
   cancel-in-progress: true
 
@@ -49,9 +50,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The runner workspace has no git repo on issue_comment (main-branch)
+          # runs, so gh cannot infer the repo — pass -R explicitly.
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
             PR_NUMBER="${{ github.event.issue.number }}"
-            REF=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+            REF=$(gh pr view -R "${{ github.repository }}" "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
             echo "ref=$REF" >> "$GITHUB_OUTPUT"
             echo "Checked out PR #$PR_NUMBER at $REF"
           else
@@ -76,6 +79,22 @@ jobs:
             Review this pull request. Read the AGENTS.md file first for project
             conventions, then analyze the diff and delegate to your specialist
             subagents as appropriate. Post your synthesized review as a comment.
+
+            The PR thread is included as context (in <pull_request_comments> and
+            <pull_request_reviews>). It contains ALL previous comments and reviews
+            on this PR, including reviews from earlier runs of this bot.
+
+            DEDUPLICATION REQUIREMENT:
+            - Before reporting any finding, check whether that exact issue was
+              already reported in <pull_request_comments> or <pull_request_reviews>.
+            - Do NOT repeat findings that were already reported. Never restate an
+              existing comment.
+            - For each previously reported issue, only mention it again if its
+              status changed (e.g. was FIXED or REGRESSED since the last review).
+              Otherwise omit it entirely.
+            - Only raise NEW issues or issues whose status has changed.
+            - If nothing new to report, post exactly: "No new issues — see the
+              previous review comment."
 
             Focus areas:
             - Code: type safety, testing, telemetry, architecture consistency

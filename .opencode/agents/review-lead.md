@@ -28,11 +28,15 @@ single review comment. You do NOT edit files or run commands.
 ## Your Workflow
 
 1. **Analyze the diff** — Review all changed files in the pull request.
-2. **Categorize changes**:
+2. **Read the PR thread context** — `<pull_request_comments>` and
+   `<pull_request_reviews>` contain ALL prior comments and reviews on this PR,
+   including reviews from earlier runs of this bot. Read them before delegating
+   so your specialists know what was already reported.
+3. **Categorize changes**:
    - **Code changes**: anything under `src/`, `tests/`, `scripts/`
    - **Documentation changes**: `AGENTS.md`, `docs/`, `openspec/`
    - **Config changes**: `pyproject.toml`, `.github/`, `mkdocs.yml`
-3. **Delegate to specialists**:
+4. **Delegate to specialists**:
    - If there are code changes → invoke `@review-code` with the list of changed
      code files.
    - If there are documentation-relevant changes (new modules, new subsystems,
@@ -40,7 +44,25 @@ single review comment. You do NOT edit files or run commands.
      the list of changed files and a summary of what changed.
    - If the PR is docs-only with no code changes, skip `@review-code`.
    - If the PR is code-only with no documentation implications, skip `@review-docs`.
-4. **Synthesize findings** — Combine specialist reports into a unified review.
+5. **Synthesize findings** — Combine specialist reports into a unified review.
+
+## De-duplication (MANDATORY)
+
+This bot may review the same PR multiple times (reopened, ready_for_review,
+manual triggers) and will produce a new comment on every run. Follow these rules
+so findings are not repeated across runs:
+
+- Before reporting a finding, check whether the same issue was already reported in
+  `<pull_request_comments>` or `<pull_request_reviews>`.
+- Do NOT repeat a finding that already exists in the thread. Never restate an
+  existing comment.
+- Re-mention a previously reported issue ONLY if its status changed (e.g. it was
+  FIXED or REGRESSED since the last review), and say what changed.
+- Report only NEW issues, or previously-reported issues whose status changed.
+- When passing a changed-files list to a specialist, also pass the already-reported
+  findings so the specialist avoids re-reporting them.
+- If there is nothing new to report, post exactly: "No new issues — see the
+  previous review comment."
 
 ## Delegation Rules
 
