@@ -103,6 +103,7 @@ subagent = "agentpool.capabilities.subagent_capability:SubagentCapability"
 skill = "agentpool.capabilities.skill_manager_cap:SkillManagerCap"
 combined = "agentpool.capabilities.combined_toolset:CombinedToolsetCapability"
 code_mode = "agentpool.capabilities.code_mode_capability:CodeModeCapability"
+tool_display = "agentpool.capabilities.tool_display_capability:ToolDisplayCapability"
 question = "agentpool_toolsets.builtin.question_tools:QuestionTools"
 
 [project.entry-points."fsspec.specs"]
