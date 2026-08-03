@@ -1,9 +1,13 @@
 """QuestionCapability — user interaction tools with YAML schema overrides.
 
-Provides ``question_for_user`` and ``ask_followup_question`` tools backed by
-``agentpool_toolsets.builtin.question_tools.QuestionTools``.  Accepts optional
-YAML schema files to override the LLM-facing parameter descriptions, mirroring
-the ``BackgroundTaskCapability`` pattern.
+Provides ``question_for_user``, ``ask_followup_question``, and ``question``
+tools backed by ``agentpool_toolsets.builtin.question_tools.QuestionTools``.
+Accepts optional YAML schema files to override the LLM-facing parameter
+descriptions, mirroring the ``BackgroundTaskCapability`` pattern.
+
+The ``question`` tool is a simple single-question tool that replaces the
+legacy ``QuestionTool`` from ``tool_impls/question/``, unifying all
+user-interaction tools under one capability.
 
 Declared via the ``question`` entry point in ``pyproject.toml`` so consumers
 can reference it in YAML config as ``type: question``.
@@ -12,9 +16,9 @@ can reference it in YAML config as ``type: question``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic_ai import RunContext, Tool
+from pydantic_ai import ModelRetry, RunContext, Tool
 from pydantic_ai.capabilities import (
     AbstractCapability,
     CapabilityOrdering,
@@ -39,9 +43,10 @@ class QuestionCapability(AbstractCapability[AgentContext]):
     and applies optional YAML schema overrides for richer LLM-facing
     parameter descriptions.
 
-    Provides one or both of:
+    Provides one or more of:
     - ``question_for_user``: Rich multi-question questionnaire tool
     - ``ask_followup_question``: Simpler single-question tool with suggestions
+    - ``question``: Simplest single-question tool (replaces legacy QuestionTool)
 
     Tool selection is controlled by the ``schemas`` dict keys and
     ``enabled_tools`` list, mirroring ``BackgroundTaskCapability``.
@@ -57,30 +62,33 @@ class QuestionCapability(AbstractCapability[AgentContext]):
         Args:
             schemas: Optional dictionary mapping tool names to schema file
                 paths.  Expected keys: ``"question_for_user"``,
-                ``"ask_followup_question"``.  Paths are resolved relative
-                to the config directory using ``CONFIG_DIR``.
-            enabled_tools: Optional list of tools to enable.  If ``None``
-                or empty, all tools whose schemas are loaded are enabled.
+                ``"ask_followup_question"``, ``"question"``.  Paths are
+                resolved relative to the config directory using ``CONFIG_DIR``.
+            enabled_tools: Optional list of tools to enable.  If ``None``,
+                all tools whose schemas are loaded are enabled.
                 Expected values: ``"question_for_user"``,
-                ``"ask_followup_question"``.
+                ``"ask_followup_question"``, ``"question"``.
         """
         self._schemas = schemas or {}
 
         # Schema loading
         self._question_for_user_schema: OpenAIFunctionDefinition | None = None
         self._ask_followup_question_schema: OpenAIFunctionDefinition | None = None
+        self._question_schema: OpenAIFunctionDefinition | None = None
 
         if schemas:
             if (qfu_path := schemas.get("question_for_user")) is not None:
                 self._question_for_user_schema = self._resolve_and_load_schema(qfu_path)
             if (afq_path := schemas.get("ask_followup_question")) is not None:
                 self._ask_followup_question_schema = self._resolve_and_load_schema(afq_path)
+            if (q_path := schemas.get("question")) is not None:
+                self._question_schema = self._resolve_and_load_schema(q_path)
 
         # Determine enabled tools
-        # No schemas → default-enable both tools (matches old QuestionTools entry point).
+        # No schemas → default-enable all tools.
         available: list[str] = []
         if not self._schemas:
-            available = ["question_for_user", "ask_followup_question"]
+            available = ["question_for_user", "ask_followup_question", "question"]
         else:
             if self._question_for_user_schema is not None or "question_for_user" in self._schemas:
                 available.append("question_for_user")
@@ -89,6 +97,8 @@ class QuestionCapability(AbstractCapability[AgentContext]):
                 or "ask_followup_question" in self._schemas
             ):
                 available.append("ask_followup_question")
+            if self._question_schema is not None or "question" in self._schemas:
+                available.append("question")
 
         if enabled_tools is not None:
             self._enabled_tools = [t for t in enabled_tools if t in available]
@@ -168,6 +178,25 @@ class QuestionCapability(AbstractCapability[AgentContext]):
             )
             tools.append(apply_params_schema(tool, self._ask_followup_question_schema))
 
+        if "question" in self._enabled_tools:
+            name = (
+                self._question_schema.get("name")
+                if self._question_schema
+                else None
+            ) or "question"
+            description = (
+                self._question_schema.get("description")
+                if self._question_schema
+                else None
+            ) or "Ask the user a clarifying question."
+            tool = Tool(
+                self._question,
+                name=name,
+                description=description,
+                metadata={"category": "other"},
+            )
+            tools.append(apply_params_schema(tool, self._question_schema))
+
         if not tools:
             return None
         return FunctionToolset(tools)
@@ -198,6 +227,43 @@ class QuestionCapability(AbstractCapability[AgentContext]):
 
         question_tools = QuestionTools(name="question_tools")
         return await question_tools.ask_followup_question(ctx.deps, question, follow_up)
+
+    async def _question(
+        self,
+        ctx: RunContext[AgentContext],
+        prompt: str,
+        response_schema: dict[str, Any] | None = None,
+    ):
+        """Simple single-question tool (replaces legacy QuestionTool).
+
+        Args:
+            ctx: The run context.
+            prompt: Question to ask the user.
+            response_schema: Optional JSON schema for structured response.
+        """
+        from mcp.types import ElicitRequestFormParams, ElicitResult, ErrorData
+
+        from agentpool.tasks.exceptions import RunAbortedError
+        from agentpool.tools.base import ToolResult
+
+        schema = response_schema or {"type": "string"}
+        params = ElicitRequestFormParams(message=prompt, requestedSchema=schema)
+        match await ctx.deps.handle_elicitation(params):
+            case ElicitResult(action="accept", content={"value": list() as value}):
+                answer_str = ", ".join(str(v) for v in value)
+                return ToolResult(content=answer_str, metadata={"answers": [value]})
+            case ElicitResult(action="accept", content={"value": value}):
+                answer_str = str(value)
+                return ToolResult(content=answer_str, metadata={"answers": [[answer_str]]})
+            case ElicitResult(action="accept", content=content):
+                answer_str = str(content)
+                return ToolResult(content=answer_str, metadata={"answers": [[answer_str]]})
+            case ElicitResult(action="cancel"):
+                raise RunAbortedError("User cancelled the elicitation request")
+            case ElicitResult():
+                return ToolResult(content="User declined to answer", metadata={"answers": []})
+            case ErrorData(message=message):
+                raise ModelRetry(f"Elicitation failed: {message}")
 
 
 __all__ = ["QuestionCapability"]

@@ -7,7 +7,7 @@ from agentpool.capabilities.question import QuestionCapability
 
 
 def test_get_toolset_returns_function_toolset_without_schemas():
-    """get_toolset() should return a FunctionToolset with default tools when no schemas provided."""
+    """get_toolset() should return a FunctionToolset with all tools when no schemas provided."""
     capability = QuestionCapability()
     toolset = capability.get_toolset()
 
@@ -16,6 +16,7 @@ def test_get_toolset_returns_function_toolset_without_schemas():
     tool_names = set(toolset.tools.keys())
     assert "question_for_user" in tool_names
     assert "ask_followup_question" in tool_names
+    assert "question" in tool_names
 
 
 def test_get_toolset_respects_enabled_tools():
@@ -83,3 +84,47 @@ def test_schemas_dict_enables_matching_tools(tmp_path):
     assert "question_for_user" in tool_names
     # ask_followup_question not in schemas, should not be auto-enabled
     assert "ask_followup_question" not in tool_names
+
+
+def test_question_tool_enabled_by_default():
+    """The simple 'question' tool should be enabled by default."""
+    capability = QuestionCapability()
+    toolset = capability.get_toolset()
+
+    assert toolset is not None
+    tool_names = set(toolset.tools.keys())
+    assert "question" in tool_names
+
+
+def test_question_tool_can_be_enabled_alone():
+    """The 'question' tool can be enabled alone via enabled_tools."""
+    capability = QuestionCapability(enabled_tools=["question"])
+    toolset = capability.get_toolset()
+
+    assert toolset is not None
+    tool_names = set(toolset.tools.keys())
+    assert tool_names == {"question"}
+
+
+def test_question_tool_can_be_enabled_via_schemas(tmp_path):
+    """The 'question' tool can be enabled via schemas dict."""
+    schema_file = tmp_path / "question.yaml"
+    schema_file.write_text(
+        "name: question\n"
+        "description: Ask a clarifying question.\n"
+        "parameters:\n"
+        "  type: object\n"
+        "  properties:\n"
+        "    prompt:\n"
+        "      type: string\n"
+        "      description: Question text\n"
+        "  required:\n"
+        "    - prompt\n"
+    )
+    capability = QuestionCapability(schemas={"question": str(schema_file)})
+    toolset = capability.get_toolset()
+
+    assert toolset is not None
+    tool_names = set(toolset.tools.keys())
+    assert "question" in tool_names
+    assert len(tool_names) == 1
