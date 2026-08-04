@@ -50,16 +50,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The runner workspace has no git repo on issue_comment (main-branch)
-          # runs, so gh cannot infer the repo — pass -R explicitly.
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            PR_NUMBER="${{ github.event.issue.number }}"
-            REF=$(gh pr view -R "${{ github.repository }}" "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
-            echo "ref=$REF" >> "$GITHUB_OUTPUT"
-            echo "Checked out PR #$PR_NUMBER at $REF"
-          else
-            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          # Resolve the PR number across all three trigger paths:
+          # - pull_request: event payload has the number directly
+          # - issue_comment: gh must resolve because comment may be on a PR or issue
+          # - workflow_dispatch: from the (required) pr_number input
+          # The runner workspace has no git repo on issue_comment / workflow_dispatch
+          # runs that skip the pull_request event, so gh needs -R to identify the repo.
+          case "${{ github.event_name }}" in
+            pull_request)
+              PR_NUMBER="${{ github.event.pull_request.number }}"
+              ;;
+            issue_comment)
+              PR_NUMBER="${{ github.event.issue.number }}"
+              ;;
+            workflow_dispatch)
+              PR_NUMBER="${{ github.event.inputs.pr_number }}"
+              ;;
+          esac
+          if [ -z "$PR_NUMBER" ]; then
+            echo "::error::Could not determine PR number for ${{ github.event_name }}"
+            exit 1
           fi
+          REF=$(gh pr view -R "${{ github.repository }}" "$PR_NUMBER" --json headRefOid --jq '.headRefOid')
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Checked out PR #$PR_NUMBER at $REF"
 
       - name: Checkout repository
         uses: actions/checkout@v6
