@@ -334,3 +334,94 @@ class TestRichAndDiffIsolation:
         items = events.tool_call_progress.await_args.kwargs["items"]
         assert len(items) == 1
         assert isinstance(items[0], DiffContentItem)
+
+
+# ---------------------------------------------------------------------------
+# 5.9 Post-title must not override pre-execution title (regression)
+# ---------------------------------------------------------------------------
+
+
+class TestRichPostTitlePreserved:
+    """Post-execution progress must not clobber the pre-execution title.
+
+    viking_search/glob share the read extractor; a hardcoded post title
+    ("Read") would replace the correct "Search for '<query>'" in protocol
+    clients. The post event must either carry the same title as the start
+    event or omit it (letting clients fall back to the existing title).
+    """
+
+    @pytest.mark.asyncio
+    async def test_search_post_title_does_not_override_start(self) -> None:
+        """viking_search: post progress carries the pre-execution title."""
+        events = AsyncMock()
+        ctx = _make_ctx(_FakeDeps(events=events))
+        cap = ToolDisplayCapability(
+            emit_rich=True,
+            emit_rich_for={"viking_search"},
+        )
+
+        await cap.wrap_tool_execute(
+            ctx,
+            call=_make_call("viking_search", tool_call_id="call_s"),
+            tool_def=_make_tool_def("viking_search"),
+            args={"query": "hydraulic pump"},
+            handler=_make_handler("match 1\nmatch 2"),
+        )
+
+        # start event carries the search title
+        events.tool_call_start.assert_awaited_once()
+        start_title = events.tool_call_start.await_args.kwargs["title"]
+        assert "hydraulic pump" in start_title, f"start title should mention query: {start_title}"
+
+        # post progress must not replace it with a bare "Read"
+        events.tool_call_progress.assert_awaited_once()
+        post_kwargs = events.tool_call_progress.await_args.kwargs
+        post_title = post_kwargs.get("title")
+        if post_title is not None:
+            assert post_title == start_title, (
+                "post title must equal start title or be absent, "
+                f"got: {post_title!r} vs {start_title!r}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_glob_post_title_uses_uri_location(self) -> None:
+        """viking_glob: post title matches the start title (pattern-based)."""
+        events = AsyncMock()
+        ctx = _make_ctx(_FakeDeps(events=events))
+        cap = ToolDisplayCapability(
+            emit_rich=True,
+            emit_rich_for={"viking_glob"},
+        )
+
+        await cap.wrap_tool_execute(
+            ctx,
+            call=_make_call("viking_glob", tool_call_id="call_g"),
+            tool_def=_make_tool_def("viking_glob"),
+            args={"pattern": "**/*.md", "uri": "viking://wiki"},
+            handler=_make_handler("viking://wiki/a.md\nviking://wiki/b.md"),
+        )
+
+        events.tool_call_start.assert_awaited_once()
+        start_title = events.tool_call_start.await_args.kwargs["title"]
+        assert "**/*.md" in start_title, f"glob start title should mention pattern: {start_title}"
+
+        events.tool_call_progress.assert_awaited_once()
+        post_title = events.tool_call_progress.await_args.kwargs["title"]
+        assert post_title == start_title, (
+            f"post title must equal start title, got: {post_title!r} vs {start_title!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5.10 target_uri recognized as a location (search subtree restriction)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchTargetUriLocation:
+    """``target_uri`` on search/find tools surfaces as a file location."""
+
+    def test_parse_locations_recognizes_target_uri(self) -> None:
+        assert _parse_locations({"target_uri": "viking://wiki/"}) == ["viking://wiki/"]
+        assert _parse_locations({"query": "x", "target_uri": "viking://wiki/"}) == [
+            "viking://wiki/"
+        ]

@@ -125,16 +125,18 @@ def _parse_diff_fields(
     return (path, old_text, new_text)
 
 
-# Path-like keys recognized across write/edit/read/query tools.
-_PATH_KEYS = ("path", "file_path", "uri", "uris", "filepath")
+# Path-like keys recognized across write/edit/read/query tools. Includes
+# ``target_uri`` (subtree restriction on viking search/find).
+_PATH_KEYS = ("path", "file_path", "uri", "uris", "filepath", "target_uri")
 
 
 def _parse_locations(args: Mapping[str, Any]) -> list[str]:
     """Extract target paths/URIs from tool arguments.
 
-    Recognizes ``path``/``file_path``/``uri``/``uris``/``filepath`` keys.
-    List-valued keys (e.g. viking ``uris``) expand to one location per
-    element; scalar strings are kept as a single location.
+    Recognizes ``path``/``file_path``/``uri``/``uris``/``filepath``/
+    ``target_uri`` keys. List-valued keys (e.g. viking ``uris``) expand
+    to one location per element; scalar strings are kept as a single
+    location.
 
     Args:
         args: The validated tool call arguments.
@@ -408,6 +410,13 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         no extractor is registered (title/kind/locations already provided
         by the pre-execution event).
 
+        The returned info carries **no title**: the post event is a content
+        update for an already-titled tool call. Protocol clients fall back
+        to the pre-execution title (opencode ``_process_tool_progress`` uses
+        ``title or existing_title``; ACP keeps its state title), so a
+        shared read/query extractor never clobbers the start title (e.g.
+        ``viking_search`` must stay "Search for '<query>'").
+
         Args:
             original_name: The original tool name.
             args: The validated tool call arguments.
@@ -420,9 +429,8 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         if extractor is None:
             return None
         items, extra_locations = extractor(args, result)
-        title = f"Read {', '.join(extra_locations)}" if extra_locations else "Read"
         return RichDisplayInfo(
-            title=title,
+            title="",
             kind="read",
             locations=extra_locations,
             items=items,
@@ -467,8 +475,10 @@ class ToolDisplayCapability(AbstractCapability[Any]):
             rich_target = self.emit_rich and original_name in self.emit_rich_for
 
             # Pre-execution: emit rich tool-start event for read/query tools.
+            pre_title: str | None = None
             if rich_target:
                 pre = self._derive_rich_pre(original_name, args)
+                pre_title = pre.title
                 events = self._prepare_emitter(ctx, call=call, original_name=original_name)
                 if events is not None:
                     await events.tool_call_start(
@@ -482,14 +492,16 @@ class ToolDisplayCapability(AbstractCapability[Any]):
             # Post-execution: rich content for read/query tools. Only
             # short-circuits when the rich layer actually produced content;
             # otherwise (e.g. a write tool also listed in emit_rich_for)
-            # we fall through to diff injection.
+            # we fall through to diff injection. The post event reuses the
+            # pre-execution title so search/glob tools don't get clobbered
+            # to a generic "Read".
             if rich_target:
                 post = self._derive_rich_post(original_name, args, result)
                 if post is not None and post.items:
                     events = self._prepare_emitter(ctx, call=call, original_name=original_name)
                     if events is not None:
                         await events.tool_call_progress(
-                            title=post.title,
+                            title=pre_title or post.title,
                             items=[*post.items],
                         )
                     return result

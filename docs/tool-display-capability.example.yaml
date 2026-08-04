@@ -1,7 +1,7 @@
 # ToolDisplayCapability 配置示例
 #
 # 全局装饰器:不改子能力源码,对 agent 已装配工具改名 + 注入 diff/rich 富信息事件。
-# 四个正交开关:rename_mode(改名)/ emit_diff(注入)/ emit_diff_for(diff 白名单)/
+# 五个正交开关:rename_mode(改名)/ emit_diff(diff 注入)/ emit_diff_for(diff 白名单)/
 # emit_rich(rich 展示)/ emit_rich_for(rich 白名单)。
 # 详见 docs/explanation/tool-display-capability.md
 ---
@@ -63,7 +63,9 @@ agents:
 # 示例 3:子能力已自发射 —— 仅改名,关闭 diff 注入避免重复
 #   fsspec 等工具集已在内部 emit DiffContentItem(见
 #   src/agentpool_toolsets/fsspec_toolset/toolset.py:575),装饰器只负责
-#   改名 + read 类工具的 rich 展示,emit_diff: false。
+#   改名,emit_diff: false。
+#   注意:fsspec_read 不在内置 extractor 注册表中,emit_rich 只注入 start
+#   事件(kind/locations),不含内容 —— 如需内容需自行注册 extractor。
 agents:
   fs-writer:
     model:

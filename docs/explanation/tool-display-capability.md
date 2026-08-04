@@ -4,7 +4,7 @@
 
 模式对齐 `ToolInterceptCapability`(`src/agentpool/agents/native_agent/tool_intercept.py`):独立 `AbstractCapability` 直接覆写 `get_wrapper_toolset()` 与 `wrap_tool_execute()`,作为全局中间件横切 agent 的全部工具 —— 不组合子能力、无 `capabilities` 字段。
 
-## 四个正交开关
+## 五个正交开关
 
 | 开关 | 默认 | 作用 |
 |---|---|---|
@@ -20,11 +20,11 @@
 
 面向 **read/search/glob/find 类只读工具**,让协议客户端获得正确的工具分类、文件锚点与内容展示 —— 与 rename(ACP 场景 `rename_mode: false` 也需 rich)、emit_diff(read/query 工具不需 diff)完全正交。
 
-**数据来源(策略注册表)**:模块级 `_RICH_EXTRACTORS` 按**原始工具名**注册 extractor,接收真实执行结果产出内容项 + locations;未注册的工具退化到 `derive_rich_tool_info` 的 title/kind + 通用参数位置提取,不注入内容。新工扩展:注册一条 extractor 即可。
+**数据来源(策略注册表)**:模块级 `_RICH_EXTRACTORS` 按**原始工具名**注册 extractor,接收真实执行结果产出内容项 + locations;未注册的工具退化到 `derive_rich_tool_info` 的 title/kind + 通用参数位置提取,不注入内容。新工具扩展:注册一条 extractor 即可。
 
-**执行前注入** `ToolCallStartEvent(kind, locations)` `—— 给客户端正确的工具图标与文件锚点(ACP 转换器原生消费,零协议改动)。
+**执行前注入** `ToolCallStartEvent(kind, locations)` —— 给客户端正确的工具图标与文件锚点(ACP 转换器原生消费,零协议改动)。
 
-**执行后注入** progress 事件携带 `TextContentItem`(读取内容/搜索结果)—— 经 opencode `_process_tool_progress` 转成 tool output 文本。
+**执行后注入** progress 事件携带 `TextContentItem`(读取内容/搜索结果)—— 经 opencode `_process_tool_progress` 转成 tool output 文本。post 事件**沿用执行前 title**(search/glob 等共享 extractor 的工具不会被显示成通用的 "Read")。
 
 **防重复**:read/query 工具的内容走 rich 通道,不生成 `DiffContentItem`;write/edit 工具的 diff 走 emit_diff 通道 —— 两类工具由 `emit_rich_for`/`emit_diff_for` 白名单天然隔离。
 
