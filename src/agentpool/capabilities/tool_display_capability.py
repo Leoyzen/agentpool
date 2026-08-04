@@ -28,7 +28,7 @@ tools.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import logfire
 from pydantic_ai.capabilities import AbstractCapability
@@ -43,6 +43,39 @@ if TYPE_CHECKING:
     from pydantic_ai._run_context import RunContext
     from pydantic_ai.messages import ToolCallPart
     from pydantic_ai.tools import ToolDefinition
+
+    from agentpool.agents.events import ToolCallContentItem
+    from agentpool.tools.base import ToolKind
+
+
+@dataclass(kw_only=True)
+class RichDisplayInfo:
+    """Rich display info derived for a tool call.
+
+    Attributes:
+        title: Human-readable title describing the operation.
+        kind: Tool kind (read, edit, search, …, other).
+        locations: Target paths/URIs affected by the tool call.
+        items: Rich content items (text/file content) for the client.
+    """
+
+    title: str
+    kind: ToolKind = "other"
+    locations: list[str] = field(default_factory=list)
+    items: list[ToolCallContentItem] = field(default_factory=list)
+
+
+class RichExtractor(Protocol):
+    """Strategy for extracting rich display info from a tool result.
+
+    Implementations receive the validated arguments and the real tool
+    result, and return rich content items plus any locations that could
+    not be derived from arguments alone.
+    """
+
+    def __call__(
+        self, args: Mapping[str, Any], result: Any
+    ) -> tuple[list[ToolCallContentItem], list[str]]: ...
 
 
 def _parse_diff_fields(
@@ -92,6 +125,150 @@ def _parse_diff_fields(
     return (path, old_text, new_text)
 
 
+# Path-like keys recognized across write/edit/read/query tools.
+_PATH_KEYS = ("path", "file_path", "uri", "uris", "filepath")
+
+
+def _parse_locations(args: Mapping[str, Any]) -> list[str]:
+    """Extract target paths/URIs from tool arguments.
+
+    Recognizes ``path``/``file_path``/``uri``/``uris``/``filepath`` keys.
+    List-valued keys (e.g. viking ``uris``) expand to one location per
+    element; scalar strings are kept as a single location.
+
+    Args:
+        args: The validated tool call arguments.
+
+    Returns:
+        A list of location strings, possibly empty.
+    """
+    locations: list[str] = []
+    for key in _PATH_KEYS:
+        value = args.get(key)
+        if isinstance(value, str):
+            if value:
+                locations.append(value)
+        elif isinstance(value, (list, tuple)):
+            locations.extend(str(item) for item in value if item)
+    return locations
+
+
+def _unwrap_result(result: Any) -> Any:
+    """Unwrap a pydantic-ai ``ToolReturn`` to its ``return_value``.
+
+    Native capability tools (viking, …) return ``ToolReturn`` objects;
+    the real tool result seen by the wrapper may be either the object or
+    its ``return_value`` depending on the call path. Content extraction
+    targets the plain value.
+
+    Args:
+        result: The raw tool result.
+
+    Returns:
+        The ``return_value`` for a ``ToolReturn``; the result unchanged
+        otherwise.
+    """
+    from pydantic_ai.messages import ToolReturn
+
+    if isinstance(result, ToolReturn):
+        return result.return_value
+    return result
+
+
+# Registry of per-tool rich content extractors (Tool-kind strategies).
+# Maps original tool name → extractor producing content items + locations
+# from the real execution result. New tools extend this registry.
+_RICH_EXTRACTORS: dict[str, RichExtractor] = {}
+
+# Known tool-name prefixes whose suffix maps to a standard tool kind
+# (e.g. ``viking_read`` → kind ``read``). Used by rich-title derivation
+# when ``derive_rich_tool_info`` does not recognize the prefixed name.
+_PREFIXED_KIND_TOOLS = (
+    "viking_read",
+    "viking_search",
+    "viking_find",
+    "viking_glob",
+    "fsspec_read",
+    "fsspec_write",
+    "fsspec_edit",
+)
+
+
+def _derive_kind(original_name: str, args: Mapping[str, Any]) -> tuple[str, ToolKind]:
+    """Derive (title, kind) for a possibly-prefixed tool name.
+
+    Strips a known prefix (``viking_``, ``fsspec_``) and re-derives via
+    ``derive_rich_tool_info`` so ``viking_read`` is classified as a read
+    tool rather than ``other``. Falls back to the raw name when no prefix
+    applies.
+
+    Args:
+        original_name: The original tool name.
+        args: The validated tool call arguments.
+
+    Returns:
+        A ``(title, kind)`` pair with a protocol-safe kind.
+    """
+    from agentpool.agents.events.infer_info import derive_rich_tool_info
+
+    kind_map: dict[str, ToolKind] = {
+        "read": "read",
+        "search": "search",
+        "find": "search",
+        "glob": "search",
+        "write": "edit",
+        "edit": "edit",
+    }
+    for tool in _PREFIXED_KIND_TOOLS:
+        if original_name == tool and "_" in tool:
+            suffix = tool.partition("_")[2]
+            if suffix in kind_map:
+                rich = derive_rich_tool_info(suffix, args)
+                return (rich.title, kind_map[suffix])
+    rich = derive_rich_tool_info(original_name, args)
+    return (rich.title, rich.kind)
+
+
+def _text_extractor(
+    items_builder: Callable[[str], list[ToolCallContentItem]],
+) -> RichExtractor:
+    """Build an extractor producing content items from an unwrapped result string."""
+
+    def extract(
+        args: Mapping[str, Any], result: Any
+    ) -> tuple[list[ToolCallContentItem], list[str]]:
+        locations = _parse_locations(args)
+        text = _unwrap_result(result)
+        if not isinstance(text, str) or not text:
+            return ([], locations)
+        return (items_builder(text), locations)
+
+    return extract
+
+
+def _register_viking_extractors() -> None:
+    """Register rich content extractors for the built-in viking tools.
+
+    Read/query tools return formatted text (line-numbered content, search
+    results). The extractors package that text into a ``TextContentItem``
+    for protocol clients and reuse argument-derived locations.
+
+    Note:
+        These are display-only enhancements applied by ``emit_rich``;
+        they do not modify the viking tools themselves.
+    """
+    from agentpool.agents.events import TextContentItem
+
+    def text_content_items(text: str) -> list[ToolCallContentItem]:
+        return [TextContentItem(text=text)]
+
+    for tool in ("viking_read", "viking_search", "viking_find", "viking_glob"):
+        _RICH_EXTRACTORS[tool] = _text_extractor(text_content_items)
+
+
+_register_viking_extractors()
+
+
 @dataclass(kw_only=True)
 class ToolDisplayCapability(AbstractCapability[Any]):
     """Global tool display decorator: rename tools + inject diff events.
@@ -108,6 +285,10 @@ class ToolDisplayCapability(AbstractCapability[Any]):
             event injection. Empty means no injection. When rename is
             active, display names are resolved back to originals before
             matching.
+        emit_rich: Enable rich display event injection (kind,
+            locations, content) for read/query tools.
+        emit_rich_for: Set of **original** tool names eligible for rich
+            display injection. Empty means no injection.
         id: Optional capability id.
     """
 
@@ -116,11 +297,15 @@ class ToolDisplayCapability(AbstractCapability[Any]):
     name_map: Mapping[str, str] = field(default_factory=dict)
     emit_diff: bool = True
     emit_diff_for: set[str] = field(default_factory=set)
+    emit_rich: bool = True
+    emit_rich_for: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
-        """Coerce ``emit_diff_for`` to ``set`` if a list was provided via YAML."""
+        """Coerce target sets to ``set`` if lists were provided via YAML."""
         if isinstance(self.emit_diff_for, list):
             self.emit_diff_for = set(self.emit_diff_for)
+        if isinstance(self.emit_rich_for, list):
+            self.emit_rich_for = set(self.emit_rich_for)
 
     @property
     def _reverse_name_map(self) -> dict[str, str]:
@@ -148,6 +333,101 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         inverted = {v: k for k, v in self.name_map.items()}
         return RenamedToolset(wrapped=toolset, name_map=inverted)
 
+    def _get_original_name(self, call_name: str) -> str:
+        """Resolve the display (renamed) tool name to its original name.
+
+        When rename is active, ``call.tool_name`` is the display name;
+        emit-diff/emit-rich filters contain original names.
+
+        Args:
+            call_name: The tool name as seen by the wrapper.
+
+        Returns:
+            The original tool name.
+        """
+        return self._reverse_name_map.get(call_name, call_name)
+
+    def _prepare_emitter(
+        self,
+        ctx: RunContext[Any],
+        *,
+        call: ToolCallPart,
+        original_name: str,
+    ) -> Any:
+        """Populate ``ctx.deps.tool_call_id`` / ``tool_name`` and return the emitter.
+
+        Capability tools bypass ``tool_wrapping.py``, leaving these fields
+        ``None``. ``StreamEventEmitter`` reads them to tag emitted events;
+        without a ``tool_call_id`` the ACP converter drops the event.
+
+        Args:
+            ctx: The pydantic-ai run context (``deps`` is the agentpool
+                ``AgentContext``).
+            call: The tool call part (carries ``tool_call_id``).
+            original_name: The resolved original tool name.
+
+        Returns:
+            The ``events`` emitter, or ``None`` when unavailable.
+        """
+        deps = ctx.deps
+        if hasattr(deps, "tool_call_id"):
+            deps.tool_call_id = call.tool_call_id
+        if hasattr(deps, "tool_name"):
+            deps.tool_name = original_name
+        events = getattr(deps, "events", None)
+        return events if events is not None else None
+
+    def _derive_rich_pre(self, original_name: str, args: dict[str, Any]) -> RichDisplayInfo:
+        """Derive pre-execution rich display info (title, kind, locations).
+
+        Uses the registry extractor when available; otherwise falls back
+        to ``derive_rich_tool_info`` for title/kind plus generic location
+        extraction from arguments.
+
+        Args:
+            original_name: The original tool name.
+            args: The validated tool call arguments.
+
+        Returns:
+            Rich display info with title, kind and locations.
+        """
+        title, kind = _derive_kind(original_name, args)
+        locations = _parse_locations(args)
+        return RichDisplayInfo(
+            title=title,
+            kind=kind,
+            locations=locations,
+        )
+
+    def _derive_rich_post(
+        self, original_name: str, args: dict[str, Any], result: Any
+    ) -> RichDisplayInfo | None:
+        """Derive post-execution rich content (content items + locations).
+
+        Applies the registry extractor for the tool; returns ``None`` when
+        no extractor is registered (title/kind/locations already provided
+        by the pre-execution event).
+
+        Args:
+            original_name: The original tool name.
+            args: The validated tool call arguments.
+            result: The real tool result (may be a ``ToolReturn``).
+
+        Returns:
+            Rich content info, or ``None`` when no extractor applies.
+        """
+        extractor = _RICH_EXTRACTORS.get(original_name)
+        if extractor is None:
+            return None
+        items, extra_locations = extractor(args, result)
+        title = f"Read {', '.join(extra_locations)}" if extra_locations else "Read"
+        return RichDisplayInfo(
+            title=title,
+            kind="read",
+            locations=extra_locations,
+            items=items,
+        )
+
     async def wrap_tool_execute(
         self,
         ctx: RunContext[Any],
@@ -157,26 +437,19 @@ class ToolDisplayCapability(AbstractCapability[Any]):
         args: dict[str, Any],
         handler: Callable[[dict[str, Any]], Awaitable[Any]],
     ) -> Any:
-        """Execute the tool, then inject a diff progress event when enabled.
+        """Execute the tool, then inject diff/rich display events when enabled.
 
-        After ``handler`` completes, derives ``(path, old_text, new_text)``
-        from the call arguments and emits a
-        :class:`~agentpool.agents.events.ToolCallProgressEvent` carrying a
-        :class:`~agentpool.agents.events.DiffContentItem` via the run
-        context's ``events`` emitter — the same channel fsspec tools use,
-        which reaches ACP converters as ``FileEditToolCallContent``.
+        Orchestrates the three orthogonal layers:
 
-        Two critical steps before emitting:
-
-        1. **Populate ``ctx.deps.tool_call_id`` / ``tool_name``** —
-           capability tools (viking, fsspec, …) bypass
-           ``tool_wrapping.py``, so these fields are ``None``. Without
-           them, ``StreamEventEmitter`` reads ``""`` and the ACP
-           converter drops the event (``if tool_call_id:`` guard fails).
-        2. **Resolve display → original name** — when rename is active,
-           ``call.tool_name`` is the *display* name. ``emit_diff_for``
-           contains *original* names. We reverse-lookup through
-           ``name_map`` before matching.
+        1. **Rich (emit_rich)**: for read/query tools, emits a
+           ``ToolCallStartEvent`` (kind + locations) *before* execution
+           and a progress event carrying content items *after* execution.
+        2. **Diff (emit_diff)**: for write/edit tools, emits a
+           ``ToolCallProgressEvent`` carrying a ``DiffContentItem`` after
+           execution — the same channel fsspec tools use, which reaches
+           ACP converters as ``FileEditToolCallContent``.
+        3. **Rename**: handled by ``get_wrapper_toolset``; here we only
+           resolve display → original names for both filters above.
 
         Args:
             ctx: The pydantic-ai run context (carries ``deps`` → agentpool
@@ -190,15 +463,40 @@ class ToolDisplayCapability(AbstractCapability[Any]):
             The tool execution result, unchanged.
         """
         with logfire.span("capability.tool_display.wrap_tool_execute", tool_name=call.tool_name):
+            original_name = self._get_original_name(call.tool_name)
+            rich_target = self.emit_rich and original_name in self.emit_rich_for
+
+            # Pre-execution: emit rich tool-start event for read/query tools.
+            if rich_target:
+                pre = self._derive_rich_pre(original_name, args)
+                events = self._prepare_emitter(ctx, call=call, original_name=original_name)
+                if events is not None:
+                    await events.tool_call_start(
+                        title=pre.title,
+                        kind=pre.kind,
+                        locations=pre.locations,
+                    )
+
             result = await handler(args)
 
+            # Post-execution: rich content for read/query tools. Only
+            # short-circuits when the rich layer actually produced content;
+            # otherwise (e.g. a write tool also listed in emit_rich_for)
+            # we fall through to diff injection.
+            if rich_target:
+                post = self._derive_rich_post(original_name, args, result)
+                if post is not None and post.items:
+                    events = self._prepare_emitter(ctx, call=call, original_name=original_name)
+                    if events is not None:
+                        await events.tool_call_progress(
+                            title=post.title,
+                            items=[*post.items],
+                        )
+                    return result
+
+            # Diff injection for write/edit tools (existing layer).
             if not self.emit_diff or not self.emit_diff_for:
                 return result
-
-            # Resolve display name → original for emit_diff_for matching.
-            # When rename is active, call.tool_name is the display name;
-            # emit_diff_for contains original names.
-            original_name = self._reverse_name_map.get(call.tool_name, call.tool_name)
             if original_name not in self.emit_diff_for:
                 return result
 
@@ -206,17 +504,7 @@ class ToolDisplayCapability(AbstractCapability[Any]):
             if path is None or new_text is None:
                 return result
 
-            # Populate ctx.deps.tool_call_id / tool_name for capability tools.
-            # tool_wrapping.py only does this for legacy direct tools (agent.py:1044-1052);
-            # capability tools (AbstractCapability) skip that path, leaving these as None.
-            # StreamEventEmitter reads self._context.tool_call_id → "" → ACP converter drops.
-            deps = ctx.deps
-            if hasattr(deps, "tool_call_id"):
-                deps.tool_call_id = call.tool_call_id
-            if hasattr(deps, "tool_name"):
-                deps.tool_name = original_name
-
-            events = getattr(deps, "events", None)
+            events = self._prepare_emitter(ctx, call=call, original_name=original_name)
             if events is None:
                 return result
 
