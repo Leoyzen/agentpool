@@ -52,9 +52,7 @@ def _make_tool_filter(
 
 MarkupType = Literal["yaml", "json", "toml"]
 # Tool name literals for statically-defined toolsets
-SubagentToolName = Literal[
-    "task",
-]
+SubagentToolName = Literal["task",]
 ExecutionEnvironmentToolName = Literal[
     "execute_code",
     "bash",
