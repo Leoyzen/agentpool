@@ -62,8 +62,8 @@ async def test_claude_acp_multiple_toolsets():
         assert agent._tool_bridge is not None
         tool_names = {t.name for t in await agent.tools.get_tools()}
         # Should have tools from both toolsets
-        # SubagentToolset provides: list_available_nodes, task
-        assert "list_available_nodes" in tool_names
+        # SubagentToolset provides: task
+        assert "list_available_nodes" not in tool_names
         assert "task" in tool_names
         assert "execute_introspection" in tool_names
 

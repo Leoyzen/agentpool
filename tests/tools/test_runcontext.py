@@ -112,11 +112,8 @@ async def test_capability_tools(default_model: str):
         subagent = SubagentToolsetConfig()
         providers = [subagent.get_provider()]
         agent = Agent(name="test", model=default_model, toolsets=providers, agent_pool=pool)
-        prompt = "Get available agents using the list_available_nodes tool and return all names."
+        prompt = "Execute task 'say hello' on agent with name `helper`."
         result = await agent.run(prompt)
-        assert agent.name in str(result.content)
-        agent_2 = Agent(name="test_2", model=default_model, toolsets=providers, agent_pool=pool)
-        result = await agent_2.run("Execute task 'say hello' on agent with name `helper`")
         assert result.get_tool_calls()
         assert result.get_tool_calls()[0].tool_name == "task"
 

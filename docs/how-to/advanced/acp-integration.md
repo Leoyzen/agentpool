@@ -518,7 +518,7 @@ agents:
 
 With this configuration, the Claude agent can:
 
-- List available agents via `list_available_nodes`
+- Delegate to sub-agents via `task`
 - Delegate work via `task`
 - Create new agents dynamically via `add_agent`
 - Use any custom tools you've registered
@@ -527,7 +527,7 @@ With this configuration, the Claude agent can:
 
 All standard toolsets can be exposed to MCP-capable agents:
 
-- **subagent**: Delegation tools (`task`, `list_available_nodes`)
+- **subagent**: Delegation tools (`task`)
 - **agent_management**: Lifecycle tools (`add_agent`, `remove_agent`, `get_agent_info`)
 - **search**: Web/news search (requires provider configuration)
 - **notifications**: Send notifications via Apprise
@@ -544,7 +544,7 @@ async with AgentPool("config.yml") as pool:
     
     # Claude can now delegate to internal agents
     result = await claude.run(
-        "Use the list_available_nodes tool to see what agents are available, "
+        "Use the task tool to delegate tasks to other agents."
         "then delegate the data processing task to specialist_a"
     )
     
@@ -566,7 +566,7 @@ graph TB
     end
     
     subgraph Internal["Internal Toolsets (Same Process)"]
-        Subagent["SubagentTools<br/>• task() → Execute tasks on other agents<br/>• list_available_nodes() → Pool inspection"]
+        Subagent["SubagentTools<br/>• task() → Execute tasks on other agents"]
         Management["AgentManagementTools<br/>• add_agent() → Dynamic agent creation<br/>• remove_agent() → Lifecycle management"]
     end
     

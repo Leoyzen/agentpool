@@ -123,14 +123,14 @@ class TestSubagentToolsAsCapability:
         assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
-        """Capability toolset includes list_available_nodes and task tools."""
+        """Capability toolset includes task tool."""
         provider = SubagentTools()
         toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
 
-        assert "list_available_nodes" in tools
+        assert "list_available_nodes" not in tools
         assert "task" in tools
 
 
