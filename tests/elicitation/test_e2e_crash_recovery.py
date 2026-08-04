@@ -762,7 +762,7 @@ async def test_e2e_elicitation_resume_maps_tool_call_id_mismatch(
             parts=[
                 TextPart(content="Let me ask."),
                 ToolCallPart(
-                    tool_name="question_for_user",
+                    tool_name="question",
                     args={},
                     tool_call_id="call_def456",  # ← pydantic-ai's tool_call_id
                 ),

@@ -20,10 +20,10 @@ async def test_subagent_tool_filtering():
     tool_names = {t.name for t in tools}
 
     assert "task" in tool_names
-    assert "list_available_nodes" in tool_names
+    assert "list_available_nodes" not in tool_names
 
     # Filtered config wraps in FilteredToolsetCapability
-    config = SubagentToolsetConfig(tools={"task": True, "list_available_nodes": False})
+    config = SubagentToolsetConfig(tools={"task": True})
     provider = config.get_provider()
     assert isinstance(provider, FilteredToolsetCapability)
 
@@ -31,7 +31,7 @@ async def test_subagent_tool_filtering():
     inner_tools = await provider.wrapped.get_tools()
     inner_names = {t.name for t in inner_tools}
     assert "task" in inner_names
-    assert "list_available_nodes" in inner_names
+    assert "list_available_nodes" not in inner_names
 
 
 async def test_skills_tool_filtering():

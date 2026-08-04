@@ -52,10 +52,7 @@ def _make_tool_filter(
 
 MarkupType = Literal["yaml", "json", "toml"]
 # Tool name literals for statically-defined toolsets
-SubagentToolName = Literal[
-    "list_available_nodes",
-    "task",
-]
+SubagentToolName = Literal["task",]
 ExecutionEnvironmentToolName = Literal[
     "execute_code",
     "bash",
@@ -200,7 +197,7 @@ class SubagentToolsetConfig(BaseToolsetConfig):
     )
 
     type: Literal["subagent"] = Field("subagent", init=False)
-    """Subagent interaction toolset (task, list_available_nodes)."""
+    """Subagent interaction toolset (task)."""
 
     tools: dict[SubagentToolName, bool] | None = Field(
         default=None,

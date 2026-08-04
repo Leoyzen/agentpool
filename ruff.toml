@@ -158,6 +158,28 @@ max-complexity = 15
 # Resource resolver/capability: PLR0911 for multi-return routing logic, TRY300 for early-return pattern
 "src/agentpool/capabilities/resource_resolver.py" = ["PLR0911"]
 "src/agentpool/capabilities/resource_capability.py" = ["PLR0911", "TRY300"]
+# Background task capability: PLR0915/PLR0911 for complex lifecycle/tool methods, TRY301 for re-raise pattern
+"src/agentpool/capabilities/background_task/capability.py" = ["PLR0915", "TRY301"]
+"src/agentpool/capabilities/background_task/manager.py" = ["PLR0915", "PLR0911"]
+# Question tool tests: RUF001 — fullwidth CJK punctuation is intentional test data
+# for verifying CJK text parsing in the question_for_user XML
+"tests/tool_impls/question/test_question_for_user.py" = ["RUF001"]
+# Background task tests (copied from xeno-agent): pre-existing style/docstring
+# conventions (D104/D205/D301/E501), pytest-style assertions inside except blocks
+# (PT017), TYPE_CHECKING import placement (TC002/TC003), and TRY301/RSE102 re-raise
+# patterns carried over verbatim from the source repo.
+"tests/capabilities/background_task/**" = [
+  "D104",
+  "D205",
+  "D301",
+  "E501",
+  "PT017",
+  "RSE102",
+  "RUF003",
+  "TC002",
+  "TC003",
+  "TRY301",
+]
 
 [format]
 preview = true
