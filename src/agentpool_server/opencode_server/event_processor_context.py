@@ -86,6 +86,9 @@ class EventProcessorContext:
     tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)
     tool_outputs: dict[str, str] = field(default_factory=dict, init=False)
     tool_inputs: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
+    # Unified diff text accumulated from DiffContentItem in ToolCallProgressEvent,
+    # carried to ToolStateCompleted.metadata.diff for TUI diff rendering.
+    tool_diffs: dict[str, str] = field(default_factory=dict, init=False)
 
     # Subagent tool parts tracking (key: "depth:source_name" -> ToolPart)
     subagent_tool_parts: dict[str, ToolPart] = field(default_factory=dict, init=False)

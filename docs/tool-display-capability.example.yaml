@@ -1,0 +1,66 @@
+# ToolDisplayCapability 配置示例
+#
+# 全局装饰器:不改子能力源码,对 agent 已装配工具改名 + 注入 diff 富信息事件。
+# 三个正交开关:rename_mode(改名)/ emit_diff(注入)/ emit_diff_for(注入白名单)。
+# 详见 docs/explanation/tool-display-capability.md
+---
+# 示例 1:OpenCode TUI —— 改名命中客户端渲染白名单 + diff 注入
+#   viking_write/viking_edit 重命名为 write/edit,客户端按白名单渲染;
+#   同时注入 DiffContentItem → TUI 显示文件变更 diff。
+agents:
+  wiki-librarian-opencode:
+    model:
+      identifier: anthropic:claude-sonnet-4-5
+    capabilities:
+      - type: viking
+        mode: write
+        url: http://localhost:8765
+      - type: tool_display
+        args:
+          rename_mode: true
+          name_map:
+            viking_write: write
+            viking_edit: edit
+          emit_diff: true
+          emit_diff_for:
+            - viking_write
+            - viking_edit
+---
+# 示例 2:ACP (Zed) —— 展示原名 + diff 注入
+#   Zed 通过 FileEditToolCallContent 原生渲染差异,无需改名;
+#   仅注入 diff 富信息事件。
+agents:
+  wiki-librarian-acp:
+    model:
+      identifier: anthropic:claude-sonnet-4-5
+    capabilities:
+      - type: viking
+        mode: write
+        url: http://localhost:8765
+      - type: tool_display
+        args:
+          rename_mode: false
+          emit_diff: true
+          emit_diff_for:
+            - viking_write
+            - viking_edit
+---
+# 示例 3:子能力已自发射 —— 仅改名,关闭注入避免重复
+#   fsspec 等工具集已在内部 emit DiffContentItem(见
+#   src/agentpool_toolsets/fsspec_toolset/toolset.py:575),装饰器只负责
+#   改名,emit_diff: false。
+agents:
+  fs-writer:
+    model:
+      identifier: anthropic:claude-sonnet-4-5
+    tools:
+      - type: file_access
+        root: /data
+    capabilities:
+      - type: tool_display
+        args:
+          rename_mode: true
+          name_map:
+            fsspec_write: write
+            fsspec_edit: edit
+          emit_diff: false

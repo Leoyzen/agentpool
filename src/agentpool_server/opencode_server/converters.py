@@ -77,6 +77,7 @@ logger = log.get_logger(__name__)
 _PARAM_NAME_MAP: dict[str, str] = {
     "path": "filePath",
     "file_path": "filePath",
+    "uri": "filePath",
     "old_string": "oldString",
     "new_string": "newString",
     "replace_all": "replaceAll",
