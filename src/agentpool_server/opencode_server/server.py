@@ -187,7 +187,9 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
             for slashed_cmd in bridge.get_commands():
                 store.register_command(slashed_cmd, replace=True)
 
-        bridge = OpenCodeSkillBridge(skill_provider=state.pool.skill_provider)
+        # Use SkillManagerCap for skill instruction loading (D8 consolidation).
+        skill_cap = state.pool.skill_capabilities[0] if state.pool.skill_capabilities else None
+        bridge = OpenCodeSkillBridge(skill_provider=skill_cap)
         initial_cmds = _build_skill_commands()
         for cmd in initial_cmds:
             bridge.handle_change(cmd.name, cmd)

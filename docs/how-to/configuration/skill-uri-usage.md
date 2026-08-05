@@ -21,20 +21,25 @@ The skill URI system provides:
 ## URI Format
 
 ```
-skill://{provider}/{skill-name}/{reference-path}
+skill://{skill-name}/{reference-path}
 ```
 
 | Component | Description | Example |
 |-----------|-------------|---------|
-| `provider` | Skill source identifier | `local`, `github-copilot` |
 | `skill-name` | Name of the skill | `python-expert` |
 | `reference-path` | Optional path to supporting files | `references/style-guide.md` |
+
+!!! note "Flat URIs"
+    Skills use a **flat** `skill://{skill-name}` identity. There is no `provider`
+    segment — a bare name and the flat URI resolve the same skill. To load a
+    reference file, append its path: `skill://{skill-name}/references/style-guide.md`.
 
 ## Loading Skills
 
 ### By Short Name (Auto-Routing)
 
-When you use a bare skill name, AgentPool searches all providers in priority order:
+When you use a bare skill name, AgentPool searches all skill sources (local
+skills first, then MCP providers) in priority order:
 
 ```python
 from agentpool import AgentPool
@@ -42,21 +47,17 @@ from agentpool import AgentPool
 async with AgentPool("config.yml") as pool:
     agent = pool.get_agent("assistant")
     # Agent can use: load_skill(ctx, "python-expert")
-    # Automatically finds skill across all providers
+    # Automatically finds skill across all sources
 ```
 
-**Priority order**: Local skills first, then MCP providers in registration order.
-
-### By Full URI (Explicit Provider)
-
-For precise control over which provider to use:
+### By Flat URI
 
 ```python
 # Local filesystem skill
-await load_skill(ctx, "skill://local/python-expert")
+await load_skill(ctx, "python-expert")
 
-# MCP server skill
-await load_skill(ctx, "skill://github-copilot/code-review")
+# Equivalent flat URI
+await load_skill(ctx, "skill://python-expert")
 ```
 
 ### Loading Reference Content
@@ -64,38 +65,20 @@ await load_skill(ctx, "skill://github-copilot/code-review")
 Skills can bundle supporting files in a `references/` directory:
 
 ```python
-# Load a reference file from a local skill
-await load_skill(ctx, "skill://local/python-expert/references/pep8-guide.md")
+# Load a reference file from a skill
+await load_skill(ctx, "skill://python-expert/references/pep8-guide.md")
 
-# Load from MCP resource-based skill
-await load_skill(ctx, "skill://skills-server/pdf-processing/examples/sample.pdf")
+# Load any supporting file by path
+await load_skill(ctx, "skill://pdf-processing/examples/sample.pdf")
 ```
 
 ## URI Examples
 
-### Local Filesystem Skills
-
 ```
-skill://local/python-expert                          # Main skill
-skill://local/python-expert/SKILL.md                 # Explicit main file
-skill://local/python-expert/references/style-guide.md # Reference file
-skill://local/my%20skill                             # URL-encoded name
-```
-
-### MCP Prompt-Based Skills
-
-```
-skill://github-copilot/code-review     # Prompt exposed as skill
-skill://my-mcp/custom-prompt           # Custom MCP server prompt
-```
-
-### MCP Resource-Based Skills (FastMCP Skills Provider)
-
-```
-skill://skills-server/pdf-processing                 # Short form
-skill://skills-server/pdf-processing/SKILL.md        # Main skill file
-skill://skills-server/pdf-processing/_manifest       # JSON manifest
-skill://skills-server/pdf-processing/examples/doc.pdf # Reference
+skill://python-expert                          # Main skill
+skill://python-expert/SKILL.md                 # Explicit main file
+skill://python-expert/references/style-guide.md # Reference file
+skill://my%20skill                             # URL-encoded name
 ```
 
 ## Argument Substitution
@@ -189,7 +172,7 @@ To create a skill with supporting files:
 
 5. Access via URI:
    ```python
-   await load_skill(ctx, "skill://local/my-skill/references/guide.md")
+   await load_skill(ctx, "skill://my-skill/references/guide.md")
    ```
 
 ## MCP Skills Provider Protocol
@@ -218,8 +201,8 @@ agents:
     model: openai:gpt-4o
     tools:
       - type: skills
-    # Can now load skills from MCP server:
-    # skill://mcp-server-with-skills/pdf-processing
+    # Can now load skills from MCP server by flat URI:
+    # skill://pdf-processing
 ```
 
 ## Security Considerations
@@ -277,15 +260,12 @@ Output format:
 ```
 Available skills:
 
-## local (3 skills)
 - **python-expert**: Expert Python development techniques
-  URI: `skill://local/python-expert`
+  URI: `skill://python-expert`
 - **refactoring**: Safe code refactoring patterns
-  URI: `skill://local/refactoring`
-
-## github-copilot (2 skills)
+  URI: `skill://refactoring`
 - **code-review**: Automated code review
-  URI: `skill://github-copilot/code-review`
+  URI: `skill://code-review`
 ```
 
 ## Configuration Reference
@@ -302,30 +282,37 @@ agents:
         max_skills: 20
 ```
 
+!!! note
+    The `type: skills` toolset is deprecated — the `load_skill` / `list_skills`
+    tools are auto-provided by `SkillManagerCap`.
+
 See [Skills Configuration](./skills.md) for detailed configuration options.
 
 ## Migration Guide
 
-### From Bare Skill Names
+### From Provider-Scoped URIs
 
-Existing code using bare skill names continues to work:
+Earlier versions used a `skill://{provider}/{skill}` form. This is now a flat
+`skill://{skill}`:
 
 ```python
-# Before (still works)
-await load_skill(ctx, "python-expert")
-
-# After (new option)
+# Before (provider segment)
 await load_skill(ctx, "skill://local/python-expert")
+
+# After (flat URI)
+await load_skill(ctx, "skill://python-expert")
+
+# Bare name still works
+await load_skill(ctx, "python-expert")
 ```
 
 ### New Capabilities
 
-New features available with RFC-0020:
+New features available:
 
-1. **Explicit provider selection**: Use full URIs when multiple providers have the same skill
-2. **Reference content**: Access supporting files via URI paths
-3. **MCP skills**: Load skills from MCP servers using the same interface
-4. **Argument substitution**: Pass dynamic arguments to skills
+1. **Reference content**: Access supporting files via `skill://{skill}/references/...`
+2. **MCP skills**: Load skills from MCP servers using the same flat interface
+3. **Argument substitution**: Pass dynamic arguments to skills
 
 ## Troubleshooting
 
@@ -337,7 +324,7 @@ Skill not found: 'my-skill'. Available: python-expert, refactoring
 
 - Check skill name spelling
 - Verify skill exists with `list_skills`
-- Check provider name if using full URI
+- Use a bare name or flat `skill://{skill-name}` URI (no provider segment)
 
 ### Reference Not Found
 

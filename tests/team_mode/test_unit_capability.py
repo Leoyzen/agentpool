@@ -250,7 +250,7 @@ def _make_host_context(team_mode: Any) -> Any:
     """
     mock = MagicMock()
     mock.manifest.team_mode = team_mode
-    mock.skills_tools_provider = None
+    mock.skill_capabilities = []
     return mock
 
 

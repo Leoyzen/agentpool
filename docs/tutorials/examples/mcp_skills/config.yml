@@ -27,9 +27,9 @@ agents:
       You are an agent that can use skills from multiple sources.
 
       You have access to:
-      1. Local skills: skill://local/skill-name
-      2. MCP prompt-based skills: skill://mcp-server/prompt-name
-      3. MCP resource-based skills: skill://mcp-skills/skill-name
+      1. Local skills: skill://skill-name
+      2. MCP prompt-based skills: skill://skill-name
+      3. MCP resource-based skills: skill://skill-name
 
       When asked to use a skill, load it with the appropriate URI.
       If no source is specified, try the short name first (auto-routes).

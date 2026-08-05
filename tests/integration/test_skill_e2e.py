@@ -208,15 +208,11 @@ async def test_skill_uri_resolution_multiple_skills() -> None:
 
 
 def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> None:
-    """load_skill available in standalone Agent.from_config() (non-SessionPool path).
+    """load_skill is available via SkillManagerCap (not _inject_pool_providers).
 
-    Given _inject_pool_providers is called with a non-None
-    skills_tools_provider, When the agent's _external_capabilities
-    is checked, Then load_skill and list_skills tools are present
-    (via the injected provider).
-
-    This is verified by checking that the skills_tools_provider is
-    injected into _external_capabilities.
+    Given the unify-skill-loading change, load_skill and list_skills are
+    owned by SkillManagerCap (registered at pool scope). _inject_pool_providers
+    no longer injects skills_tools_provider.
     """
     from agentpool.host.factory import _inject_pool_providers
 
@@ -226,7 +222,6 @@ def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> No
 
     class FakeHostContext:
         def __init__(self) -> None:
-            self.skills_tools_provider = MagicMock(name="skills_tools_provider")
             self.mcp = MagicMock()
             self.mcp.get_aggregating_provider.return_value = None
 
@@ -236,9 +231,8 @@ def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> No
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=False)
 
-    # The skills_tools_provider should be injected.
-    assert len(agent._external_capabilities) == 1
-    assert agent._external_capabilities[0] is host_context.skills_tools_provider
+    # No skills_tools_provider injection (owned by SkillManagerCap now).
+    assert len(agent._external_capabilities) == 0
 
 
 # =========================================================================
@@ -247,14 +241,11 @@ def test_load_skill_available_in_standalone_agent(minimal_pool: AgentPool) -> No
 
 
 def test_load_skill_available_in_child_session_agent(minimal_pool: AgentPool) -> None:
-    """load_skill available in child session agent via _inject_pool_providers().
+    """MCP aggregating provider injected for child sessions (skills via cap).
 
-    Given _inject_pool_providers is called for a child session agent,
-    When the agent's _external_capabilities is checked, Then
-    skills_tools_provider is injected.
-
-    This ensures child session agents have access to load_skill and
-    list_skills tools.
+    Given _inject_pool_providers with include_aggregating=True, When
+    the agent's _external_capabilities is checked, Then only the MCP
+    aggregating provider is injected (skills come from SkillManagerCap).
     """
     from agentpool.host.factory import _inject_pool_providers
 
@@ -264,7 +255,6 @@ def test_load_skill_available_in_child_session_agent(minimal_pool: AgentPool) ->
 
     class FakeHostContext:
         def __init__(self) -> None:
-            self.skills_tools_provider = MagicMock(name="skills_tools_provider")
             self.mcp = MagicMock()
             self.mcp.get_aggregating_provider.return_value = MagicMock(name="mcp_aggregating")
 
@@ -274,9 +264,8 @@ def test_load_skill_available_in_child_session_agent(minimal_pool: AgentPool) ->
 
     _inject_pool_providers(agent, host_context, pool, include_aggregating=True)
 
-    # Both skills_tools_provider and mcp_aggregating should be injected.
-    assert len(agent._external_capabilities) == 2
-    assert host_context.skills_tools_provider in agent._external_capabilities
+    # Only MCP aggregating provider is injected (no skills_tools_provider).
+    assert len(agent._external_capabilities) == 1
 
 
 # =========================================================================

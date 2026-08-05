@@ -20,8 +20,8 @@ agents:
 
       You can:
       1. Load the main skill: "documentation-style-guide"
-      2. Load reference files: "skill://local/documentation-style-guide/references/headings.md"
-      3. Load examples: "skill://local/documentation-style-guide/references/examples/api-doc.md"
+      2. Load reference files: "skill://documentation-style-guide/references/headings.md"
+      3. Load examples: "skill://documentation-style-guide/references/examples/api-doc.md"
 
       When helping with documentation, load relevant references to provide guidance.
     tools:
@@ -37,9 +37,9 @@ agents:
       reference files bundled with skills.
 
       Use the load_skill tool with URI paths to access references:
-      - skill://local/documentation-style-guide/references/structure.md
-      - skill://local/documentation-style-guide/references/formatting.md
-      - skill://local/documentation-style-guide/references/examples/
+      - skill://documentation-style-guide/references/structure.md
+      - skill://documentation-style-guide/references/formatting.md
+      - skill://documentation-style-guide/references/examples/
 
       When asked about a skill's references, load them and summarize
       their content.

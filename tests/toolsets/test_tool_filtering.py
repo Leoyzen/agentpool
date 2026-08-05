@@ -20,10 +20,10 @@ async def test_subagent_tool_filtering():
     tool_names = {t.name for t in tools}
 
     assert "task" in tool_names
-    assert "list_available_nodes" in tool_names
+    assert "list_available_nodes" not in tool_names
 
     # Filtered config wraps in FilteredToolsetCapability
-    config = SubagentToolsetConfig(tools={"task": True, "list_available_nodes": False})
+    config = SubagentToolsetConfig(tools={"task": True})
     provider = config.get_provider()
     assert isinstance(provider, FilteredToolsetCapability)
 
@@ -31,30 +31,27 @@ async def test_subagent_tool_filtering():
     inner_tools = await provider.wrapped.get_tools()
     inner_names = {t.name for t in inner_tools}
     assert "task" in inner_names
-    assert "list_available_nodes" in inner_names
+    assert "list_available_nodes" not in inner_names
 
 
 async def test_skills_tool_filtering():
-    """Test filtering tools in skills toolset."""
-    # Unfiltered provider has all tools
+    """Test filtering in skills toolset (now empty — tools owned by SkillManagerCap)."""
+    # SkillsToolsetConfig.get_provider() now returns an empty
+    # FunctionToolsetCapability since load_skill/list_skills are owned
+    # by SkillManagerCap (unify-skill-loading change).
     config_all = SkillsToolsetConfig()
     provider_all = config_all.get_provider()
     tools = await provider_all.get_tools()
     tool_names = {t.name for t in tools}
 
-    assert "load_skill" in tool_names
-    assert "list_skills" in tool_names
+    # No tools from SkillsToolsetConfig anymore.
+    assert "load_skill" not in tool_names
+    assert "list_skills" not in tool_names
 
-    # Filtered config wraps in FilteredToolsetCapability
+    # Filtered config still wraps in FilteredToolsetCapability
     config = SkillsToolsetConfig(tools={"load_skill": False})
     provider = config.get_provider()
     assert isinstance(provider, FilteredToolsetCapability)
-
-    # Inner capability still has all tools
-    inner_tools = await provider.wrapped.get_tools()
-    inner_names = {t.name for t in inner_tools}
-    assert "load_skill" in inner_names
-    assert "list_skills" in inner_names
 
 
 async def test_code_toolset_filtering():

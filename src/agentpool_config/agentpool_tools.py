@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
+import warnings
 
 from exxec_config import ExecutionEnvironmentConfig  # noqa: TC002
 from pydantic import ConfigDict, Field
@@ -100,6 +101,11 @@ class AgentCliToolConfig(BaseToolConfig):
 class QuestionToolConfig(BaseToolConfig):
     """Configuration for user interaction tool.
 
+    .. deprecated::
+        Use ``capabilities: [{type: question}]`` instead of ``tools: [{type: question}]``.
+        The ``QuestionCapability`` provides the ``question`` tool with YAML
+        schema override support.
+
     Example:
         ```yaml
         tools:
@@ -113,7 +119,18 @@ class QuestionToolConfig(BaseToolConfig):
     """User interaction tool."""
 
     def get_tool(self) -> Tool:
-        """Convert config to QuestionTool instance."""
+        """Convert config to a question tool instance.
+
+        Emits a ``DeprecationWarning`` directing users to
+        ``capabilities: [{type: question}]``.
+        """
+        warnings.warn(
+            "tools: [{type: question}] is deprecated. "
+            "Use capabilities: [{type: question}] instead, which provides "
+            "the question tool.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from agentpool.tool_impls.question import create_question_tool
 
         return create_question_tool(

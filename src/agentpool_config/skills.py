@@ -29,11 +29,19 @@ class SkillsInstructionConfig(Schema):
     instructions. This enables agents to discover and use skills without
     explicit tool calls, making skill usage more natural and context-aware.
 
+    The static ``<available-skills>`` catalog (skill name + description) is
+    ALWAYS emitted; the ``inject`` field governs whether full
+    ``<skill_content>`` instructions are also added:
+
     Modes:
-    - "off": No dynamic skill injection (default, backward compatible)
-    - "metadata": Inject only skill metadata (name, description, triggers)
-    - "full": Inject complete skill content including prompts and examples
-      for maximum capability at the cost of more tokens
+    - "description" (default): catalog only — NO full ``<skill_content>``.
+      Full instructions are loaded on demand via ``load_skill``. This is the
+      token-saving default.
+    - "matcher": catalog + full instructions for skills selected by the
+      runtime-injected ``matcher_fn`` (non-serialized). Falls back to
+      ``description`` with a warning if no matcher is set.
+    - "all": catalog + full instructions for every skill (opt-in heaviest
+      mode; preserves legacy inject-all behavior).
     """
 
     model_config = ConfigDict(
@@ -42,6 +50,21 @@ class SkillsInstructionConfig(Schema):
             "x-doc-title": "Skills Instruction Configuration",
         }
     )
+
+    inject: Literal["description", "matcher", "all"] = Field(
+        default="description",
+        title="Skill content injection mode",
+        examples=["description", "matcher", "all"],
+    )
+    """Skill content injection mode.
+
+    Controls whether full ``<skill_content>`` instructions are injected into
+    the system prompt in addition to the static ``<available-skills>``
+    catalog:
+    - ``description`` (default): catalog only; full instructions on demand.
+    - ``matcher``: catalog + full instructions for matcher-selected skills.
+    - ``all``: catalog + full instructions for every skill (heaviest).
+    """
 
     max_skills: int = Field(
         default=20,

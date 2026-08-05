@@ -225,7 +225,7 @@ async def test_wrap_tool_execute_reraises_run_aborted_error(
     """wrap_tool_execute() must re-raise RunAbortedError, not swallow it.
 
     RunAbortedError is a control-flow exception raised when the user cancels
-    an elicitation/question (e.g. question_for_user cancel). It must propagate
+    an elicitation/question (e.g. question tool cancel). It must propagate
     up to NativeTurn.execute()'s except RunAbortedError handler to abort the
     run. If swallowed here, the LLM receives it as a tool error and continues
     executing.
@@ -234,8 +234,8 @@ async def test_wrap_tool_execute_reraises_run_aborted_error(
 
     cap = make_capability(mock_hook_manager)
     ctx = make_run_context()
-    call = make_tool_call("question_for_user")
-    tool_def = make_tool_def("question_for_user")
+    call = make_tool_call("question")
+    tool_def = make_tool_def("question")
     args: dict[str, Any] = {}
 
     async def aborting_handler(a: dict[str, Any]) -> Any:
@@ -265,8 +265,8 @@ async def test_wrap_tool_execute_reraises_model_retry(
     """
     cap = make_capability(mock_hook_manager)
     ctx = make_run_context()
-    call = make_tool_call("question_for_user")
-    tool_def = make_tool_def("question_for_user")
+    call = make_tool_call("question")
+    tool_def = make_tool_def("question")
     args: dict[str, Any] = {}
 
     async def retrying_handler(a: dict[str, Any]) -> Any:
@@ -330,8 +330,8 @@ async def test_wrap_tool_execute_reraises_call_deferred(
 
     cap = make_capability(mock_hook_manager)
     ctx = make_run_context()
-    call = make_tool_call("question_for_user")
-    tool_def = make_tool_def("question_for_user")
+    call = make_tool_call("question")
+    tool_def = make_tool_def("question")
     args: dict[str, Any] = {}
 
     async def deferring_handler(a: dict[str, Any]) -> Any:
@@ -397,8 +397,8 @@ async def test_wrap_tool_execute_reraises_tool_retry_error(
 
     cap = make_capability(mock_hook_manager)
     ctx = make_run_context()
-    call = make_tool_call("question_for_user")
-    tool_def = make_tool_def("question_for_user")
+    call = make_tool_call("question")
+    tool_def = make_tool_def("question")
     args: dict[str, Any] = {}
 
     async def retrying_handler(a: dict[str, Any]) -> Any:

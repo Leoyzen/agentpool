@@ -1,11 +1,9 @@
 """User interaction tools for asking questions via MCP Elicit.
 
-Provides two tools:
-- ``question_for_user``: Rich multi-question XML questionnaire with enum/multi/input types
-- ``ask_followup_question``: Simpler single-question tool with ``<suggest>`` options
-
-Both tools use ``AgentContext.handle_elicitation()`` to present forms to the user
-through the MCP Elicit protocol and collect structured responses.
+Provides a single ``question`` tool that supports rich multi-question XML
+questionnaires with enum/multi/input types.  Uses
+``AgentContext.handle_elicitation()`` to present forms to the user through the
+MCP Elicit protocol and collect structured responses.
 """
 
 from __future__ import annotations
@@ -247,54 +245,11 @@ def _format_question_response(questions: list[Question], result: Any) -> ToolRes
     raise RuntimeError(f"Unknown action: {action}")
 
 
-def _format_followup_response(result: Any) -> ToolResult:
-    """Format the elicitation result for a follow-up question.
-
-    Args:
-        result: Result from ctx.handle_elicitation (ElicitResult or ErrorData).
-
-    Returns:
-        ToolResult with the user's response.
-    """
-    if isinstance(result, ErrorData):
-        return ToolResult(
-            content=f"Error: {result.message}",
-            metadata={"answers": []},
-        )
-
-    action = result.action
-    match action:
-        case "accept":
-            content = result.content
-            if isinstance(content, dict) and "value" in content:
-                value = content["value"]
-                answer_str = str(value)
-            else:
-                answer_str = str(content)
-            return ToolResult(
-                content=answer_str,
-                metadata={"answers": [[answer_str]]},
-            )
-        case "cancel":
-            return ToolResult(
-                content="User cancelled the request",
-                metadata={"answers": []},
-            )
-        case "decline":
-            return ToolResult(
-                content="User declined to answer",
-                metadata={"answers": []},
-            )
-        case _ as unreachable:
-            raise RuntimeError(f"Unknown action: {unreachable}")
-
-
 class QuestionTools(FunctionToolsetCapability):
-    """Built-in toolset providing user interaction tools.
+    """Built-in toolset providing the user interaction ``question`` tool.
 
-    Exposes two tools via ``create_tool``:
-    - ``question_for_user``: Multi-question XML questionnaire with enum/multi/input types
-    - ``ask_followup_question``: Single question with ``<suggest>`` tag options
+    Exposes a single ``question`` tool via ``create_tool`` that accepts a
+    multi-question XML questionnaire with enum/multi/input types.
     """
 
     def __init__(
@@ -302,15 +257,14 @@ class QuestionTools(FunctionToolsetCapability):
         name: str = "question_tools",
     ) -> None:
         super().__init__(name=name)
-        self.create_tool(self.question_for_user, category="other")
-        self.create_tool(self.ask_followup_question, category="other")
+        self.create_tool(self.question, category="other")
 
-    async def question_for_user(  # noqa: D417
+    async def question(  # noqa: D417
         self,
         ctx: AgentContext,
         questions: str,
     ) -> ToolResult:
-        """Present questions to the user and collect responses.
+        """Ask the user one or more questions and collect their responses.
 
         Parses questions from XML format, presents them as a form via MCP Elicit,
         and returns the user's answers.
@@ -324,9 +278,17 @@ class QuestionTools(FunctionToolsetCapability):
                 </question>
             </questions>
 
+        For a single question you may omit the <questions> wrapper:
+
+            <question header='Confirm' type='enum'>
+                <text>Proceed?</text>
+                <suggest>Yes</suggest>
+                <suggest>No</suggest>
+            </question>
+
         Args:
             questions: XML string with a <questions> root element containing
-                one or more <question> tags.
+                one or more <question> tags (bare <question> tags also accepted).
         """
         try:
             parsed = parse_questionnaire(questions)
@@ -339,55 +301,3 @@ class QuestionTools(FunctionToolsetCapability):
         params = ElicitRequestFormParams(message=message, requestedSchema=schema)
         result = await ctx.handle_elicitation(params)
         return _format_question_response(parsed, result)
-
-    async def ask_followup_question(  # noqa: D417
-        self,
-        ctx: AgentContext,
-        question: str,
-        follow_up: str,
-    ) -> ToolResult:
-        """Ask a follow-up question with suggestions.
-
-        Parses suggestions from <suggest> tags and presents them to the user.
-
-        Args:
-            question: The main question to ask the user.
-            follow_up: Question text containing <suggest> tags.
-        """
-        import html
-        import re
-        from typing import cast
-
-        raw_suggestions = re.findall(r"<suggest\s*([^>]*)>(.*?)</suggest>", follow_up, re.DOTALL)
-        suggestions = cast(list[tuple[str, str]], raw_suggestions)
-
-        choices: list[str] = []
-        input_suggestion: str | None = None
-
-        for attr_str, content_raw in suggestions:
-            suggestion_content = html.unescape(content_raw).strip()
-            raw_attrs = re.findall(r'(\w+)="([^"]*)"', attr_str)
-            suggestion_attrs = dict(cast(list[tuple[str, str]], raw_attrs))
-
-            if suggestion_attrs.get("type") == "input":
-                input_suggestion = suggestion_content
-            else:
-                choices.append(suggestion_content)
-
-        # Map suggestions to a JSON schema enum
-        if choices:
-            schema: dict[str, Any] = {
-                "type": "string",
-                "enum": choices,
-            }
-            if input_suggestion and input_suggestion not in choices:
-                choices.append(input_suggestion)
-                schema["enum"] = choices
-        elif input_suggestion:
-            schema = {"type": "string", "default": input_suggestion}
-        else:
-            schema = {"type": "string"}
-
-        params = ElicitRequestFormParams(message=question, requestedSchema=schema)
-        result = await ctx.handle_elicitation(params)
-        return _format_followup_response(result)

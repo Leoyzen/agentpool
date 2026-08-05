@@ -1,0 +1,29 @@
+description: |-
+  Retrieve output from a background task. Use this tool to check the status and results
+  of tasks spawned with async_mode=true.
+
+  If the task is still running, the tool returns the current status. Set `block=true`
+  to wait for the task to complete before returning.
+
+name: background_output
+parameters:
+  type: object
+  properties:
+    task_id:
+      type: string
+      description: The ID of the background task to retrieve output from.
+    block:
+      type: boolean
+      description: |-
+        Whether to block until the task completes. When false (default), returns
+        immediately with the current status. When true, waits for the task to reach
+        a terminal state before returning.
+      default: false
+    timeout_seconds:
+      type: number
+      description: |-
+        Maximum seconds to wait when block=true. Defaults to 60 seconds.
+        Has no effect when block=false.
+      default: 60.0
+  required:
+    - task_id

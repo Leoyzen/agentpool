@@ -509,10 +509,12 @@ async def test_get_capabilities_caches_toolset_by_client_id() -> None:
 
 @pytest.mark.integration
 async def test_skills_providers_added_to_child_session() -> None:
-    """Rule 7: Skills tools provider is added to children.
+    """Rule 7: Skills are available to child sessions via SkillManagerCap.
 
-    The orchestrator adds ``pool.skills_tools_provider`` to child session
-    agents, so subagents can discover and use skills.
+    After the unify-skill-loading change, load_skill/list_skills are owned
+    by SkillManagerCap (registered at pool scope). _inject_pool_providers
+    no longer injects skills_tools_provider. Skills are accessible via
+    the ExtensionRegistry.
     """
     agent_config = NativeAgentConfig(
         name="test_agent",
@@ -537,27 +539,10 @@ async def test_skills_providers_added_to_child_session() -> None:
             parent_session_id=parent_session_id,
             agent_name="test_agent",
         )
-        child_agent = await session_pool.sessions.get_or_create_session_agent(child_session_id)
 
-        if pool.skills_tools_provider is not None:
-            # The skills_tools_provider may be added directly or wrapped in a
-            # CombinedToolsetCapability. In some controller paths (SessionController),
-            # the provider may not be added yet — this is a known limitation.
-            providers = child_agent._external_capabilities
-            found = pool.skills_tools_provider in providers
-            if not found:
-                from agentpool.capabilities.combined_toolset import CombinedToolsetCapability
-
-                for p in providers:
-                    if isinstance(p, CombinedToolsetCapability) and (
-                        pool.skills_tools_provider in p.capabilities
-                    ):
-                        found = True
-                        break
-            # Check if child has any tools providers (may be wrapped differently)
-            if not found:
-                # At minimum, child should have some external providers
-                assert len(providers) > 0, "Child must have external providers"
+        # SkillManagerCap is registered at pool scope; agents access it via
+        # ExtensionRegistry. Verify the pool has skill_capabilities.
+        assert len(pool.skill_capabilities) > 0
 
         await session_pool.shutdown()
 

@@ -805,7 +805,7 @@ class BaseTeam[TDeps, TResult](MessageNode[TDeps, TResult]):
 
     async def _load_skill_instructions(self, skill_name: str, member_name: str) -> str:
         pool = self._agent_pool
-        if pool is None or pool.skill_provider is None:
+        if pool is None or pool.skill_resolver is None:
             from agentpool.skills.exceptions import SkillNotFoundError
 
             raise SkillNotFoundError(skill_name)

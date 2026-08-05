@@ -34,7 +34,6 @@ def _make_host_context(session_pool: Any = None) -> HostContext:
         connection_registry=MagicMock(),
         mcp=MagicMock(),
         skills_registry=MagicMock(),
-        skills_tools_provider=None,
         prompt_manager=MagicMock(),
         process_manager=MagicMock(),
         file_ops=MagicMock(),

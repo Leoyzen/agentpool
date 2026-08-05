@@ -1,0 +1,18 @@
+description: |-
+  Cancel running background task(s). Provide a specific task_id to cancel one task,
+  or set cancel_all=true to cancel all running tasks.
+
+name: background_cancel
+parameters:
+  type: object
+  properties:
+    task_id:
+      type: string
+      description: |-
+        The ID of the background task to cancel. Not required when cancel_all is true.
+    cancel_all:
+      type: boolean
+      description: |-
+        When true, cancel all running background tasks. The task_id parameter is
+        ignored when this is set.
+      default: false

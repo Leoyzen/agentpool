@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable
 import contextlib
+from pathlib import PurePosixPath
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -17,7 +18,6 @@ from agentpool_toolsets.builtin import (
     CodeTools,
     DebugTools,
     ProcessManagementTools,
-    SkillsTools,
     SubagentTools,
     WorkersTools,
 )
@@ -123,30 +123,39 @@ class TestSubagentToolsAsCapability:
         assert isinstance(provider, AbstractCapability)
 
     async def test_toolset_contains_expected_tools(self) -> None:
-        """Capability toolset includes list_available_nodes and task tools."""
+        """Capability toolset includes task tool."""
         provider = SubagentTools()
         toolset = await _resolve_toolset(provider)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())
 
-        assert "list_available_nodes" in tools
+        assert "list_available_nodes" not in tools
         assert "task" in tools
 
 
 @pytest.mark.unit
 class TestSkillsToolsAsCapability:
-    """Tests for SkillsTools as a capability."""
+    """Tests for skill loading tools as a capability.
 
-    async def test_is_abstract_capability(self) -> None:
-        """SkillsTools is an AbstractCapability."""
-        provider = SkillsTools()
-        assert isinstance(provider, AbstractCapability)
+    SkillsTools has been consolidated into SkillManagerCap (unify-skill-loading).
+    These tests verify that load_skill and list_skills are exposed via
+    SkillManagerCap.get_toolset().
+    """
 
-    async def test_toolset_contains_expected_tools(self) -> None:
-        """Capability toolset includes load_skill and list_skills tools."""
-        provider = SkillsTools()
-        toolset = await _resolve_toolset(provider)
+    async def test_skill_manager_cap_exposes_load_and_list_tools(self) -> None:
+        """SkillManagerCap toolset includes load_skill and list_skills tools."""
+        from agentpool.capabilities.skill_manager_cap import SkillManagerCap
+        from agentpool.skills.skill import Skill
+
+        local_skill = Skill(
+            name="test-skill",
+            description="A test skill",
+            skill_path=PurePosixPath("skill://test-skill"),
+            instructions="Test instructions.",
+        )
+        cap = SkillManagerCap(local_skills={"test-skill": local_skill})
+        toolset = await _resolve_toolset(cap)
 
         assert toolset is not None
         tools = await toolset.get_tools(_make_run_context())

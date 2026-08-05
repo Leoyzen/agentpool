@@ -1,0 +1,80 @@
+description: |-
+  The task tool spawns a background subtask with a specialized mode. Unlike synchronous delegation, the background task runs independently and the caller receives a task_id immediately for later retrieval.
+
+  This tool is used to:
+  - Launch long-running subtasks that don't block the current agent.
+  - Parallelize work by spawning multiple background tasks.
+  - Decompose complex projects into concurrent, manageable pieces.
+  - Inject specialized skills into subagent context for domain-specific tasks.
+
+  ## Skills Usage
+
+  The `load_skills` parameter allows parent agents to inject specialized skill instructions
+  into the subagent's context. Skills provide domain-specific guidance, best practices,
+  and procedural knowledge to help the subagent complete the task effectively.
+
+  When to use skills:
+  - Task requires domain expertise (e.g., Git operations, Python coding)
+  - Subagent should follow specific guidelines or patterns
+  - Quality standards must be enforced (e.g., code review practices)
+
+  ## Background vs Synchronous
+
+  Set `async_mode` to `true` to run the task in the background. The tool returns a task_id
+  immediately. Use `background_output` to retrieve results and `background_cancel` to cancel.
+
+name: task
+parameters:
+  type: object
+  properties:
+    agent:
+      type: string
+      description: The specialized agent for the new task. Must be one of the available agents.
+    load_skills:
+      type: array
+      description: |
+        Skill names or skill:// URIs to inject. REQUIRED - pass [] if no skills needed.
+
+        Supports three formats:
+        - Bare name: "git-master" — loads the full SKILL.md
+        - Full URI: "skill://local/git-master" — loads the full SKILL.md
+        - Reference URI: "skill://local/git-master/references/guide.md" — loads only the referenced file
+      items:
+        type: string
+        description: Skill name or skill:// URI (e.g., "git-master", "skill://local/git-master/references/guide.md").
+    title:
+      type: string
+      description: |
+        Optional title for the subtask. This will be displayed in event outputs
+        and helps identify the purpose of the task. If not provided, a default
+        title will be generated from the task description.
+    message:
+      type: string
+      description: |
+        A clear, concise statement of what the task entails.
+
+        The initial instructions for this new task. Should be specific, precise, and concise.
+
+        The "message" must contain the following content:
+          - All necessary background information from the parent task or previous sub-tasks required to complete this task.
+          - The goal that this sub-task should achieve.
+          - In markdown format for readability.
+    expected_output:
+      type: string
+      description: |-
+        A precise definition of the successful outcome for this sub-task. The final result from the sub-task must strictly conform to this description. It should clearly and narrowly define:
+        - The specific work to be performed *only* within this sub-task.
+        - The exact format and content of the expected return value.
+        No deviations or additional work beyond this scope are permitted.
+    async_mode:
+      type: boolean
+      description: |-
+        When true, the task runs in the background and a task_id is returned immediately.
+        When false (default), the task runs synchronously and blocks until completion.
+      default: false
+  required:
+    - agent
+    - load_skills
+    - message
+    - expected_output
+  strict: true

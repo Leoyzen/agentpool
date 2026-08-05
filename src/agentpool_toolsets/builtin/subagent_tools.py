@@ -69,49 +69,7 @@ class SubagentTools(FunctionToolsetCapability):
     ) -> None:
         super().__init__(name=name)
         # create_tool already adds to _tools, no need to call add_tool
-        self.create_tool(
-            self.list_available_nodes, category="search", read_only=True, idempotent=True
-        )
         self.create_tool(self.task, category="other")
-
-    async def list_available_nodes(  # noqa: D417
-        self,
-        ctx: AgentContext,
-        node_type: Literal["all", "agent", "team"] = "all",
-        only_idle: bool = False,
-    ) -> str:
-        """List available agents and/or teams in the current pool.
-
-        Args:
-            node_type: Filter by node type - "all", "agent", or "team"
-            only_idle: If True, only returns nodes that aren't currently busy
-
-        Returns:
-            List of node names that can be used with the task tool
-        """
-        if ctx.pool is None:
-            msg = "No agent pool available"
-            raise ToolError(msg)
-        lines: list[str] = []
-        if node_type in ("all", "agent"):
-            for ag_name, ag_cfg in ctx.pool.manifest.agents.items():
-                lines.extend([
-                    f"name: {ag_name}",
-                    "type: agent",
-                    f"description: {ag_cfg.description or 'No description'}",
-                    "---",
-                ])
-
-        if node_type in ("all", "team"):  # List teams
-            for tm_name, tm_cfg in ctx.pool.manifest.teams.items():
-                lines.extend([
-                    f"name: {tm_name}",
-                    "type: team",
-                    f"description: {tm_cfg.description or 'No description'}",
-                    "---",
-                ])
-
-        return "\n".join(lines) if lines else "No nodes available"
 
     async def task(  # noqa: D417
         self,

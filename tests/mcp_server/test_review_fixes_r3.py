@@ -68,7 +68,7 @@ async def test_get_or_create_session_agent_does_not_recreate_cleaned_parent_sess
     )
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
+    mock_pool.skill_capabilities = []
     mock_pool.mcp = mcp_manager
     mock_pool.get_context.return_value = MagicMock()
     mock_pool._factory.create_session_agent = AsyncMock(return_value=parent_agent)
@@ -157,7 +157,7 @@ async def test_get_or_create_session_agent_reads_parent_snapshot_without_leaking
     )
     mock_pool.main_agent_name = "test_agent"
     mock_pool._config_file_path = None
-    mock_pool.skills_tools_provider = MagicMock()
+    mock_pool.skill_capabilities = []
     mock_pool.mcp = mcp_manager
     mock_pool.get_context.return_value = MagicMock()
     mock_pool._factory.create_session_agent = AsyncMock(return_value=parent_agent)

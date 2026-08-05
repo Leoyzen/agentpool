@@ -20,9 +20,9 @@ agents:
 
       Available loading methods:
       1. By short name: "python-expert" (auto-routes to first provider with match)
-      2. By full URI: "skill://local/python-expert" (explicit provider)
+      2. By full URI: "skill://python-expert" (explicit provider)
       3. With arguments: "greeting" with "Alice Company formal"
-      4. Reference content: "skill://local/python-expert/references/guide.md"
+      4. Reference content: "skill://python-expert/references/guide.md"
 
       When asked to load a skill, use the load_skill tool with the appropriate format.
     tools:
