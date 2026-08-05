@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -27,9 +28,24 @@ from pydantic_ai.capabilities import AbstractCapability
 from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
+from agentpool.capabilities.viking.ingest import (
+    _MEMORY_INTENT_TEMPLATE,
+    _extract_conversation_pairs,
+    _ingest_conversation,
+    _sanitize_message,
+    format_memory_diff_summary,
+    read_memory_diff,
+)
 from agentpool.log import get_logger
 
 logger = get_logger(__name__)
+
+# Maximum consecutive failed remember drains before pending reasons are
+# dropped. Bounds the marker accumulation on a persistently failing server.
+_REMEMBER_MAX_RETRIES = 3
+
+# Time budget for the background memory-diff notification task.
+_REMEMBER_NOTIFY_TIMEOUT = 30.0
 
 
 if TYPE_CHECKING:
@@ -193,6 +209,11 @@ class VikingCapability(AbstractCapability[Any]):
     """Source type metadata for ingested sessions."""
     auto_ingest_keep_recent_turns: int = 0
     """Number of recent turns to retain after commit. 0 = no retention."""
+    remember_notify: bool = True
+    """When ``True`` (default), notify the session of an ingested memory's
+    captured URIs (added/updated/deleted) via the session steer channel
+    once the background extraction completes. Set to ``False`` to silence
+    the notification — memories are still captured either way."""
     _client: Any = field(default=None, repr=False)
     _owns_client: bool = field(default=True, repr=False)
     _identity: VikingIdentity | None = field(default=None, repr=False)
@@ -204,8 +225,15 @@ class VikingCapability(AbstractCapability[Any]):
     _last_ingested_idx: int = field(default=0, repr=False)
     """Cursor tracking the last message index ingested to Viking.
     Reset to 0 on each per-run copy via ``for_run()``."""
-    _pending_conversation: list[dict[str, str]] | None = field(default=None, repr=False)
-    """Pending conversation pairs not yet ingested (for last-turn flush)."""
+    _remember_pending: list[str] = field(default_factory=list, repr=False)
+    """Reasons queued by ``viking_remember`` calls for deferred capture.
+    Drained at the next ``before_model_request`` boundary (or flushed in
+    ``after_run``). Cleared only on a successful commit — a failed drain
+    retains them so the retry keeps its ``<memory-intent>`` markers."""
+    _remember_drain_failures: int = field(default=0, repr=False)
+    """Consecutive failed remember drains in this run. When it reaches
+    ``_REMEMBER_MAX_RETRIES``, pending reasons are dropped with a warning
+    to avoid unbounded marker accumulation on a failing server."""
     _pending_tasks: set[asyncio.Task[None]] = field(default_factory=set, repr=False)
     """References to fire-and-forget ingestion tasks. Prevents GC and
     enables ``after_run()`` to await them before client teardown."""
@@ -436,7 +464,8 @@ class VikingCapability(AbstractCapability[Any]):
             _identity=self._identity,
             _profile_injected=False,
             _last_ingested_idx=0,
-            _pending_conversation=None,
+            _remember_pending=[],
+            _remember_drain_failures=0,
             _pending_tasks=set(),
         )
 
@@ -1024,6 +1053,7 @@ class VikingCapability(AbstractCapability[Any]):
 
         Executes all enabled handlers in order (D7):
 
+        0. Remember drain (capture deferred ``viking_remember`` intents)
         1. Auto-ingest (process previous turn, fire-and-forget)
         2. Profile injection (add static profile, first turn only)
         3. Auto-recall (add dynamic recalled memories)
@@ -1048,11 +1078,246 @@ class VikingCapability(AbstractCapability[Any]):
             return request_context
 
         with logfire.span("viking.before_model_request"):
+            request_context = await self._handle_remember_drain(ctx, request_context)
             request_context = await self._handle_auto_ingest(ctx, request_context)
             request_context = await self._handle_profile_inject(ctx, request_context)
             request_context = await self._handle_auto_recall(ctx, request_context)
             request_context = await self._handle_compaction(ctx, request_context)
             return await self._handle_multimodal_bridge(ctx, request_context)
+
+    async def _handle_remember_drain(
+        self,
+        ctx: RunContext[Any],
+        request_context: ModelRequestContext,
+    ) -> ModelRequestContext:
+        """Capture conversations queued by ``viking_remember`` calls.
+
+        Runs as step 0 of ``before_model_request`` — before auto-ingest —
+        so it drains first and advances the shared cursor, making the
+        auto-ingest range disjoint. Independent of ``auto_ingest_enabled``.
+
+        Extracts the real conversation pairs since ``_last_ingested_idx``,
+        appends one ``<memory-intent>`` marker per pending reason, and
+        sanitizes unconditionally (deferred capture runs after recall /
+        profile injection, so injected blocks must always be stripped to
+        avoid re-ingesting them). The commit is awaited synchronously —
+        only an HTTP round-trip; Phase 2 extraction is not awaited. On
+        success the cursor advances and pending reasons clear; on failure
+        both are left intact for the next boundary's retry (bounded by
+        ``_REMEMBER_MAX_RETRIES``). A background task then polls the
+        extraction task and steers the resulting memory diff into the
+        session when ``remember_notify`` is enabled.
+
+        Args:
+            ctx: The pydantic-ai run context.
+            request_context: The model request context containing messages.
+
+        Returns:
+            The unchanged ``request_context`` (ingestion does not modify
+            the request context).
+        """
+        if not self._remember_pending:
+            return request_context
+
+        messages = request_context.messages
+        current_count = len(messages)
+        if current_count <= self._last_ingested_idx:
+            return request_context
+
+        reasons = list(self._remember_pending)
+        pairs = _extract_conversation_pairs(messages, self._last_ingested_idx)
+        if not pairs:
+            self._remember_pending = reasons
+            return request_context
+
+        # Sanitize unconditionally (D5), then append intent markers.
+        pairs = [{"role": p["role"], "content": _sanitize_message(p["content"])} for p in pairs]
+        for reason in reasons:
+            if reason:
+                pairs.append({
+                    "role": "user",
+                    "content": _MEMORY_INTENT_TEMPLATE.format(reason=reason),
+                })
+
+        try:
+            client = await self._ensure_client()
+        except Exception:
+            logger.warning("remember: failed to ensure client", exc_info=True)
+            self._mark_remember_failure(reasons)
+            return request_context
+
+        session_id = f"remember-{uuid.uuid4().hex[:12]}"
+        try:
+            commit_result = await _ingest_conversation(
+                client,
+                pairs,
+                session_id=session_id,
+                source_type="remember",
+            )
+        except Exception:
+            logger.warning("remember: ingestion failed", exc_info=True)
+            self._mark_remember_failure(reasons)
+            return request_context
+
+        # Success — advance cursor and clear reasons atomically.
+        self._last_ingested_idx = current_count
+        self._remember_pending = []
+        self._remember_drain_failures = 0
+        self._spawn_memory_notify(ctx, client, commit_result)
+        return request_context
+
+    def _mark_remember_failure(self, reasons: list[str]) -> None:
+        """Record a failed remember drain, capping retries.
+
+        ``_remember_pending`` was snapshotted but never cleared at drain
+        start, so on failure it already holds the original reasons
+        untouched — the retry at the next boundary re-extracts the same
+        range with the same ``<memory-intent>`` markers. Only the retry
+        cap (``_REMEMBER_MAX_RETRIES`` consecutive failures) drops them,
+        with a warning, to bound accumulation on a failing server.
+
+        Args:
+            reasons: The snapshot of reasons from the failed drain (used
+                for the drop warning).
+        """
+        self._remember_drain_failures += 1
+        if self._remember_drain_failures >= _REMEMBER_MAX_RETRIES:
+            logger.warning(
+                "remember: %d consecutive drain failures — dropping %d pending reason(s)",
+                self._remember_drain_failures,
+                len(reasons),
+            )
+            self._remember_pending = []
+
+    def _spawn_memory_notify(self, ctx: RunContext[Any], client: Any, commit_result: Any) -> None:
+        """Spawn the background memory-diff notification task.
+
+        Best-effort: skips silently when notifications are disabled, the
+        commit result carries no archive/task ids, or no steer channel is
+        available. The task self-bounds via ``_REMEMBER_NOTIFY_TIMEOUT``
+        and is intentionally not tracked in ``_pending_tasks`` (that flush
+        exists for commit tasks; steering is a post-commit notification).
+
+        Args:
+            ctx: The pydantic-ai run context (used to capture the steer
+                channel and run session id at drain time).
+            client: The SDK client used for the commit.
+            commit_result: The ``commit_session`` response.
+        """
+        if not self.remember_notify or not isinstance(commit_result, dict):
+            return
+        if not commit_result.get("archive_uri") or not commit_result.get("task_id"):
+            return
+        session_pool, run_session_id = self._capture_steer_channel(ctx)
+        if session_pool is None or run_session_id is None:
+            return
+        # Spawn bounded (30s) background notification. Intentional: not
+        # tracked in _pending_tasks — that flush exists for commit tasks
+        # and would time out on this task's poll duration. The task body
+        # runs under its own logfire span; asyncio holds a reference while
+        # it is pending and the concrete task object is not referenced
+        # further.
+        notify_task = asyncio.create_task(
+            self._notify_memory_diff(client, commit_result, session_pool, run_session_id)
+        )
+        logger.debug("remember: notification task %s spawned", id(notify_task))
+
+    @staticmethod
+    def _capture_steer_channel(ctx: RunContext[Any]) -> tuple[Any, str | None]:
+        """Capture the session steer channel and run session id at drain time.
+
+        Follows the DCP nudge pattern: ``ctx.deps.node.host_context`` →
+        ``session_pool``. Defensive because the viking deps type is not
+        guaranteed to carry ``node`` (tests use bare deps).
+
+        Args:
+            ctx: The pydantic-ai run context.
+
+        Returns:
+            A ``(session_pool_or_None, run_session_id_or_None)`` tuple.
+        """
+        from agentpool.capabilities.viking.tools import _get_session_id
+
+        run_session_id = _get_session_id(ctx)
+        try:
+            host_ctx = ctx.deps.node.host_context
+        except AttributeError:
+            host_ctx = None
+        session_pool = host_ctx.session_pool if host_ctx is not None else None
+        return session_pool, run_session_id
+
+    async def _notify_memory_diff(
+        self,
+        client: Any,
+        commit_result: dict[str, Any],
+        session_pool: Any,
+        run_session_id: str,
+    ) -> None:
+        """Poll the extraction task, then steer the memory diff summary.
+
+        Runs as a background task after a successful remember commit.
+        Waits for the asynchronous Phase 2 extraction to finish, reads
+        ``{archive_uri}/memory_diff.json``, formats the added/updated/
+        deleted URIs, and steers them into the session via the session
+        pool's background-task entry point (which survives run
+        boundaries and falls back to the session's feedback queue).
+
+        Args:
+            client: The SDK client used for the commit.
+            commit_result: The ``commit_session`` response.
+            session_pool: The captured ``SessionPool`` (or compatible).
+            run_session_id: The run session id to steer into.
+        """
+        with logfire.span("viking.memory_diff_notify"):
+            archive_uri = commit_result.get("archive_uri")
+            task_id = commit_result.get("task_id")
+            try:
+                if not await self._wait_for_extraction(client, task_id):
+                    return
+                diff = await read_memory_diff(client, str(archive_uri))
+                summary = format_memory_diff_summary(diff)
+                if not summary:
+                    logger.debug("remember: memory diff empty — notify skipped")
+                    return
+                await session_pool.steer_from_background_task(run_session_id, summary)
+            except Exception:
+                logger.warning("remember: memory notification failed", exc_info=True)
+
+    @staticmethod
+    async def _wait_for_extraction(
+        client: Any,
+        task_id: str | None,
+        *,
+        timeout: float = _REMEMBER_NOTIFY_TIMEOUT,
+        interval: float = 1.0,
+    ) -> bool:
+        """Poll the extraction task until it completes or times out.
+
+        Args:
+            client: The SDK client used for the commit.
+            task_id: The extraction task id from ``commit_session``.
+            timeout: Maximum total wait in seconds.
+            interval: Poll interval in seconds.
+
+        Returns:
+            ``True`` when the task reached a completed state.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                resp = await client._request("GET", f"/tasks/{task_id}")
+            except Exception:
+                logger.warning("remember: extraction poll failed", exc_info=True)
+                return False
+            status = _extract_task_status(resp)
+            if status in ("completed", "succeeded", "done"):
+                return True
+            if status in ("failed", "error", "cancelled"):
+                logger.warning("remember: extraction task ended with status %r", status)
+                return False
+            await asyncio.sleep(interval)
+        logger.warning("remember: extraction poll timed out after %.0fs", timeout)
+        return False
 
     async def _handle_multimodal_bridge(
         self,
@@ -1360,12 +1625,6 @@ class VikingCapability(AbstractCapability[Any]):
         if not self.auto_ingest_enabled:
             return request_context
 
-        from agentpool.capabilities.viking.ingest import (
-            _extract_conversation_pairs,
-            _ingest_conversation,
-            _sanitize_message,
-        )
-
         messages = request_context.messages
         current_count = len(messages)
 
@@ -1383,9 +1642,6 @@ class VikingCapability(AbstractCapability[Any]):
         # Sanitize messages if enabled
         if self.auto_ingest_sanitize:
             pairs = [{"role": p["role"], "content": _sanitize_message(p["content"])} for p in pairs]
-
-        # Store pending conversation for last-turn flush
-        self._pending_conversation = pairs
 
         # Update cursor BEFORE ingestion to prevent retries on failure
         self._last_ingested_idx = current_count
@@ -1426,12 +1682,18 @@ class VikingCapability(AbstractCapability[Any]):
         *,
         result: Any,
     ) -> Any:
-        """Flush pending ingestion tasks before the run completes.
+        """Flush pending ingestion before the run completes.
 
-        Awaits all fire-and-forget ingestion tasks with a 5-second
-        timeout. This fires while the client is still alive (unlike
-        ``__aexit__`` which runs after the parent may have closed the
-        client). Logs a warning if the flush times out or fails.
+        Two-step close-out, order matters:
+
+        1. Await all fire-and-forget commit tasks (existing 5-second
+           flush). Awaited FIRST so an auto-ingest task that claimed a
+           message range but failed can't leave a gap the advanced cursor
+           says is covered.
+        2. Tail-flush: drain any pending remember intent plus any
+           un-ingested trailing messages (``[cursor, end]``) in a final
+           synchronous commit. Closes the historical gap where the final
+           assistant message of a run was never ingested.
 
         Args:
             ctx: The pydantic-ai run context.
@@ -1440,20 +1702,72 @@ class VikingCapability(AbstractCapability[Any]):
         Returns:
             The unchanged ``result``.
         """
-        if not self._pending_tasks:
-            return result
+        if self._pending_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._pending_tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "auto_ingest: flush timed out after 5s — %d tasks pending",
+                    len(self._pending_tasks),
+                )
+            except Exception:
+                logger.warning("auto_ingest: flush failed", exc_info=True)
         try:
-            await asyncio.wait_for(
-                asyncio.gather(*self._pending_tasks, return_exceptions=True),
-                timeout=5.0,
-            )
-        except TimeoutError:
-            logger.warning(
-                "auto_ingest: flush timed out after 5s — %d tasks pending", len(self._pending_tasks)
-            )
+            await self._flush_tail(ctx)
         except Exception:
-            logger.warning("auto_ingest: flush failed", exc_info=True)
+            logger.warning("remember: tail-flush failed", exc_info=True)
         return result
+
+    async def _flush_tail(self, ctx: RunContext[Any]) -> None:
+        """Flush pending remember intent and trailing messages at run end.
+
+        Captures ``[cursor, end]`` (including the final assistant message,
+        which never existed at any earlier ``before_model_request``) plus
+        any pending ``<memory-intent>`` markers, in one synchronous commit.
+        Sanitizes unconditionally. On success advances the cursor; on
+        failure logs — the run is over, so there is nothing to retry.
+
+        Gated on active ingestion only: runs when ``auto_ingest_enabled``
+        (closing the final-turn cursor gap for automatic capture) or when
+        a remember intent is pending (flushing the last-moment capture).
+        When both are off the run's conversation is never auto-captured.
+
+        Args:
+            ctx: The pydantic-ai run context.
+        """
+        if not self.auto_ingest_enabled and not self._remember_pending:
+            return
+
+        messages = ctx.messages
+        current_count = len(messages)
+        if current_count <= self._last_ingested_idx and not self._remember_pending:
+            return
+
+        reasons = list(self._remember_pending)
+        self._remember_pending = []
+        pairs = _extract_conversation_pairs(messages, self._last_ingested_idx)
+        if not pairs:
+            return
+        pairs = [{"role": p["role"], "content": _sanitize_message(p["content"])} for p in pairs]
+        for reason in reasons:
+            if reason:
+                pairs.append({
+                    "role": "user",
+                    "content": _MEMORY_INTENT_TEMPLATE.format(reason=reason),
+                })
+
+        client = await self._ensure_client()
+        session_id = f"remember-{uuid.uuid4().hex[:12]}"
+        await _ingest_conversation(
+            client,
+            pairs,
+            session_id=session_id,
+            source_type="remember",
+        )
+        self._last_ingested_idx = current_count
 
 
 def _normalize_search_results(results: Any) -> list[dict[str, Any]]:
@@ -1483,6 +1797,27 @@ def _normalize_search_results(results: Any) -> list[dict[str, Any]]:
     if isinstance(results, list):
         return results
     return []
+
+
+def _extract_task_status(resp: Any) -> str | None:
+    """Extract a task status string from a raw poll response.
+
+    Handles both dict responses and ``httpx.Response`` objects (the
+    identity resolver establishes that ``_request`` returns the latter),
+    checking the common ``status`` / ``state`` keys.
+
+    Args:
+        resp: The raw response from ``client._request("GET", ...)``.
+
+    Returns:
+        The status string, or ``None`` when it cannot be determined.
+    """
+    if hasattr(resp, "json"):
+        resp = resp.json()
+    if isinstance(resp, dict):
+        status = resp.get("status") or resp.get("state")
+        return str(status) if status else None
+    return None
 
 
 def _guess_extension(media_type: str) -> str:
