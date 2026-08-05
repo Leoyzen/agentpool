@@ -16,7 +16,7 @@ import uuid
 from pydantic_ai.messages import BinaryImage, ToolReturn
 from pydantic_ai.tools import RunContext  # noqa: TC002 - needed at runtime for get_type_hints()
 
-from agentpool.capabilities.viking.constants import _IMAGE_MIME_TYPES, IMAGE_EXTENSIONS
+from agentpool.capabilities.viking.constants import IMAGE_EXTENSIONS, IMAGE_MIME_TYPES
 from agentpool.capabilities.viking.utils import (
     add_line_numbers,
     format_glob_results,
@@ -431,9 +431,13 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                 image_parts: list[BinaryImage] = []
                 for u in uri_list:
                     is_image = _is_image_resource(u)
-                    if is_image and not cap._should_return_image_bytes():
+                    suffix = PurePosixPath(u).suffix.lower()
+                    # SVG is a vector format most vision APIs reject — it
+                    # never enters the byte path, always degrades to a text
+                    # hint, regardless of the support_vision / model caps.
+                    if is_image and (not cap._should_return_image_bytes() or suffix == ".svg"):
                         # Image resource but the model can't consume image
-                        # bytes (or forced text) — return a text URI hint.
+                        # bytes (or forced text / vector SVG) — text URI hint.
                         if len(uri_list) > 1:
                             sections.append(f"=== {u} ===\n{_image_uri_hint(u)}")
                         else:
@@ -443,14 +447,15 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
                     if is_image:
                         # Image resource and the model accepts image bytes.
                         data = await client.download_bytes(u)
-                        media_type = _IMAGE_MIME_TYPES.get(
+                        media_type = IMAGE_MIME_TYPES.get(
                             PurePosixPath(u).suffix.lower(), "application/octet-stream"
                         )
+                        image_idx = len(image_parts) + 1  # 1-based, matches content order
                         image_parts.append(BinaryImage(data=data, media_type=media_type))
                         if len(uri_list) > 1:
-                            sections.append(f"=== {u} ===\n[Image: {media_type}]")
+                            sections.append(f"=== {u} ===\n[Image #{image_idx}: {media_type}]")
                         else:
-                            sections.append(f"[Image: {media_type}]")
+                            sections.append(f"[Image #{image_idx}: {media_type}]")
                         continue
 
                     if level == "abstract":

@@ -13,8 +13,9 @@ from __future__ import annotations
 # the server's ``IMAGE_EXTENSIONS`` — extension is the authoritative signal
 # since the server's ``stat`` API exposes no MIME field.
 #
-# ``.svg`` is intentionally excluded from byte-return candidates: it is a
-# vector format most vision APIs reject. See ``VikingCapability._should_return_image_bytes``.
+# ``.svg`` IS included (matching the server), but is a vector format most
+# vision APIs reject, so ``viking_read`` downgrades SVG URIs to a text hint
+# and never returns bytes for them. See ``_should_return_image_bytes``.
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".png",
     ".jpg",
@@ -22,6 +23,7 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".gif",
     ".bmp",
     ".webp",
+    ".svg",
     ".tiff",
     ".tif",
     ".ico",
@@ -30,7 +32,7 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset({
 
 # MIME mapping for the byte-return image extensions above. Unknown
 # extensions fall back to ``application/octet-stream``.
-_IMAGE_MIME_TYPES: dict[str, str] = {
+IMAGE_MIME_TYPES: dict[str, str] = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",

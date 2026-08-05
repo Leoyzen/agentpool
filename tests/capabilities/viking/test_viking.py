@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic import ValidationError
+from pydantic_ai.messages import BinaryImage
 from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.models.test import TestModel
 import pytest
@@ -742,6 +743,219 @@ class TestRetrieveTools:
         result = await read_tool(ctx, uris="viking://single.md")
 
         assert "===" not in result.return_value
+
+    # ------------------------------------------------------------------
+    # viking_read image branch (support_vision)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_support_vision_true(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """support_vision=True returns BinaryImage with correct data & mime."""
+        viking_cap.support_vision = True
+        mock_client.download_bytes = AsyncMock(return_value=b"\x89PNG-fake-image-bytes")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://photo.png")
+
+        mock_client.download_bytes.assert_called_once_with("viking://photo.png")
+        mock_client.read.assert_not_called()
+        assert result.content is not None
+        parts = list(result.content)
+        assert any(isinstance(p, BinaryImage) for p in parts)
+        img = next(p for p in parts if isinstance(p, BinaryImage))
+        assert img.data == b"\x89PNG-fake-image-bytes"
+        assert img.media_type == "image/png"
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_support_vision_false(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """support_vision=False returns text URI hint, no download."""
+        viking_cap.support_vision = False
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://photo.png")
+
+        mock_client.download_bytes.assert_not_called()
+        mock_client.read.assert_not_called()
+        assert result.content is None
+        assert "viking://photo.png" in result.return_value
+        assert "Image resource" in result.return_value
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_auto_vision_model(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """support_vision=None + image_input=True returns image bytes."""
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        viking_cap.support_vision = None
+        viking_cap.model_capabilities = ModelCapabilities(image_input=True)
+        mock_client.download_bytes = AsyncMock(return_value=b"webp-data")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://pic.webp")
+
+        parts = list(result.content) if result.content is not None else []
+        assert any(isinstance(p, BinaryImage) for p in parts)
+        img = next(p for p in parts if isinstance(p, BinaryImage))
+        assert img.media_type == "image/webp"
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_auto_text_only_model(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """support_vision=None + image_input=False returns text URI hint."""
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        viking_cap.support_vision = None
+        viking_cap.model_capabilities = ModelCapabilities(image_input=False)
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://photo.png")
+
+        assert result.content is None
+        assert "Image resource" in result.return_value
+        mock_client.download_bytes.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_viking_read_non_image_ignores_support_vision(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Non-image URIs keep the text path regardless of the switch."""
+        viking_cap.support_vision = True
+        mock_client.read = AsyncMock(return_value="text content")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://doc.md")
+
+        mock_client.download_bytes.assert_not_called()
+        mock_client.read.assert_called_once()
+        assert result.content is None
+        assert "text content" in result.return_value
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_download_error(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """download_bytes failure returns viking_read error text, no raise."""
+        viking_cap.support_vision = True
+        mock_client.download_bytes = AsyncMock(side_effect=RuntimeError("boom"))
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://photo.png")
+
+        assert "viking_read error" in result.return_value
+        assert "boom" in result.return_value
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_mixed_uris(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Mixed image + text URIs: image bytes + text sections, order kept."""
+        viking_cap.support_vision = True
+        mock_client.read = AsyncMock(return_value="doc body")
+        mock_client.download_bytes = AsyncMock(return_value=b"img-bytes")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris=["viking://a.md", "viking://photo.jpg", "viking://b.md"])
+
+        assert mock_client.read.call_count == 2
+        mock_client.download_bytes.assert_called_once_with("viking://photo.jpg")
+        assert "=== viking://photo.jpg ===" in result.return_value
+        parts = list(result.content) if result.content is not None else []
+        assert any(isinstance(p, BinaryImage) for p in parts)
+
+    @pytest.mark.asyncio
+    async def test_viking_read_multi_image_index_maps_to_content_order(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Multi-image reads: #N markers in return_value map to content order.
+
+        The text return_value must carry indexed markers ([Image #1], [#2], ...)
+        in URIs order, and the BinaryImage parts in ToolReturn.content must
+        follow the same order — so the model can disambiguate which image
+        belongs to which URI.
+        """
+        viking_cap.support_vision = True
+        mock_client.download_bytes = AsyncMock(side_effect=[b"a-bytes", b"b-bytes", b"c-bytes"])
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(
+            ctx,
+            uris=[
+                "viking://one.png",
+                "viking://two.png",
+                "viking://three.png",
+            ],
+        )
+
+        # Markers appear in URI order, 1-based.
+        rv = result.return_value
+        i1, i2, i3 = rv.index("[Image #1"), rv.index("[Image #2"), rv.index("[Image #3")
+        assert i1 < i2 < i3
+        # Content mirrors the same order.
+        imgs = [p for p in (result.content or []) if isinstance(p, BinaryImage)]
+        assert [p.data for p in imgs] == [b"a-bytes", b"b-bytes", b"c-bytes"]
+        assert [p.media_type for p in imgs] == ["image/png"] * 3
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_svg_never_returns_bytes(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """SVG images degrade to text URI hint even with support_vision=True."""
+        viking_cap.support_vision = True
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        result = await read_tool(ctx, uris="viking://diagram.svg")
+
+        mock_client.download_bytes.assert_not_called()
+        assert result.content is None
+        assert "Image resource" in result.return_value
+
+    @pytest.mark.asyncio
+    async def test_viking_read_image_jpeg_mime_extension_map(
+        self, viking_cap: VikingCapability, mock_client: AsyncMock
+    ) -> None:
+        """Unknown image extension falls back to application/octet-stream."""
+        viking_cap.support_vision = True
+        mock_client.download_bytes = AsyncMock(return_value=b"raw-bytes")
+        tools = build_tools(viking_cap)
+        read_tool = _get_tool(tools, "viking_read")
+
+        ctx = _make_ctx()
+        await read_tool(ctx, uris="viking://data.xyz")
+
+        # .xyz is not a known image extension → text path untouched.
+        mock_client.read = AsyncMock(return_value="content")
+        result2 = await read_tool(ctx, uris="viking://data.xyz")
+        assert result2.content is None
+
+        # .jpeg maps to image/jpeg.
+        result3 = await read_tool(ctx, uris="viking://pic.jpeg")
+        parts = list(result3.content) if result3.content is not None else []
+        img = next(p for p in parts if isinstance(p, BinaryImage))
+        assert img.media_type == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------

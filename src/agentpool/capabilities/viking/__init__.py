@@ -28,7 +28,7 @@ from pydantic_ai.toolsets import AgentToolset, FunctionToolset
 
 from agentpool.capabilities.viking.constants import (
     IMAGE_EXTENSIONS as IMAGE_EXTENSIONS,
-    _IMAGE_MIME_TYPES as _IMAGE_MIME_TYPES,
+    IMAGE_MIME_TYPES as IMAGE_MIME_TYPES,
 )
 from agentpool.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
 from agentpool.log import get_logger
