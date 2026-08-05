@@ -243,6 +243,86 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         return resolve_agent_context_from_deps(ctx.deps, capability_name="TeamCommCapability")
 
+    async def _format_member_skills_instructions(
+        self,
+        ctx: RunContext[Any],
+        skill_names: list[str],
+        member_agent: str,
+    ) -> str:
+        """Render skill instructions as XML blocks for a member's system prompt.
+
+        Loads each skill via ``load_skill_for_node`` with the *member's* node
+        name so package-scope visibility is checked against the member agent,
+        not the lead. Supports bare skill names and ``skill://`` URIs
+        (including reference paths). Deduplicates by display name, preserving
+        first-occurrence order. Failures degrade to readable error text — they
+        never raise (member creation must not abort).
+
+        Skill resolution uses the runtime ``AgentContext`` carried by
+        ``ctx.deps`` (the object exposing ``.pool``) — NOT the capability-layer
+        ``AgentContextDeps`` (frozen dataclass without ``.pool``). See
+        ``resolve_agent_context_from_deps`` for the relationship.
+
+        Args:
+            ctx: pydantic-ai run context whose ``deps`` is the runtime
+                ``AgentContext`` (mocked in unit tests).
+            skill_names: Bare skill names or ``skill://`` URIs to inject.
+            member_agent: Registry name of the member agent; its node scope
+                governs skill visibility.
+
+        Returns:
+            Newline-joined ``<skill-instruction name="...">...</skill-instruction>``
+            blocks, or ``""`` when no skills are requested.
+        """
+        from agentpool.skills.uri_resolver import ResolvedSkillURI
+        from agentpool_toolsets.builtin.skills import load_skill_for_node
+
+        if not skill_names:
+            return ""
+
+        sections: list[str] = []
+        # Dedupe preserving first-occurrence order (spec: duplicate skill
+        # names SHALL be injected exactly once).
+        unique_names = list(dict.fromkeys(skill_names))
+        skill_ctx: Any = ctx.deps  # RuntimeAgentContext with .pool; mocked in unit tests
+        for skill_name in unique_names:
+            # Clean display name for the XML attribute.
+            try:
+                resolved = ResolvedSkillURI.parse(skill_name)
+                display_name = resolved.skill_name
+                if resolved.reference_path:
+                    display_name = f"{resolved.skill_name}/{resolved.reference_path}"
+            except Exception:  # noqa: BLE001
+                display_name = skill_name
+
+            try:
+                instructions = await load_skill_for_node(
+                    skill_ctx,
+                    skill_name,
+                    node_name=member_agent,
+                    include_assembly=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                instructions = (
+                    f"Error: Failed to load skill '{skill_name}': {type(exc).__name__}: {exc}"
+                )
+            sections.append(
+                f'<skill-instruction name="{display_name}">\n{instructions}\n</skill-instruction>'
+            )
+        return "\n".join(sections)
+
+    @staticmethod
+    def _coerce_skill_names(value: Any) -> list[str]:
+        """Coerce a ``skills`` value to a list of names, dropping bad types.
+
+        Accepts lists of strings (empty included). Any other shape (``None``,
+        a bare string, a list containing non-strings) is treated as empty so
+        a malformed tool argument can never abort member creation.
+        """
+        if not isinstance(value, list):
+            return []
+        return [item for item in value if isinstance(item, str)]
+
     def _get_team_state(self, agent_ctx: AgentContextDeps) -> FileTeamState | None:
         """Create a FileTeamState for the current team, or None if not in a team.
 
@@ -1680,12 +1760,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         ctx: RunContext[Any],
         name: Annotated[str, Field(description="Human-readable team name")],
         members: Annotated[
-            list[dict[str, str]],
+            list[dict[str, Any]],
             Field(
                 description='List of member dicts, each with "agent" '
                 '(registered agent name) and "name" (display name) keys. '
-                "Example: "
-                '[{"agent": "historian", "name": "researcher"}, '
+                'Optional keys: "instructions" (per-member instructions), '
+                '"skills" (list of skill names or skill:// URIs injected as '
+                "instruction text). Example: "
+                '[{"agent": "historian", "name": "researcher", '
+                '"skills": ["lodestone"]}, '
                 '{"agent": "logician", "name": "analyst"}]'
             ),
         ],
@@ -1710,7 +1793,15 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Config defaults: when LLM passes empty members, use defaults config.
         if not members and self._config.defaults is not None:
-            members = [{"name": m.name, "agent": m.agent} for m in self._config.defaults.members]
+            members = [
+                {
+                    "name": m.name,
+                    "agent": m.agent,
+                    "instructions": m.instructions,
+                    "skills": m.skills,
+                }
+                for m in self._config.defaults.members
+            ]
 
         # Eligibility checks.
         for member in members:
@@ -1772,6 +1863,19 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
         try:
             for member in members:
                 member_instructions: str = member.get("instructions", "")
+                # Inject requested skills as instruction text into the
+                # member's system prompt (pure prompt guidance — no tool/MCP
+                # assembly). Visibility is checked against the member agent's
+                # node scope, and loading failures degrade to error text.
+                member_skills = self._coerce_skill_names(member.get("skills"))
+                if member_skills:
+                    skills_content = await self._format_member_skills_instructions(
+                        ctx,
+                        member_skills,
+                        member["agent"],
+                    )
+                    if skills_content:
+                        member_instructions = f"{skills_content}\n\n{member_instructions}"
                 member_session_id = await self._create_member_session(
                     agent_ctx,
                     member["agent"],
@@ -2110,6 +2214,14 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 "the member's system prompt"
             ),
         ] = "",
+        skills: Annotated[
+            list[str] | None,
+            Field(
+                description="Optional skill names or skill:// URIs (including "
+                "reference paths) injected as instruction text into the "
+                "member's system prompt"
+            ),
+        ] = None,
     ) -> ToolReturn:
         """Add a new member to an existing team (lead-only).
 
@@ -2170,6 +2282,18 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
 
         # Create child session for the new member.
         try:
+            # Inject requested skills as instruction text into the member's
+            # system prompt (pure prompt guidance — no tool/MCP assembly).
+            member_instructions: str = instructions
+            coerced_skills = self._coerce_skill_names(skills)
+            if coerced_skills:
+                skills_content = await self._format_member_skills_instructions(
+                    ctx,
+                    coerced_skills,
+                    agent,
+                )
+                if skills_content:
+                    member_instructions = f"{skills_content}\n\n{member_instructions}"
             member_session_id = await self._create_member_session(
                 agent_ctx,
                 agent,
@@ -2180,7 +2304,7 @@ class TeamCommCapability(FunctionToolsetCapability[Any]):
                 team_name=agent_ctx.session.metadata.get("team_name"),
                 team_role="member",
                 team_member_name=name,
-                team_member_instructions=instructions,
+                team_member_instructions=member_instructions,
             )
         except Exception as exc:  # noqa: BLE001
             return ToolReturn(return_value=f"Failed to create member session: {exc}")

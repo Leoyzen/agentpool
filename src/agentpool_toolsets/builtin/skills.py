@@ -69,6 +69,7 @@ async def load_skill(
     arguments: str | None = None,
     *,
     node_name: str | None = None,
+    include_assembly: bool = True,
 ) -> str:
     """Load a Claude Code Skill and return its instructions.
 
@@ -79,6 +80,9 @@ async def load_skill(
         skill_name: Name of the skill to load, or a skill:// URI.
         arguments: Optional space-separated arguments for substitution.
         node_name: Optional node name for package-scoped skill visibility.
+        include_assembly: When False, skip MCP/tool status rendering and
+            tool import — returns pure instruction text (used for
+            instruction-only injection, e.g. team-member skills).
 
     Returns:
         The full skill instructions for execution.
@@ -93,6 +97,7 @@ async def load_skill(
         skill_name,
         arguments,
         node_name=node_name,
+        include_assembly=include_assembly,
     )
 
 
@@ -101,6 +106,8 @@ async def load_skill_for_node(
     skill_name: str,
     node_name: str,
     arguments: str | None = None,
+    *,
+    include_assembly: bool = True,
 ) -> str:
     """Load a skill using a target node's package-level skill scope.
 
@@ -109,11 +116,19 @@ async def load_skill_for_node(
         skill_name: Name of the skill to load, or a skill:// URI.
         node_name: The node whose package scope governs visibility.
         arguments: Optional space-separated arguments for substitution.
+        include_assembly: When False, skip MCP/tool status rendering and
+            tool import — returns pure instruction text.
 
     Returns:
         The full skill instructions for execution.
     """
-    return await load_skill(ctx, skill_name, arguments, node_name=node_name)
+    return await load_skill(
+        ctx,
+        skill_name,
+        arguments,
+        node_name=node_name,
+        include_assembly=include_assembly,
+    )
 
 
 async def list_skills(ctx: AgentContext) -> str:
