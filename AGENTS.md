@@ -80,7 +80,7 @@ Instrument critical-path code (RunLoop, Turn, delegation, protocol entry points)
 | Lifecycle dimensions (full) | `docs/explanation/lifecycle-dimensions.md` |
 | Hooks & events (full) | `docs/explanation/hooks-events.md` |
 | Capabilities (full) | `docs/explanation/capabilities.md` |
-| ToolDisplayCapability (tool rename + diff events) | `docs/explanation/tool-display-capability.md` |
+| ToolDisplayCapability (tool rename + diff + rich display events) | `docs/explanation/tool-display-capability.md` |
 | Telemetry rules | `docs/explanation/telemetry.md` |
 | Usage examples | `docs/explanation/usage-examples.md` |
 | Extending AgentPool | `docs/explanation/extending-agentpool.md` |

@@ -55,7 +55,14 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
     tool_lower = actual_name.lower()
     # Read operations
     if tool_lower in ("read", "read_file"):
-        path = input_data.get("file_path") or input_data.get("path", "")
+        paths: list[str] = []
+        for key in ("file_path", "path", "uri", "uris", "filepath"):
+            raw = input_data.get(key)
+            if isinstance(raw, str):
+                if raw:
+                    paths.append(raw)
+            elif isinstance(raw, (list, tuple)):
+                paths.extend(str(item) for item in raw if item)
         offset = input_data.get("offset") or input_data.get("line")
         suffix = ""
         if limit := input_data.get("limit"):
@@ -64,13 +71,20 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
             suffix = f" ({start}-{end})"
         elif offset:
             suffix = f" (from line {offset + 1})"
-        title = f"Read {path}{suffix}" if path else "Read File"
-        locations = [LocationContentItem(path=path, line=offset or 0)] if path else []
+        joined = ", ".join(paths)
+        title = f"Read {joined}{suffix}" if joined else "Read File"
+        locations = [LocationContentItem(path=path, line=offset or 0) for path in paths]
         return RichToolInfo(title=title, kind="read", locations=locations)
 
     # Write operations
     if tool_lower in ("write", "write_file"):
-        path = input_data.get("file_path") or input_data.get("path", "")
+        path = (
+            input_data.get("file_path")
+            or input_data.get("path")
+            or input_data.get("uri")
+            or input_data.get("filepath")
+            or ""
+        )
         content = input_data.get("content", "")
         return RichToolInfo(
             title=f"Write {path}" if path else "Write File",
@@ -80,7 +94,13 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
         )
     # Edit operations
     if tool_lower in ("edit", "edit_file"):
-        path = input_data.get("file_path") or input_data.get("path", "")
+        path = (
+            input_data.get("file_path")
+            or input_data.get("path")
+            or input_data.get("uri")
+            or input_data.get("filepath")
+            or ""
+        )
         old_string = input_data.get("old_string") or input_data.get("old_text", "")
         new_string = input_data.get("new_string") or input_data.get("new_text", "")
         return RichToolInfo(
@@ -93,7 +113,13 @@ def derive_rich_tool_info(name: str, input_data: ToolInput | dict[str, Any]) -> 
         )
     # Delete operations
     if tool_lower in ("delete", "delete_path", "delete_file"):
-        path = input_data.get("file_path") or input_data.get("path", "")
+        path = (
+            input_data.get("file_path")
+            or input_data.get("path")
+            or input_data.get("uri")
+            or input_data.get("filepath")
+            or ""
+        )
         locations = [LocationContentItem(path=path)] if path else []
         title = f"Delete {path}" if path else "Delete"
         return RichToolInfo(title=title, kind="delete", locations=locations)

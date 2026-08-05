@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import pytest
 
-from acp.schema import FileEditToolCallContent, ToolCallProgress
-from agentpool.agents.events import DiffContentItem, ToolCallProgressEvent, ToolCallStartEvent
+from acp.schema import FileEditToolCallContent, ToolCallProgress, ToolCallStart
+from agentpool.agents.events import (
+    DiffContentItem,
+    LocationContentItem,
+    ToolCallProgressEvent,
+    ToolCallStartEvent,
+)
 from agentpool_server.acp_server.event_converter import ACPEventConverter
 
 
@@ -86,3 +91,36 @@ async def test_converter_requires_no_start_for_rich_progress() -> None:
 
     # No crash; at minimum no updates or a progress update.
     assert isinstance(updates, list)
+
+
+@pytest.mark.anyio
+async def test_rich_start_converts_kind_and_locations() -> None:
+    """ToolCallStartEvent with kind + locations yields ACP ToolCallStart.
+
+    Exercises the emit_rich pre-execution event shape: a read tool
+    (viking_read) marked with kind="read" and multiple URI locations
+    must surface as an ACP tool-start notification with matching kind
+    and file locations.
+    """
+    converter = ACPEventConverter()
+    updates = await collect_updates(
+        converter,
+        ToolCallStartEvent(
+            tool_call_id="call_rich",
+            tool_name="viking_read",
+            title="Read viking://a.md, viking://b.md",
+            kind="read",
+            locations=[
+                LocationContentItem(path="viking://a.md"),
+                LocationContentItem(path="viking://b.md"),
+            ],
+        ),
+    )
+
+    start_updates = [u for u in updates if isinstance(u, ToolCallStart)]
+    assert start_updates, "expected at least one ToolCallStart update"
+    start = start_updates[0]
+    assert start.tool_call_id == "call_rich"
+    assert start.kind == "read"
+    assert start.locations is not None
+    assert [loc.path for loc in start.locations] == ["viking://a.md", "viking://b.md"]
