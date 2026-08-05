@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta
 import inspect
 from pathlib import Path
@@ -1296,6 +1297,24 @@ class Agent[TDeps = None, OutputDataT = str](BaseAgent[TDeps, OutputDataT]):
                                 turn_id=turn_id,
                             )
                             registry.register(populated, turn_scope)
+
+                # Populate VikingCapability.model_capabilities with resolved
+                # model capabilities so viking_read can auto-detect whether
+                # to return image bytes (via _should_return_image_bytes).
+                # Like ModalityFilterCapability this is a capability-level
+                # population, not auto-injection of new capabilities.
+                from agentpool.capabilities.viking import VikingCapability
+
+                if isinstance(cap, VikingCapability):
+                    populated_viking = replace(
+                        cap,
+                        model_capabilities=resolved_caps,
+                    )
+                    tool_capabilities[i] = populated_viking
+                    for j, ext_cap in enumerate(self._external_capabilities):
+                        if ext_cap is cap:
+                            self._external_capabilities[j] = populated_viking
+                            break
 
         # Handle retries parameter: newer pydantic-ai uses dict form for output_retries
         if AgentRetries is not None and self._output_retries is not None:

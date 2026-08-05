@@ -37,7 +37,7 @@ from agentpool.capabilities.viking.utils import (
     is_viking_uri,
     truncate_text,
 )
-from agentpool_config.capabilities import VikingCapabilityConfig
+from agentpool_config.capabilities import VikingCapabilityConfig, build_capability
 
 
 pytestmark = pytest.mark.unit
@@ -138,6 +138,32 @@ class TestVikingCapabilityConfig:
         assert cfg.public_download_base_url is None
         assert cfg.resource_read_level == "overview"
 
+    def test_default_support_vision_none(self) -> None:
+        """support_vision defaults to None (auto-detect from model capabilities)."""
+        cfg = VikingCapabilityConfig()
+        assert cfg.support_vision is None
+
+    def test_support_vision_true(self) -> None:
+        """support_vision=True forces image bytes for image URIs."""
+        cfg = VikingCapabilityConfig(support_vision=True)
+        assert cfg.support_vision is True
+
+    def test_support_vision_false(self) -> None:
+        """support_vision=False forces text URI descriptions for image URIs."""
+        cfg = VikingCapabilityConfig(support_vision=False)
+        assert cfg.support_vision is False
+
+    def test_support_vision_build_passthrough(self) -> None:
+        """build_capability passes support_vision=... to VikingCapability.
+
+        Explicit False must reach the capability (only None is filtered by
+        _import_and_instantiate), so forced-text mode survives the build.
+        """
+        cap = build_capability(VikingCapabilityConfig(support_vision=False))
+        assert cap.support_vision is False
+        cap_none = build_capability(VikingCapabilityConfig())
+        assert cap_none.support_vision is None
+
     def test_mode_retrieve(self) -> None:
         """Mode 'retrieve' is accepted."""
         cfg = VikingCapabilityConfig(mode="retrieve")
@@ -202,6 +228,71 @@ class TestVikingCapabilityConfig:
         union_type = typing.get_args(BuiltinCapabilityConfig)[0]
         member_types = typing.get_args(union_type)
         assert VikingCapabilityConfig in member_types
+
+
+# ---------------------------------------------------------------------------
+# support_vision — _should_return_image_bytes tri-state matrix
+# ---------------------------------------------------------------------------
+
+
+class TestShouldReturnImageBytes:
+    """Tri-state matrix for ``_should_return_image_bytes``."""
+
+    @staticmethod
+    def _cap(
+        support_vision: bool | None = None, image_input: bool | None = None
+    ) -> VikingCapability:
+        from agentpool_config.model_capabilities import ModelCapabilities
+
+        cap = VikingCapability(mode="all", support_vision=support_vision)
+        cap.model_capabilities = ModelCapabilities(image_input=image_input)
+        return cap
+
+    @pytest.mark.parametrize(
+        "image_input",
+        [None, False, True],
+        ids=["unknown", "false", "true"],
+    )
+    def test_explicit_true_overrides_all(self, image_input: bool | None) -> None:
+        """support_vision=True forces bytes regardless of model capabilities."""
+        cap = self._cap(support_vision=True, image_input=image_input)
+        assert cap._should_return_image_bytes() is True
+
+    @pytest.mark.parametrize(
+        "image_input",
+        [None, False, True],
+        ids=["unknown", "false", "true"],
+    )
+    def test_explicit_false_overrides_all(self, image_input: bool | None) -> None:
+        """support_vision=False forces text regardless of model capabilities."""
+        cap = self._cap(support_vision=False, image_input=image_input)
+        assert cap._should_return_image_bytes() is False
+
+    def test_auto_vision_model(self) -> None:
+        """support_vision=None + image_input=True auto-detects vision."""
+        cap = self._cap(support_vision=None, image_input=True)
+        assert cap._should_return_image_bytes() is True
+
+    def test_auto_text_only_model(self) -> None:
+        """support_vision=None + image_input=False auto-detects text-only."""
+        cap = self._cap(support_vision=None, image_input=False)
+        assert cap._should_return_image_bytes() is False
+
+    def test_auto_unknown_capability_field(self) -> None:
+        """support_vision=None + image_input=None (cache miss) degrades to text."""
+        cap = self._cap(support_vision=None, image_input=None)
+        assert cap._should_return_image_bytes() is False
+
+    def test_auto_uninjected_capabilities(self) -> None:
+        """support_vision=None + model_capabilities=None (not injected) → text.
+
+        Safe degradation: the capability *produces* image content and must
+        not emit BinaryImage it cannot guarantee the model accepts (unlike
+        ModalityFilterCapability which passes through on None).
+        """
+        cap = VikingCapability(mode="all", support_vision=None)
+        cap.model_capabilities = None
+        assert cap._should_return_image_bytes() is False
 
 
 # ---------------------------------------------------------------------------
