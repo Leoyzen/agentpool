@@ -12,9 +12,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agentpool.mcp_server.manager import MCPManager
-from agentpool.sessions import SessionData
-from agentpool_server.acp_server.session_manager import ACPSessionManager
+from wolfharness.mcp_server.manager import MCPManager
+from wolfharness.sessions import SessionData
+from wolfharness_server.acp_server.session_manager import ACPSessionManager
 
 
 @pytest.mark.integration
@@ -97,7 +97,7 @@ async def test_resume_closes_old_session() -> None:
 
     try:
         with patch(
-            "agentpool_server.acp_server.session_manager.ACPSession",
+            "wolfharness_server.acp_server.session_manager.ACPSession",
             return_value=mock_new_session,
         ):
             result = await acp_manager.resume_session(

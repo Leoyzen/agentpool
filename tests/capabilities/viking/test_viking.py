@@ -17,27 +17,27 @@ from pydantic_ai.models import ModelRequestContext, ModelRequestParameters
 from pydantic_ai.models.test import TestModel
 import pytest
 
-from agentpool.capabilities.viking import VikingCapability, _normalize_search_results
-from agentpool.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
-from agentpool.capabilities.viking.profile import (
+from wolfharness.capabilities.viking import VikingCapability, _normalize_search_results
+from wolfharness.capabilities.viking.identity import VikingIdentity, _try_decode_api_key
+from wolfharness.capabilities.viking.profile import (
     _derive_context_hint,
     _format_profile_block,
 )
-from agentpool.capabilities.viking.recall import (
+from wolfharness.capabilities.viking.recall import (
     _extract_latest_user_prompt,
     _format_recall_block,
     _inject_system_message,
     _rank_and_dedup,
 )
-from agentpool.capabilities.viking.tools import build_tools
-from agentpool.capabilities.viking.utils import (
+from wolfharness.capabilities.viking.tools import build_tools
+from wolfharness.capabilities.viking.utils import (
     add_line_numbers,
     format_ls_entries,
     format_search_results,
     is_viking_uri,
     truncate_text,
 )
-from agentpool_config.capabilities import VikingCapabilityConfig
+from wolfharness_config.capabilities import VikingCapabilityConfig
 
 
 pytestmark = pytest.mark.unit
@@ -193,7 +193,7 @@ class TestVikingCapabilityConfig:
         """The 'type' field discriminator correctly identifies VikingCapabilityConfig."""
         import typing
 
-        from agentpool_config.capabilities import BuiltinCapabilityConfig
+        from wolfharness_config.capabilities import BuiltinCapabilityConfig
 
         cfg = VikingCapabilityConfig()
         assert cfg.type == "viking"
@@ -1884,7 +1884,7 @@ class TestResourceAccessProtocol:
 
     def test_isinstance_resource_access(self, viking_cap: VikingCapability) -> None:
         """VikingCapability should be recognized as ResourceAccess."""
-        from agentpool.capabilities.resource_protocols import ResourceAccess
+        from wolfharness.capabilities.resource_protocols import ResourceAccess
 
         assert isinstance(viking_cap, ResourceAccess)
 
@@ -2040,44 +2040,44 @@ class TestMultimodalBridge:
         assert cap._supports_modality("audio/mpeg") is False
 
     def test_supports_modality_image(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=True))
         assert cap._supports_modality("image/png") is True
         assert cap._supports_modality("image/jpeg") is True
 
     def test_supports_modality_image_false(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=False))
         assert cap._supports_modality("image/png") is False
 
     def test_supports_modality_audio(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(audio_input=True))
         assert cap._supports_modality("audio/mpeg") is True
 
     def test_supports_modality_video(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(video_input=True))
         assert cap._supports_modality("video/mp4") is True
 
     def test_supports_modality_document(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(document_input=True))
         assert cap._supports_modality("application/pdf") is True
 
     def test_supports_modality_unknown(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(model_capabilities=ModelCapabilities(image_input=True))
         assert cap._supports_modality("application/zip") is False
 
     def test_guess_extension_known(self) -> None:
-        from agentpool.capabilities.viking import _guess_extension
+        from wolfharness.capabilities.viking import _guess_extension
 
         assert _guess_extension("image/png") == "png"
         assert _guess_extension("image/jpeg") == "jpg"
@@ -2086,7 +2086,7 @@ class TestMultimodalBridge:
         assert _guess_extension("application/pdf") == "pdf"
 
     def test_guess_extension_unknown(self) -> None:
-        from agentpool.capabilities.viking import _guess_extension
+        from wolfharness.capabilities.viking import _guess_extension
 
         assert _guess_extension("application/zip") == "bin"
 
@@ -2129,7 +2129,7 @@ class TestMultimodalBridge:
             UserPromptPart,
         )
 
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(
             multimodal_bridge=True,
@@ -2164,7 +2164,7 @@ class TestMultimodalBridge:
             UserPromptPart,
         )
 
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(
             multimodal_bridge=True,
@@ -2196,7 +2196,7 @@ class TestMultimodalBridge:
             UserPromptPart,
         )
 
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(
             multimodal_bridge=True,
@@ -2221,7 +2221,7 @@ class TestMultimodalBridge:
             UserPromptPart,
         )
 
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         cap = VikingCapability(
             multimodal_bridge=True,
@@ -2284,7 +2284,7 @@ class TestMultimodalBridge:
         assert uri is None
 
     async def test_for_run_preserves_model_capabilities(self) -> None:
-        from agentpool_config.model_capabilities import ModelCapabilities
+        from wolfharness_config.model_capabilities import ModelCapabilities
 
         caps = ModelCapabilities(image_input=True)
         cap = VikingCapability(model_capabilities=caps, multimodal_bridge=True)
@@ -3902,7 +3902,7 @@ class TestCompaction:
 
     def test_estimate_tokens_ascii(self) -> None:
         """ASCII text: chars / 4."""
-        from agentpool.capabilities.viking.compaction import _estimate_tokens
+        from wolfharness.capabilities.viking.compaction import _estimate_tokens
 
         assert _estimate_tokens("") == 0
         assert _estimate_tokens("hello") == 1  # 5 // 4 = 1
@@ -3911,7 +3911,7 @@ class TestCompaction:
 
     def test_estimate_tokens_cjk(self) -> None:
         """CJK characters count as 1 token each."""
-        from agentpool.capabilities.viking.compaction import _estimate_tokens
+        from wolfharness.capabilities.viking.compaction import _estimate_tokens
 
         # Each CJK char is 1 token
         assert _estimate_tokens("你好") == 2
@@ -3921,14 +3921,14 @@ class TestCompaction:
 
     def test_estimate_tokens_mixed(self) -> None:
         """Mixed ASCII + CJK: ASCII at 4:1, CJK at 1:1."""
-        from agentpool.capabilities.viking.compaction import _estimate_tokens
+        from wolfharness.capabilities.viking.compaction import _estimate_tokens
 
         # 2 CJK chars (2 tokens) + 8 ASCII chars (2 tokens) = 4
         assert _estimate_tokens("你好abcdefgh") == 4
 
     def test_estimate_tokens_empty(self) -> None:
         """Empty string returns 0."""
-        from agentpool.capabilities.viking.compaction import _estimate_tokens
+        from wolfharness.capabilities.viking.compaction import _estimate_tokens
 
         assert _estimate_tokens("") == 0
 
@@ -3938,7 +3938,7 @@ class TestCompaction:
         """Split messages keeping last N turns."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _split_archivable
+        from wolfharness.capabilities.viking.compaction import _split_archivable
 
         # 4 user turns, keep last 2
         messages: list[Any] = []
@@ -3960,7 +3960,7 @@ class TestCompaction:
         """Keep all messages when fewer turns than keep_recent_turns."""
         from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _split_archivable
+        from wolfharness.capabilities.viking.compaction import _split_archivable
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="Turn 1")]),
@@ -3974,7 +3974,7 @@ class TestCompaction:
         """keep_recent_turns=0 means all messages are archivable."""
         from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _split_archivable
+        from wolfharness.capabilities.viking.compaction import _split_archivable
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="Turn 1")]),
@@ -3986,7 +3986,7 @@ class TestCompaction:
 
     def test_split_archivable_empty(self) -> None:
         """Empty messages list returns empty tuple."""
-        from agentpool.capabilities.viking.compaction import _split_archivable
+        from wolfharness.capabilities.viking.compaction import _split_archivable
 
         archivable, keep = _split_archivable([], keep_recent_turns=3)
         assert archivable == []
@@ -3998,7 +3998,7 @@ class TestCompaction:
         """Serialize messages as markdown with role headers."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _serialize_messages
+        from wolfharness.capabilities.viking.compaction import _serialize_messages
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="Hello there")]),
@@ -4012,7 +4012,7 @@ class TestCompaction:
 
     def test_serialize_messages_empty(self) -> None:
         """Empty messages produce empty string."""
-        from agentpool.capabilities.viking.compaction import _serialize_messages
+        from wolfharness.capabilities.viking.compaction import _serialize_messages
 
         assert _serialize_messages([]) == ""
 
@@ -4022,7 +4022,7 @@ class TestCompaction:
         """Summary contains first 200 chars of each message."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _summarize_messages
+        from wolfharness.capabilities.viking.compaction import _summarize_messages
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="What is Python?")]),
@@ -4036,7 +4036,7 @@ class TestCompaction:
         """Summary truncates long content to 200 chars."""
         from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-        from agentpool.capabilities.viking.compaction import _summarize_messages
+        from wolfharness.capabilities.viking.compaction import _summarize_messages
 
         long_text = "x" * 300
         messages = [
@@ -4049,7 +4049,7 @@ class TestCompaction:
 
     def test_summarize_messages_empty(self) -> None:
         """Empty messages produce empty string."""
-        from agentpool.capabilities.viking.compaction import _summarize_messages
+        from wolfharness.capabilities.viking.compaction import _summarize_messages
 
         assert _summarize_messages([]) == ""
 
@@ -4377,7 +4377,7 @@ class TestAutoIngest:
 
     def test_sanitize_strips_recall_block(self) -> None:
         """_sanitize_message replaces <openviking-recall> with placeholder."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = "Hello <openviking-recall>secret data</openviking-recall> world"
         result = _sanitize_message(content)
@@ -4389,7 +4389,7 @@ class TestAutoIngest:
 
     def test_sanitize_strips_profile_block(self) -> None:
         """_sanitize_message replaces <openviking-profile> with placeholder."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = "Context: <openviking-profile>user profile data</openviking-profile> end"
         result = _sanitize_message(content)
@@ -4399,7 +4399,7 @@ class TestAutoIngest:
 
     def test_sanitize_strips_both_blocks(self) -> None:
         """_sanitize_message strips both recall and profile blocks."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = (
             "<openviking-recall>recall data</openviking-recall>"
@@ -4413,7 +4413,7 @@ class TestAutoIngest:
 
     def test_sanitize_multiline_blocks(self) -> None:
         """_sanitize_message handles multi-line XML blocks."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = (
             "<openviking-recall>\n  <hit uri='viking://doc.md'/>\n  data\n</openviking-recall> rest"
@@ -4425,7 +4425,7 @@ class TestAutoIngest:
 
     def test_sanitize_disabled_returns_original(self) -> None:
         """When enabled=False, content is returned unchanged."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = "<openviking-recall>keep this</openviking-recall>"
         result = _sanitize_message(content, enabled=False)
@@ -4433,7 +4433,7 @@ class TestAutoIngest:
 
     def test_sanitize_no_xml_blocks(self) -> None:
         """Content without XML blocks is returned unchanged."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         content = "just plain text without any xml blocks"
         result = _sanitize_message(content)
@@ -4441,7 +4441,7 @@ class TestAutoIngest:
 
     def test_sanitize_empty_string(self) -> None:
         """Empty string returns empty string."""
-        from agentpool.capabilities.viking.ingest import _sanitize_message
+        from wolfharness.capabilities.viking.ingest import _sanitize_message
 
         assert _sanitize_message("") == ""
 
@@ -4451,7 +4451,7 @@ class TestAutoIngest:
         """Extracts user+assistant pairs from messages."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="What is X?")]),
@@ -4466,7 +4466,7 @@ class TestAutoIngest:
         """Only extracts messages after start_idx."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="old question")]),
@@ -4483,7 +4483,7 @@ class TestAutoIngest:
         """Returns empty list when start_idx >= len(messages)."""
         from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         messages = [ModelRequest(parts=[UserPromptPart(content="hello")])]
         result = _extract_conversation_pairs(messages, start_idx=1)
@@ -4493,7 +4493,7 @@ class TestAutoIngest:
         """Extracts multiple user+assistant turns."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content="Q1")]),
@@ -4514,7 +4514,7 @@ class TestAutoIngest:
         """Skips UserPromptPart with list (multimodal) content."""
         from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserPromptPart
 
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         messages = [
             ModelRequest(parts=[UserPromptPart(content=["image_data", "text"])]),
@@ -4529,7 +4529,7 @@ class TestAutoIngest:
 
     def test_extract_conversation_pairs_empty_messages(self) -> None:
         """Empty messages list returns empty list."""
-        from agentpool.capabilities.viking.ingest import _extract_conversation_pairs
+        from wolfharness.capabilities.viking.ingest import _extract_conversation_pairs
 
         assert _extract_conversation_pairs([], start_idx=0) == []
 
@@ -4941,9 +4941,9 @@ class TestAutoIngest:
         assert cfg.auto_ingest_sanitize is True
 
     def test_config_auto_ingest_source_type_default(self) -> None:
-        """VikingCapabilityConfig has auto_ingest_source_type='agentpool' by default."""
+        """VikingCapabilityConfig has auto_ingest_source_type='wolfharness' by default."""
         cfg = VikingCapabilityConfig()
-        assert cfg.auto_ingest_source_type == "agentpool"
+        assert cfg.auto_ingest_source_type == "wolfharness"
 
     def test_config_auto_ingest_keep_recent_turns_default(self) -> None:
         """VikingCapabilityConfig has auto_ingest_keep_recent_turns=0 by default."""

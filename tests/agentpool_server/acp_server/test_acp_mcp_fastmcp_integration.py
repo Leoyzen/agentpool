@@ -38,11 +38,11 @@ import pytest
 
 from acp.exceptions import RequestError
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent
-from agentpool.delegation import AgentPool
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
-from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
+from wolfharness import Agent
+from wolfharness.delegation import AgentPool
+from wolfharness_server.acp_server.acp_agent import AgentPoolACPAgent
+from wolfharness_server.acp_server.acp_mcp_manager import AcpMcpConnection
+from wolfharness_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
 if TYPE_CHECKING:
@@ -66,8 +66,8 @@ def mock_connection():
 @pytest.fixture
 def default_test_agent() -> Agent:
     """Create a simple test agent with a pool."""
-    from agentpool.models.agents import NativeAgentConfig
-    from agentpool.models.manifest import AgentsManifest
+    from wolfharness.models.agents import NativeAgentConfig
+    from wolfharness.models.manifest import AgentsManifest
 
     def simple_callback(message: str) -> str:
         return f"Test response: {message}"

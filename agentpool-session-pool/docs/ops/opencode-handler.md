@@ -1,6 +1,6 @@
 # OpenCode Handler Ops Playbook
 
-Operational runbook for the `OpenCodeProtocolHandler` (`agentpool_server.opencode_server.handler`).
+Operational runbook for the `OpenCodeProtocolHandler` (`wolfharness_server.opencode_server.handler`).
 
 ## SSE Connection Troubleshooting
 
@@ -22,7 +22,7 @@ Operational runbook for the `OpenCodeProtocolHandler` (`agentpool_server.opencod
 
 3. **Verify events are being published:**
    ```python
-   from agentpool.orchestrator.metrics import MetricsCollector
+   from wolfharness.orchestrator.metrics import MetricsCollector
    collector = MetricsCollector(session_pool)
    metrics = await collector.get_metrics()
    print(metrics.event_bus_queue_depth.get(session_id, 0))
@@ -30,7 +30,7 @@ Operational runbook for the `OpenCodeProtocolHandler` (`agentpool_server.opencod
 
 4. **Verify SSE broadcast is working:**
    ```python
-   from agentpool_server.opencode_server.models.events import SessionIdleEvent
+   from wolfharness_server.opencode_server.models.events import SessionIdleEvent
    await state.broadcast_event(SessionIdleEvent.create(session_id))
    # Client should receive this immediately
    ```

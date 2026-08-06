@@ -1,14 +1,14 @@
 # AgentPool
 
-[![PyPI License](https://img.shields.io/pypi/l/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Package status](https://img.shields.io/pypi/status/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Monthly downloads](https://img.shields.io/pypi/dm/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Python version](https://img.shields.io/pypi/pyversions/agentpool.svg)](https://pypi.org/project/agentpool/)
-[![Github Stars](https://img.shields.io/github/stars/Leoyzen/agentpool)](https://github.com/Leoyzen/agentpool/stars)
+[![PyPI License](https://img.shields.io/pypi/l/wolfharness.svg)](https://pypi.org/project/wolfharness/)
+[![Package status](https://img.shields.io/pypi/status/wolfharness.svg)](https://pypi.org/project/wolfharness/)
+[![Monthly downloads](https://img.shields.io/pypi/dm/wolfharness.svg)](https://pypi.org/project/wolfharness/)
+[![Python version](https://img.shields.io/pypi/pyversions/wolfharness.svg)](https://pypi.org/project/wolfharness/)
+[![Github Stars](https://img.shields.io/github/stars/Leoyzen/wolfharness)](https://github.com/Leoyzen/wolfharness/stars)
 
 **A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
 
-[Documentation](https://leoyzen.github.io/agentpool/)
+[Documentation](https://leoyzen.github.io/wolfharness/)
 
 ## The Problem
 
@@ -48,7 +48,7 @@ flowchart TB
 ## Quick Start
 
 ```bash
-uv tool install agentpool
+uv tool install wolfharness
 
 ```
 
@@ -65,10 +65,10 @@ agents:
 
 ```bash
 # Run via CLI
-agentpool run assistant "Hello!"
+wolfharness run assistant "Hello!"
 
 # Or start as ACP server (for Zed, Toad, etc.)
-agentpool serve-acp agents.yml
+wolfharness serve-acp agents.yml
 ```
 
 ### Integrating External Agents
@@ -154,11 +154,11 @@ AgentPool can expose your agents through multiple server protocols:
 
 | Server | Command | Use Case |
 |--------|---------|----------|
-| **ACP** | `agentpool serve-acp` | IDE integration (Zed, Toad) - bidirectional communication with tool confirmations |
-| **OpenCode** | `agentpool serve-opencode` | OpenCode TUI/Desktop - supports remote filesystems via fsspec |
-| **MCP** | `agentpool serve-mcp` | Expose tools to other agents |
-| AG-UI | `agentpool serve-agui` | AG-UI compatible frontends |
-| OpenAI API | `agentpool serve-api` | Drop-in OpenAI API replacement |
+| **ACP** | `wolfharness serve-acp` | IDE integration (Zed, Toad) - bidirectional communication with tool confirmations |
+| **OpenCode** | `wolfharness serve-opencode` | OpenCode TUI/Desktop - supports remote filesystems via fsspec |
+| **MCP** | `wolfharness serve-mcp` | Expose tools to other agents |
+| AG-UI | `wolfharness serve-agui` | AG-UI compatible frontends |
+| OpenAI API | `wolfharness serve-api` | Drop-in OpenAI API replacement |
 
 The **ACP server** is ideal for IDE integration - it provides real-time tool confirmations and session management. The **OpenCode server** enables the OpenCode TUI to control AgentPool agents, including agents operating on remote environments (Docker, SSH, cloud sandboxes).
 
@@ -176,18 +176,18 @@ The **ACP server** is ideal for IDE integration - it provides real-time tool con
 ### CLI
 
 ```bash
-agentpool run agent_name "prompt"           # Single run
-agentpool serve-acp config.yml              # ACP server for IDEs
-agentpool serve-opencode config.yml         # OpenCode TUI server
-agentpool serve-mcp config.yml              # MCP server
-agentpool watch --config agents.yml         # React to triggers
-agentpool history stats --group-by model    # View analytics
+wolfharness run agent_name "prompt"           # Single run
+wolfharness serve-acp config.yml              # ACP server for IDEs
+wolfharness serve-opencode config.yml         # OpenCode TUI server
+wolfharness serve-mcp config.yml              # MCP server
+wolfharness watch --config agents.yml         # React to triggers
+wolfharness history stats --group-by model    # View analytics
 ```
 
 ### Programmatic
 
 ```python
-from agentpool import AgentPool
+from wolfharness import AgentPool
 
 async with AgentPool("agents.yml") as pool:
     agent = pool.get_agent("assistant")
@@ -205,6 +205,6 @@ async with AgentPool("agents.yml") as pool:
 
 ## Documentation
 
-For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/agentpool](https://leoyzen.github.io/agentpool/).
+For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/wolfharness](https://leoyzen.github.io/wolfharness/).
 # test
 # final test

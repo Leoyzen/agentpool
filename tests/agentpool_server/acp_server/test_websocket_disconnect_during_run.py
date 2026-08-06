@@ -21,10 +21,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from agentpool.lifecycle import RunState
-from agentpool.orchestrator.run import RunHandle
-from agentpool.orchestrator.session_controller import SessionController, SessionState
-from agentpool_server.acp_server.session_manager import ACPSessionManager
+from wolfharness.lifecycle import RunState
+from wolfharness.orchestrator.run import RunHandle
+from wolfharness.orchestrator.session_controller import SessionController, SessionState
+from wolfharness_server.acp_server.session_manager import ACPSessionManager
 
 
 @pytest.mark.integration

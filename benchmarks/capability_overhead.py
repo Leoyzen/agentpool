@@ -27,14 +27,14 @@ import time
 import tracemalloc
 from typing import Any
 
-from agentpool.resource_providers import StaticResourceProvider
 from pydantic_ai.models.test import TestModel
+from wolfharness.resource_providers import StaticResourceProvider
 
-from agentpool import Agent
-from agentpool.hooks import AgentHooks
-from agentpool.hooks.base import Hook, HookInput, HookResult
-from agentpool.mcp_server.manager import MCPManager
-from agentpool.tools import Tool, ToolManager
+from wolfharness import Agent
+from wolfharness.hooks import AgentHooks
+from wolfharness.hooks.base import Hook, HookInput, HookResult
+from wolfharness.mcp_server.manager import MCPManager
+from wolfharness.tools import Tool, ToolManager
 
 
 # ---------------------------------------------------------------------------

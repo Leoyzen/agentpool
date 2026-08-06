@@ -35,8 +35,8 @@ import uuid
 from pydantic_ai.messages import ToolReturn
 import pytest
 
-from agentpool.capabilities.viking import VikingCapability
-from agentpool.capabilities.viking.tools import build_tools
+from wolfharness.capabilities.viking import VikingCapability
+from wolfharness.capabilities.viking.tools import build_tools
 
 
 if TYPE_CHECKING:
@@ -448,7 +448,7 @@ async def test_resource_access_workflow(
     viking_cap.resources_uri = test_dir
     viking_cap.resource_read_level = "read"
     try:
-        from agentpool.capabilities.resource_protocols import TextResourceContent
+        from wolfharness.capabilities.resource_protocols import TextResourceContent
 
         # read_resource
         result = await viking_cap.read_resource(resource_uri)
@@ -488,7 +488,7 @@ async def test_multimodal_bridge(
     from pydantic_ai.models import ModelRequestContext
     from pydantic_ai.models.test import TestModel
 
-    from agentpool_config.model_capabilities import ModelCapabilities
+    from wolfharness_config.model_capabilities import ModelCapabilities
 
     cap = VikingCapability(
         mode="all",

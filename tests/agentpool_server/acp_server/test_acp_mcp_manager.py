@@ -8,7 +8,7 @@ import anyio
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool_server.acp_server.acp_mcp_manager import (
+from wolfharness_server.acp_server.acp_mcp_manager import (
     AcpMcpConnection,
     AcpMcpConnectionManager,
 )

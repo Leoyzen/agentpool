@@ -12,12 +12,12 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool import Agent
-from agentpool.delegation import AgentPool
-from agentpool.models.agents import NativeAgentConfig
-from agentpool.models.manifest import AgentsManifest
-from agentpool_server.acp_server.acp_agent import AgentPoolACPAgent
-from agentpool_server.acp_server.acp_mcp_manager import (
+from wolfharness import Agent
+from wolfharness.delegation import AgentPool
+from wolfharness.models.agents import NativeAgentConfig
+from wolfharness.models.manifest import AgentsManifest
+from wolfharness_server.acp_server.acp_agent import AgentPoolACPAgent
+from wolfharness_server.acp_server.acp_mcp_manager import (
     AcpMcpConnection,
     AcpMcpConnectionManager,
 )

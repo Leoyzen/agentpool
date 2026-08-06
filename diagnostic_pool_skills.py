@@ -7,9 +7,9 @@ from pathlib import Path
 import sys
 
 
-sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
+sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/wolfharness/src")
 
-from agentpool import AgentPool
+from wolfharness import AgentPool
 
 
 async def main():

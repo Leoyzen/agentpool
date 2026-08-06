@@ -4,9 +4,9 @@ import asyncio
 import sys
 
 
-sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/agentpool/src")
+sys.path.insert(0, "/Users/yuchen.liu/src/yilab/iroot-llm/packages/wolfharness/src")
 
-from agentpool.resource_providers.mcp_provider import MCPResourceProvider
+from wolfharness.resource_providers.mcp_provider import MCPResourceProvider
 
 
 async def main():

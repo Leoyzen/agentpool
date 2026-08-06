@@ -4,23 +4,23 @@ Operational runbook for the `SessionPool` orchestration layer.
 
 ## Dashboard Compatibility
 
-All Prometheus metric names use the `agentpool_` prefix and identical label names to the pre-SessionPool Grafana dashboards. **No dashboard changes are required.**
+All Prometheus metric names use the `wolfharness_` prefix and identical label names to the pre-SessionPool Grafana dashboards. **No dashboard changes are required.**
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `agentpool_sessions_total` | gauge | Active sessions |
-| `agentpool_active_turns_total` | gauge | Turns in progress |
-| `agentpool_auto_resume_total` | counter | Auto-resume iterations |
-| `agentpool_event_bus_subscribers` | gauge | Subscribers per session (`session_id` label) |
-| `agentpool_session_lifetime_seconds` | gauge | Average closed-session lifetime |
-| `agentpool_turn_latency_ms` | summary | Turn latency p99 (`quantile="0.99"`) |
+| `wolfharness_sessions_total` | gauge | Active sessions |
+| `wolfharness_active_turns_total` | gauge | Turns in progress |
+| `wolfharness_auto_resume_total` | counter | Auto-resume iterations |
+| `wolfharness_event_bus_subscribers` | gauge | Subscribers per session (`session_id` label) |
+| `wolfharness_session_lifetime_seconds` | gauge | Average closed-session lifetime |
+| `wolfharness_turn_latency_ms` | summary | Turn latency p99 (`quantile="0.99"`) |
 
 Call `metrics.to_prometheus()` on a `SessionPoolMetrics` snapshot to emit these lines for scraping.
 
 ## Startup
 
 ```python
-from agentpool.orchestrator import SessionPool
+from wolfharness.orchestrator import SessionPool
 
 session_pool = SessionPool(agent_pool)
 await session_pool.start()
@@ -53,7 +53,7 @@ assert session_pool.event_bus is not None
 ### Readiness (Recommended)
 
 ```python
-from agentpool.orchestrator.metrics import MetricsCollector
+from wolfharness.orchestrator.metrics import MetricsCollector
 
 collector = MetricsCollector(session_pool)
 metrics = await collector.get_metrics()
@@ -94,7 +94,7 @@ print(f"Event bus subscribers: {metrics.event_bus_queue_depth}")
 
 **Diagnosis:**
 
-- `agentpool_event_bus_subscribers` gauge will show high counts for specific sessions.
+- `wolfharness_event_bus_subscribers` gauge will show high counts for specific sessions.
 - Check consumer task logs — look for "Event consumer cancelled" or uncaught exceptions.
 
 **Remediation:**
@@ -137,18 +137,18 @@ print(metrics.to_prometheus())
 Example output:
 
 ```text
-# TYPE agentpool_sessions_total gauge
-agentpool_sessions_total 42
-# TYPE agentpool_active_turns_total gauge
-agentpool_active_turns_total 3
-# TYPE agentpool_auto_resume_total counter
-agentpool_auto_resume_total 17
-# TYPE agentpool_event_bus_subscribers gauge
-agentpool_event_bus_subscribers{session_id="sess_abc"} 2
-# TYPE agentpool_session_lifetime_seconds gauge
-agentpool_session_lifetime_seconds 1245.300
-# TYPE agentpool_turn_latency_ms summary
-agentpool_turn_latency_ms{quantile="0.99"} 150.000
+# TYPE wolfharness_sessions_total gauge
+wolfharness_sessions_total 42
+# TYPE wolfharness_active_turns_total gauge
+wolfharness_active_turns_total 3
+# TYPE wolfharness_auto_resume_total counter
+wolfharness_auto_resume_total 17
+# TYPE wolfharness_event_bus_subscribers gauge
+wolfharness_event_bus_subscribers{session_id="sess_abc"} 2
+# TYPE wolfharness_session_lifetime_seconds gauge
+wolfharness_session_lifetime_seconds 1245.300
+# TYPE wolfharness_turn_latency_ms summary
+wolfharness_turn_latency_ms{quantile="0.99"} 150.000
 ```
 
 ## Emergency Procedures

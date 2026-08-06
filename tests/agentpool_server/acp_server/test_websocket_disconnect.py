@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from agentpool_server.acp_server.session_manager import ACPSessionManager
+from wolfharness_server.acp_server.session_manager import ACPSessionManager
 
 
 def _make_mock_session(session_id: str) -> AsyncMock:

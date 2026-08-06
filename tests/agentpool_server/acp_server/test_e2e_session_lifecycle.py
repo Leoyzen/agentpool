@@ -30,9 +30,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool.mcp_server.config_snapshot import McpConfigSnapshot
-from agentpool.mcp_server.manager import MCPManager
-from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
+from wolfharness.mcp_server.config_snapshot import McpConfigSnapshot
+from wolfharness.mcp_server.manager import MCPManager
+from wolfharness_server.acp_server.acp_mcp_manager import AcpMcpConnectionManager
 
 
 class _FakeTransport:

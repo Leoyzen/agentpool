@@ -11,11 +11,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool_server.acp_server.acp_mcp_manager import (
+from wolfharness_server.acp_server.acp_mcp_manager import (
     AcpMcpConnection,
     AcpMcpConnectionManager,
 )
-from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
+from wolfharness_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.anyio]

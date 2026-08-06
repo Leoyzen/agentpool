@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from tokonomics.model_discovery.model_info import ModelInfo, ModelPricing
 
-from agentpool_server.opencode_server.models import ModelCost, ModelLimit
-from agentpool_server.shared.model_utils import (
+from wolfharness_server.opencode_server.models import ModelCost, ModelLimit
+from wolfharness_server.shared.model_utils import (
     _apply_configured_variants,
     _build_providers_from_tokonomics,
     _extract_provider,
@@ -72,7 +72,7 @@ class TestExtractProvider:
 
     def test_string_config_openai(self) -> None:
         """Extract provider from StringModelConfig with openai identifier."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="openai:gpt-4o")
         result = _extract_provider(config)
@@ -80,7 +80,7 @@ class TestExtractProvider:
 
     def test_string_config_anthropic(self) -> None:
         """Extract provider from StringModelConfig with anthropic identifier."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="anthropic:claude-sonnet-4")
         result = _extract_provider(config)
@@ -88,7 +88,7 @@ class TestExtractProvider:
 
     def test_string_config_no_provider(self) -> None:
         """Return unknown for StringModelConfig without provider prefix."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="gpt-4o")
         result = _extract_provider(config)
@@ -96,7 +96,7 @@ class TestExtractProvider:
 
     def test_anthropic_config(self) -> None:
         """Return anthropic for AnthropicModelConfig."""
-        from agentpool.models.model_configs import AnthropicModelConfig
+        from wolfharness.models.model_configs import AnthropicModelConfig
 
         config = AnthropicModelConfig(identifier="claude-opus-4-5")
         result = _extract_provider(config)
@@ -104,7 +104,7 @@ class TestExtractProvider:
 
     def test_openai_config(self) -> None:
         """Return openai for OpenAIModelConfig."""
-        from agentpool.models.model_configs import OpenAIModelConfig
+        from wolfharness.models.model_configs import OpenAIModelConfig
 
         config = OpenAIModelConfig(identifier="gpt-5.1-chat-latest")
         result = _extract_provider(config)
@@ -112,7 +112,7 @@ class TestExtractProvider:
 
     def test_gemini_config(self) -> None:
         """Return google for GeminiModelConfig."""
-        from agentpool.models.model_configs import GeminiModelConfig
+        from wolfharness.models.model_configs import GeminiModelConfig
 
         config = GeminiModelConfig(identifier="gemini-2.0-flash")
         result = _extract_provider(config)
@@ -120,7 +120,7 @@ class TestExtractProvider:
 
     def test_fallback_config_first_string(self) -> None:
         """Extract provider from first model in FallbackModelConfig."""
-        from agentpool.models.model_configs import FallbackModelConfig, StringModelConfig
+        from wolfharness.models.model_configs import FallbackModelConfig, StringModelConfig
 
         config = FallbackModelConfig(models=[StringModelConfig(identifier="openai:gpt-4o")])
         result = _extract_provider(config)
@@ -128,7 +128,7 @@ class TestExtractProvider:
 
     def test_fallback_config_first_anthropic(self) -> None:
         """Extract anthropic when first model is AnthropicModelConfig."""
-        from agentpool.models.model_configs import AnthropicModelConfig, FallbackModelConfig
+        from wolfharness.models.model_configs import AnthropicModelConfig, FallbackModelConfig
 
         config = FallbackModelConfig(models=[AnthropicModelConfig(identifier="claude-opus-4-5")])
         result = _extract_provider(config)
@@ -137,7 +137,7 @@ class TestExtractProvider:
     def test_fallback_config_empty_models(self) -> None:
         """Return unknown for FallbackModelConfig with empty models list - minimum 1 required."""
         # Note: FallbackModelConfig requires at least 1 model, so we test with String instead
-        from agentpool.models.model_configs import FallbackModelConfig
+        from wolfharness.models.model_configs import FallbackModelConfig
 
         # Single model fallback with unknown provider string
         config = FallbackModelConfig(models=["unknown-model-name"])
@@ -146,7 +146,7 @@ class TestExtractProvider:
 
     def test_fallback_config_nested_fallback(self) -> None:
         """Handle nested FallbackModelConfig."""
-        from agentpool.models.model_configs import (
+        from wolfharness.models.model_configs import (
             AnthropicModelConfig,
             FallbackModelConfig,
         )
@@ -247,7 +247,7 @@ class TestApplyConfiguredVariants:
     @pytest.fixture
     def sample_provider(self) -> Any:
         """Create a sample Provider for testing."""
-        from agentpool_server.opencode_server.models import Model, Provider
+        from wolfharness_server.opencode_server.models import Model, Provider
 
         model = Model(
             id="gpt-4o",
@@ -387,7 +387,7 @@ class TestResolveModelInfoFromResponse:
 
     def test_variant_match(self) -> None:
         """Resolve raw API names to variant name and configured provider."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         # get_model() canonicalizes "openai-chat" → "openai", so
         # _resolve_variant_identifier() returns "openai:svc/kimi-k2".
@@ -399,7 +399,7 @@ class TestResolveModelInfoFromResponse:
 
     def test_variant_match_with_explicit_provider(self) -> None:
         """Resolve to variant name with explicit provider field in config."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         variants = {
             "kimi-k2": StringModelConfig(
@@ -412,7 +412,7 @@ class TestResolveModelInfoFromResponse:
 
     def test_no_match_fallback(self) -> None:
         """Fall back to raw names when no variant matches."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         variants = {"kimi-k2": StringModelConfig(identifier="openai-chat:svc/kimi-k2")}
         result = resolve_model_info_from_response("gpt-4o", "openai", variants)
@@ -425,25 +425,25 @@ class TestResolveModelInfoFromResponse:
 
     def test_none_model_name(self) -> None:
         """Return ('unknown', provider_name) when model_name is None."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         variants = {"kimi-k2": StringModelConfig(identifier="openai-chat:svc/kimi-k2")}
         result = resolve_model_info_from_response(None, "openai-chat", variants)
         assert result == ("unknown", "openai-chat")
 
     def test_none_provider_name(self) -> None:
-        """Return (model_name, 'agentpool') when provider_name is None."""
+        """Return (model_name, 'wolfharness') when provider_name is None."""
         result = resolve_model_info_from_response("gpt-4o", None, {})
-        assert result == ("gpt-4o", "agentpool")
+        assert result == ("gpt-4o", "wolfharness")
 
     def test_both_none(self) -> None:
-        """Return ('unknown', 'agentpool') when both inputs are None."""
+        """Return ('unknown', 'wolfharness') when both inputs are None."""
         result = resolve_model_info_from_response(None, None, {})
-        assert result == ("unknown", "agentpool")
+        assert result == ("unknown", "wolfharness")
 
     def test_non_string_config_variant(self) -> None:
         """Test matching with OpenAIModelConfig (non-StringModelConfig)."""
-        from agentpool.models.model_configs import OpenAIModelConfig
+        from wolfharness.models.model_configs import OpenAIModelConfig
 
         # OpenAIModelConfig resolves to variant_name as-is per _resolve_variant_identifier
         variants = {"gpt-5": OpenAIModelConfig(identifier="gpt-5.1-chat-latest")}
@@ -457,7 +457,7 @@ class TestResolveModelInfoFromResponse:
 
     def test_multiple_variants_same_identifier_first_wins(self) -> None:
         """First variant in dict order wins when multiple match the same identifier."""
-        from agentpool.models.model_configs import StringModelConfig
+        from wolfharness.models.model_configs import StringModelConfig
 
         config = StringModelConfig(identifier="openai-chat:svc/kimi-k2")
         variants = {"first": config, "second": config}

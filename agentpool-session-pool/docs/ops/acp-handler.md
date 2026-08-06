@@ -1,6 +1,6 @@
 # ACP Handler Ops Playbook
 
-Operational runbook for the `ACPProtocolHandler` (`agentpool_server.acp_server.handler`).
+Operational runbook for the `ACPProtocolHandler` (`wolfharness_server.acp_server.handler`).
 
 ## Feature Flag Toggle
 
@@ -27,7 +27,7 @@ agents:
 ### Check at runtime
 
 ```python
-from agentpool_server.acp_server.handler import ACPProtocolHandler
+from wolfharness_server.acp_server.handler import ACPProtocolHandler
 
 handler = ACPProtocolHandler(agent_pool, event_converter, client)
 enabled = handler._should_use_session_pool()

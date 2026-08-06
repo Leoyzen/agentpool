@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from acp.schema.mcp import AcpMcpServer
-from agentpool_server.acp_server.acp_mcp_manager import AcpMcpConnection
-from agentpool_server.acp_server.acp_mcp_transport import AcpMcpTransport
+from wolfharness_server.acp_server.acp_mcp_manager import AcpMcpConnection
+from wolfharness_server.acp_server.acp_mcp_transport import AcpMcpTransport
 
 
 pytestmark = pytest.mark.integration
