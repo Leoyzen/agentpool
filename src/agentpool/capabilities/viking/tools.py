@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any, Literal
-import uuid
 
 from pydantic_ai.messages import ToolReturn
 from pydantic_ai.tools import RunContext  # noqa: TC002 - needed at runtime for get_type_hints()
@@ -473,32 +472,30 @@ def build_tools(cap: VikingCapability) -> list[Callable[..., Any]]:
 
         async def viking_remember(
             ctx: RunContext[Any],
-            messages: list[dict[str, str]],
+            reason: str = "",
         ) -> ToolReturn:
-            """Store a conversation experience in Viking memory.
+            """Schedule the current conversation for capture into Viking memory.
 
-            Creates a session, adds messages, and commits it to the
-            knowledge graph for future recall.
+            Capture is deferred: the real conversation (this turn's exchange
+            plus later turns) is ingested at the end of the current model
+            boundary and committed for memory extraction. No conversation
+            content is passed by this tool — genuine user/assistant roles are
+            taken from the session directly.
 
             Args:
-                messages: A list of message dicts with ``role`` and
-                    ``content`` keys (e.g. ``{"role": "user", "content": "..."}``).
+                reason: Optional reason for remembering — recorded as an
+                    intent marker so the memory extraction focuses on it.
 
             Returns:
-                Confirmation string with the generated session ID.
+                Confirmation that the capture was scheduled.
             """
-            try:
-                client = await cap._ensure_client()
-                sid = str(uuid.uuid4())
-                await client.create_session(session_id=sid)
-                for msg in messages:
-                    await client.add_message(sid, msg["role"], msg["content"])
-                await client.commit_session(sid)
-                return ToolReturn(
-                    return_value=f"Remembered {len(messages)} messages (session: {sid})."
+            cap._remember_pending.append(reason)
+            return ToolReturn(
+                return_value=(
+                    "Capture scheduled — the current conversation will be "
+                    "ingested into Viking memory after this turn."
                 )
-            except Exception as e:
-                return ToolReturn(return_value=f"viking_remember error: {e}")
+            )
 
         async def viking_write(
             ctx: RunContext[Any],

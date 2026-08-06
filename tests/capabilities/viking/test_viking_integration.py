@@ -41,30 +41,14 @@ pytestmark = pytest.mark.integration
 
 
 def _make_mock_client() -> AsyncMock:
-    """Create a fully populated mock AsyncHTTPClient for L2 integration tests."""
-    client = AsyncMock()
-    client.initialize = AsyncMock()
-    client.close = AsyncMock()
-    client.search = AsyncMock(return_value={"results": []})
-    client.find = AsyncMock(return_value={"results": []})
-    client.grep = AsyncMock(return_value={"matches": []})
-    client.glob = AsyncMock(return_value={"matches": []})
-    client.ls = AsyncMock(return_value=[])
-    client.read = AsyncMock(return_value="file content")
-    client.abstract = AsyncMock(return_value="abstract summary")
-    client.overview = AsyncMock(return_value="overview content")
-    client.write = AsyncMock(return_value={"status": "ok"})
-    client.mkdir = AsyncMock(return_value=None)
-    client.rm = AsyncMock(return_value=None)
-    client.link = AsyncMock(return_value=None)
-    client.set_tags = AsyncMock(return_value={"status": "ok"})
-    client.add_resource = AsyncMock(return_value={"status": "ok"})
-    client.create_session = AsyncMock(return_value={"session_id": "test-session"})
-    client.add_message = AsyncMock(return_value={"status": "ok"})
-    client.commit_session = AsyncMock(return_value={"status": "ok"})
-    client.get_session_context = AsyncMock(return_value={})
-    client._request = AsyncMock(return_value={})
-    return client
+    """Create a fully populated mock AsyncHTTPClient for L2 integration tests.
+
+    Delegates to the shared factory so the canned SDK surface is defined
+    exactly once (see ``tests/capabilities/viking/conftest.py``).
+    """
+    from tests.capabilities.viking.conftest import build_mock_client
+
+    return build_mock_client()
 
 
 def _make_request_context(messages: list[Any]) -> ModelRequestContext:

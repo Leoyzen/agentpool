@@ -90,10 +90,12 @@ Use `viking_ls` to discover available URIs when unsure.
 
 ### Memory Tools
 
-- **`viking_remember`**: Store conversation experiences as structured
-  messages. Use when the user shares preferences, important facts, or
-  decisions worth persisting. Creates a session, adds messages, then
-  commits for memory extraction.
+- **`viking_remember`**: Store the current conversation in Viking memory
+  for future recall. Takes no conversation content — the real exchange is
+  captured automatically at the end of the turn. Call it when the user
+  shares preferences, important facts, or decisions worth persisting.
+  Optionally pass a `reason` to focus memory extraction on that intent.
+  The capture result (memory URIs) is notified back into the session.
 - **`viking_recall`**: Retrieve stored memories by semantic query across
   multiple context types. Valid context types are:
   - `memory` — personal memories and conversation history
