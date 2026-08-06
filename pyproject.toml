@@ -85,11 +85,11 @@ dependencies = [
 ]
 
 [project.urls]
-"Code coverage" = "https://app.codecov.io/gh/phil65/wolfharness"
-Discussions = "https://github.com/phil65/wolfharness/discussions"
-Documentation = "https://phil65.github.io/wolfharness/"
-Issues = "https://github.com/phil65/wolfharness/issues"
-Source = "https://github.com/phil65/wolfharness"
+"Code coverage" = "https://app.codecov.io/gh/Leoyzen/wolfharness"
+Discussions = "https://github.com/Leoyzen/wolfharness/discussions"
+Documentation = "https://leoyzen.github.io/wolfharness/"
+Issues = "https://github.com/Leoyzen/wolfharness/issues"
+Source = "https://github.com/Leoyzen/wolfharness"
 
 [project.scripts]
 acp-bridge = "acp.bridge.__main__:main"
@@ -517,6 +517,43 @@ asyncio_mode = "auto"
 [tool.uv]
 default-groups = ["dev", "lint", "docs"]
 constraint-dependencies = ["extism-sys<1.13.0"]
+
+# Override mknodes metadata: it declares a dependency on the legacy `agentpool`
+# PyPI package, which pulls in outdated code that conflicts with the renamed
+# `wolfharness` project. Redirect that dependency to `wolfharness` so uv resolves
+# the local workspace instead of downloading the stale PyPI release.
+[[tool.uv.dependency-metadata]]
+name = "mknodes"
+version = "2.2.14"
+requires-dist = [
+    "wolfharness",
+    "anybadge",
+    "anyenv[httpx]",
+    "clinspector",
+    "coloraide",
+    "epregistry",
+    "fieldz",
+    "fsspec",
+    "git-changelog",
+    "githarbor",
+    "gitpython",
+    "griffelib",
+    "jinja2",
+    "jinjarope[icons]",
+    "mkdocstrings[python]",
+    "natsort",
+    "pipdeptree",
+    "pydantic",
+    "pytest-asyncio",
+    "python-dotenv",
+    "setuptools",
+    "tomli-w",
+    "typer",
+    "universal-pathlib",
+    "upathtools[httpx]",
+    "yamling",
+    "zensical",
+]
 
 [tool.uv.build-backend]
 module-name = [
