@@ -23,7 +23,7 @@ warnings.warn(
 )
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     """Forward top-level attribute access to wolfharness_commands."""
     import wolfharness_commands
 
@@ -36,7 +36,9 @@ class _ShimFinder(abc.MetaPathFinder):
     _prefix = "agentpool_commands."
     _target = "wolfharness_commands"
 
-    def find_spec(self, fullname: str, path: object = None, target: object = None):
+    def find_spec(
+        self, fullname: str, path: object = None, target: object = None
+    ) -> machinery.ModuleSpec | None:
         if not fullname.startswith(self._prefix):
             return None
 
