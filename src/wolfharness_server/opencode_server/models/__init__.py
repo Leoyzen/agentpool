@@ -130,6 +130,7 @@ from wolfharness_server.opencode_server.models.agent import (
     Agent,
     AuthInfo,
     Command,
+    OpenCodeCapabilities,
     ProviderAuthAuthorization,
     ProviderAuthMethod,
     SkillInfo,
@@ -138,6 +139,7 @@ from wolfharness_server.opencode_server.models.agent import (
     WorktreeRemoveRequest,
     WorktreeResetRequest,
     WorkspaceCreateRequest,
+    WorkspaceEventConnectionStatus,
     WorkspaceInfo,
 )
 from wolfharness_server.opencode_server.models.diagnostics import (
@@ -289,6 +291,7 @@ __all__ = [
     "ModelLimit",
     "ModelRef",
     "OpenCodeBaseModel",
+    "OpenCodeCapabilities",
     "OpenCodePendingPermission",
     "OpenCodePendingQuestion",
     "OutputFormat",
@@ -409,6 +412,7 @@ __all__ = [
     "VcsBranchUpdatedEvent",
     "VcsInfo",
     "WorkspaceCreateRequest",
+    "WorkspaceEventConnectionStatus",
     "WorkspaceInfo",
     "WorktreeCreateRequest",
     "WorktreeInfo",

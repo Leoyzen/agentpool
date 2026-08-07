@@ -181,6 +181,30 @@ class WorkspaceCreateRequest(OpenCodeBaseModel):
     """Backend-specific metadata."""
 
 
+class WorkspaceEventConnectionStatus(OpenCodeBaseModel):
+    """Connection status for a workspace.
+
+    Matches OpenCode SDK's ``WorkspaceEventConnectionStatus`` type used by
+    ``/experimental/workspace/status``.
+    """
+
+    workspace_id: str
+    """Workspace identifier (serialized as ``workspaceID``)."""
+
+    status: Literal["connected", "connecting", "disconnected", "error"]
+    """Connection status of the workspace event stream."""
+
+
+class OpenCodeCapabilities(OpenCodeBaseModel):
+    """Experimental server capabilities for OpenCode TUI.
+
+    Matches the body OpenCode expects from ``/experimental/capabilities``.
+    """
+
+    background_subagents: bool
+    """Whether the server supports background subagents."""
+
+
 class AuthInfo(OpenCodeBaseModel):
     """Authentication credential info."""
 

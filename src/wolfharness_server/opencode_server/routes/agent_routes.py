@@ -30,11 +30,13 @@ from wolfharness_server.opencode_server.models import (
     McpAuthorizationResponse,
     McpResource,
     MCPStatus,
+    OpenCodeCapabilities,
     ProviderAuthAuthorization,
     ProviderAuthMethod,
     Session,
     SkillInfo,
     WorkspaceCreateRequest,
+    WorkspaceEventConnectionStatus,
     WorkspaceInfo,
     WorktreeCreateRequest,
     WorktreeInfo,
@@ -634,6 +636,36 @@ async def list_workspaces(state: StateDep) -> list[WorkspaceInfo]:
         _workspace_from_worktree(directory, branch=None, project_id=project_id)
         for directory in await list_worktrees(repo_dir)
     ]
+
+
+@router.get("/experimental/workspace/status")
+async def get_workspace_status(
+    state: StateDep,
+    directory: str | None = None,
+    workspace: str | None = None,
+) -> list[WorkspaceEventConnectionStatus]:
+    """Return workspace event-stream connection statuses.
+
+    OpenCode SDK expects ``Array<WorkspaceEventConnectionStatus>``. We do not
+    maintain per-workspace event-stream connections, so the result is empty.
+
+    Args:
+        state: Server state (kept for request context compatibility).
+        directory: Optional directory filter (unused, kept for contract).
+        workspace: Optional workspace filter (unused, kept for contract).
+    """
+    _ = directory, workspace, state
+    return []
+
+
+@router.get("/experimental/capabilities")
+async def get_capabilities() -> OpenCodeCapabilities:
+    """Return experimental server capabilities for the OpenCode client.
+
+    OpenCode requires the ``backgroundSubagents`` field. We do not yet support
+    background subagents, so this is reported as ``false``.
+    """
+    return OpenCodeCapabilities(background_subagents=False)
 
 
 @router.post("/experimental/workspace")
