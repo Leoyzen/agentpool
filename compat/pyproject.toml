@@ -1,0 +1,38 @@
+[project]
+name = "agentpool"
+version = "2.9.5"
+description = "Backward-compatible compatibility package — delegates to wolfharness"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+dependencies = [
+    "wolfharness==2.9.5",
+]
+
+[project.optional-dependencies]
+coding = ["wolfharness[coding]==2.9.5"]
+zed = ["wolfharness[zed]==2.9.5"]
+
+[project.scripts]
+agentpool = "wolfharness_cli.__main__:cli"
+wolfharness = "wolfharness_cli.__main__:cli"
+
+[build-system]
+requires = ["uv_build>=0.8.22"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = [
+    "agentpool",
+    "agentpool_bot",
+    "agentpool_cli",
+    "agentpool_commands",
+    "agentpool_config",
+    "agentpool_prompts",
+    "agentpool_server",
+    "agentpool_storage",
+    "agentpool_sync",
+    "agentpool_toolsets",
+]
+
+[tool.uv.sources]
+wolfharness = { path = "..", editable = true }
