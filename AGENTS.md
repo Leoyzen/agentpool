@@ -11,6 +11,28 @@ All significant changes go through OpenSpec: `/opsx:explore` → `/opsx:propose`
 - Location: `openspec/` (24 capability specs, 34 archived changes)
 - CLI: `openspec` v1.4+ — see `openspec/config.yaml`
 
+## Changelog
+
+Every release requires a changelog entry. See `changelog/README.md` for the full convention.
+
+### Release workflow
+
+1. Development changes accumulate in `changelog/unreleased/` — one detail file per logical change (`YYYY-MM-DD-short-slug.md`).
+2. At release time:
+   - Rename `unreleased/` to the version number (e.g. `2.10.0/`).
+   - Write `README.md` (summary linking each detail file) and `RELEASE.md` (GitHub Release body).
+   - Update `pyproject.toml` version.
+   - Commit **before** creating the git tag.
+   - Create a fresh empty `unreleased/` for the next cycle.
+
+### Detail file format
+
+```markdown
+# Title
+
+What changed and why. Use `##` sections once the entry covers more than one thing.
+```
+
 ## Quick Commands
 
 ```bash
