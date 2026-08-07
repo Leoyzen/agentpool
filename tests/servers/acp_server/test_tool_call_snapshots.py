@@ -11,9 +11,9 @@ from typing import TYPE_CHECKING
 from exxec.models import ExecutionResult
 import pytest
 from syrupy.extensions.json import JSONSnapshotExtension
-from wolfharness_config.wolfharness_tools import BashToolConfig, ExecuteCodeToolConfig
 
 from wolfharness_config.toolsets import FSSpecToolsetConfig
+from wolfharness_config.wolfharness_tools import BashToolConfig, ExecuteCodeToolConfig
 
 from .tool_call_harness import ToolCallTestHarness
 
