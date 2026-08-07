@@ -26,10 +26,10 @@ from pydantic_ai.models.test import TestModel
 import pytest
 import yamling
 
-from agentpool.capabilities.viking import VikingCapability
-from agentpool.capabilities.viking.identity import VikingIdentity
-from agentpool.capabilities.viking.tools import build_tools
-from agentpool_config.capabilities import VikingCapabilityConfig, build_capability
+from wolfharness.capabilities.viking import VikingCapability
+from wolfharness.capabilities.viking.identity import VikingIdentity
+from wolfharness.capabilities.viking.tools import build_tools
+from wolfharness_config.capabilities import VikingCapabilityConfig, build_capability
 
 
 pytestmark = pytest.mark.integration
@@ -98,7 +98,7 @@ def _build_cap_from_config(
 
 def test_yaml_config_loading_viking_all() -> None:
     """YAML config with type=viking, mode=all produces VikingCapabilityConfig."""
-    from agentpool import AgentsManifest
+    from wolfharness import AgentsManifest
 
     yaml_str = """
 agents:
@@ -121,7 +121,7 @@ agents:
 
 def test_yaml_config_loading_viking_retrieve() -> None:
     """YAML config with mode=retrieve produces VikingCapabilityConfig with that mode."""
-    from agentpool import AgentsManifest
+    from wolfharness import AgentsManifest
 
     yaml_str = """
 agents:
@@ -141,7 +141,7 @@ agents:
 
 def test_yaml_config_loading_viking_with_fields() -> None:
     """YAML config with all fields populated parses correctly."""
-    from agentpool import AgentsManifest
+    from wolfharness import AgentsManifest
 
     yaml_str = """
 agents:
@@ -174,7 +174,7 @@ agents:
 
 def test_yaml_config_loading_default_mode() -> None:
     """YAML config without mode defaults to 'all'."""
-    from agentpool import AgentsManifest
+    from wolfharness import AgentsManifest
 
     yaml_str = """
 agents:
@@ -503,7 +503,7 @@ def test_resource_read_level_read() -> None:
 
 def test_resource_read_level_yaml_parsing() -> None:
     """YAML config with resource_read_level parses correctly."""
-    from agentpool import AgentsManifest
+    from wolfharness import AgentsManifest
 
     yaml_str = """
 agents:

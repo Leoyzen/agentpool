@@ -65,7 +65,7 @@ Everything is a MessageNode - enabling seamless composition:
 
 ## License
 
-MIT License - see [LICENSE](https://github.com/Leoyzen/agentpool/blob/main/LICENSE) for details.
+MIT License - see [LICENSE](https://github.com/Leoyzen/wolfharness/blob/main/LICENSE) for details.
 
 ## Documentation
 
@@ -95,7 +95,7 @@ agents:
 ### Python Usage
 
 ```python
-from agentpool import AgentPool
+from wolfharness import AgentPool
 
 async def main():
     async with AgentPool("agents.yml") as pool:

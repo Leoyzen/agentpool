@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agentpool.capabilities.viking import VikingCapability
+from wolfharness.capabilities.viking import VikingCapability
 
 
 def build_mock_client() -> AsyncMock:
