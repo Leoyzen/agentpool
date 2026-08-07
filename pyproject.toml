@@ -93,8 +93,18 @@ Source = "https://github.com/Leoyzen/wolfharness"
 
 [project.scripts]
 acp-bridge = "acp.bridge.__main__:main"
+agentpool = "wolfharness_cli.__main__:cli"
 wolfharness = "wolfharness_cli.__main__:cli"
 wolfharness-db = "wolfharness_storage.sql_provider.cli:main"
+
+[project.entry-points."fsspec.specs"]
+acp = "acp.filesystem:ACPFileSystem"
+
+[project.entry-points."jinjarope.environment"]
+wolfharness = "wolfharness.utils:setup_env"
+
+[project.entry-points."universal_pathlib.implementations"]
+acp = "acp.filesystem:ACPPath"
 
 [project.entry-points."wolfharness.capabilities"]
 mcp = "wolfharness.capabilities.mcp_server_cap:McpServerCap"
@@ -106,15 +116,6 @@ code_mode = "wolfharness.capabilities.code_mode_capability:CodeModeCapability"
 tool_display = "wolfharness.capabilities.tool_display_capability:ToolDisplayCapability"
 question = "wolfharness.capabilities.question:QuestionCapability"
 background_task = "wolfharness.capabilities.background_task:BackgroundTaskCapability"
-
-[project.entry-points."fsspec.specs"]
-acp = "acp.filesystem:ACPFileSystem"
-
-[project.entry-points."jinjarope.environment"]
-wolfharness = "wolfharness.utils:setup_env"
-
-[project.entry-points."universal_pathlib.implementations"]
-acp = "acp.filesystem:ACPPath"
 
 [project.optional-dependencies]
 a2a = ["fasta2a", "starlette"]  # A2A Server
@@ -348,7 +349,11 @@ ignore_imports = [
 name = "ACP package must not import from server"
 type = "forbidden"
 source_modules = ["acp"]
-forbidden_modules = ["wolfharness_server", "wolfharness_commands", "wolfharness_cli"]
+forbidden_modules = [
+  "wolfharness_server",
+  "wolfharness_commands",
+  "wolfharness_cli"
+]
 # No direct violations exist; all violations are indirect (acp -> wolfharness.utils
 # -> ... -> server). Indirect checks are disabled via allow_indirect_imports
 # until the downstream wolfharness.common_types -> wolfharness_server chain is fixed
@@ -526,33 +531,33 @@ constraint-dependencies = ["extism-sys<1.13.0"]
 name = "mknodes"
 version = "2.2.14"
 requires-dist = [
-    "wolfharness",
-    "anybadge",
-    "anyenv[httpx]",
-    "clinspector",
-    "coloraide",
-    "epregistry",
-    "fieldz",
-    "fsspec",
-    "git-changelog",
-    "githarbor",
-    "gitpython",
-    "griffelib",
-    "jinja2",
-    "jinjarope[icons]",
-    "mkdocstrings[python]",
-    "natsort",
-    "pipdeptree",
-    "pydantic",
-    "pytest-asyncio",
-    "python-dotenv",
-    "setuptools",
-    "tomli-w",
-    "typer",
-    "universal-pathlib",
-    "upathtools[httpx]",
-    "yamling",
-    "zensical",
+  "wolfharness",
+  "anybadge",
+  "anyenv[httpx]",
+  "clinspector",
+  "coloraide",
+  "epregistry",
+  "fieldz",
+  "fsspec",
+  "git-changelog",
+  "githarbor",
+  "gitpython",
+  "griffelib",
+  "jinja2",
+  "jinjarope[icons]",
+  "mkdocstrings[python]",
+  "natsort",
+  "pipdeptree",
+  "pydantic",
+  "pytest-asyncio",
+  "python-dotenv",
+  "setuptools",
+  "tomli-w",
+  "typer",
+  "universal-pathlib",
+  "upathtools[httpx]",
+  "yamling",
+  "zensical",
 ]
 
 [tool.uv.build-backend]

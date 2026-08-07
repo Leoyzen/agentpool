@@ -159,8 +159,14 @@ max-complexity = 15
 "src/wolfharness/capabilities/resource_resolver.py" = ["PLR0911"]
 "src/wolfharness/capabilities/resource_capability.py" = ["PLR0911", "TRY300"]
 # Background task capability: PLR0915/PLR0911 for complex lifecycle/tool methods, TRY301 for re-raise pattern
-"src/wolfharness/capabilities/background_task/capability.py" = ["PLR0915", "TRY301"]
-"src/wolfharness/capabilities/background_task/manager.py" = ["PLR0915", "PLR0911"]
+"src/wolfharness/capabilities/background_task/capability.py" = [
+  "PLR0915",
+  "TRY301"
+]
+"src/wolfharness/capabilities/background_task/manager.py" = [
+  "PLR0915",
+  "PLR0911"
+]
 # Question tool tests: RUF001 — fullwidth CJK punctuation is intentional test data
 # for verifying CJK text parsing in the question_for_user XML
 "tests/tool_impls/question/test_question_for_user.py" = ["RUF001"]
