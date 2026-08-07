@@ -18,8 +18,15 @@ import wolfharness.capabilities.background_task.capability as btc_module
 from wolfharness.capabilities.background_task.capability import ForceRetrievalMode
 
 
-CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
-TASK_SCHEMA_PATH = str(CONFIG_DIR / "tools" / "task.yaml")
+SCHEMAS_DIR = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "wolfharness"
+    / "capabilities"
+    / "background_task"
+    / "schemas"
+)
+TASK_SCHEMA_PATH = str(SCHEMAS_DIR / "task.yaml")
 
 
 @runtime_checkable
