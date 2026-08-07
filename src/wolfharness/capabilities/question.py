@@ -14,6 +14,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
+import warnings
 
 import logfire
 from pydantic_ai import RunContext, Tool
@@ -130,12 +131,20 @@ class QuestionCapability(AbstractCapability[AgentContext]):
             description = (
                 self._question_schema.get("description") if self._question_schema else None
             ) or "Ask the user one or more structured questions."
-            tool = Tool(
-                self._question,
-                name=name,
-                description=description,
-                metadata={"category": "other"},
-            )
+            # pydantic_ai can't schema ToolResult (plain dataclass); runtime
+            # conversion in _ToolInterceptCapability.wrap_tool_execute handles it.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    category=UserWarning,
+                    message=r"Could not generate return schema for .+",
+                )
+                tool = Tool(
+                    self._question,
+                    name=name,
+                    description=description,
+                    metadata={"category": "other"},
+                )
             tools.append(apply_params_schema(tool, self._question_schema))
 
         if not tools:
