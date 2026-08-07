@@ -740,6 +740,7 @@ class SkillManagerCap(
         arguments: str | None = None,
         *,
         node_name: str | None = None,
+        include_assembly: bool = True,
     ) -> str:
         """Implementation for the ``load_skill`` agent tool.
 
@@ -752,6 +753,11 @@ class SkillManagerCap(
             arguments: Optional space-separated arguments for substitution.
             node_name: Optional node name override for package-scoped skill
                 visibility. Defaults to the node carried by ``ctx``.
+            include_assembly: When False, skip the MCP/tool status rendering
+                and tool import (module side effects) entirely — returns pure
+                instruction text for instruction-only injection (e.g. team
+                member skills). Defaults to True, preserving the agent-facing
+                ``load_skill`` tool behavior.
         """
         pool, resolved_node = self._resolve_pool(ctx)
         node_name_effective = node_name if node_name is not None else resolved_node
@@ -803,16 +809,20 @@ class SkillManagerCap(
         # Apply argument substitution
         instructions = _substitute_arguments(instructions, arguments)
 
-        # Activate MCP servers and tools declared in the skill
+        # Activate MCP servers and tools declared in the skill.
+        # When ``include_assembly`` is False (e.g. instruction-only injection
+        # into a team member prompt), skip the MCP/tool status appendix
+        # entirely — tool modules are NOT imported (importing runs their
+        # module-level side effects, out of scope for prompt injection).
         mcp_lines: list[str] = []
         tool_lines: list[str] = []
 
-        if skill.mcp_servers:
+        if include_assembly and skill.mcp_servers:
             for server_name, config in skill.mcp_servers.items():
                 server_desc = config.command or config.url or "configured"
                 mcp_lines.append(f"- `{server_name}`: {server_desc}")
 
-        if skill.tools:
+        if include_assembly and skill.tools:
             tool_manager = SkillToolManager()
             for tool_config in skill.tools:
                 result = tool_manager.import_tool(tool_config)

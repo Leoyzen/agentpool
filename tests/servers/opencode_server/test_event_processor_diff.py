@@ -266,3 +266,63 @@ class TestDiffContentItemToUnifiedDiff:
         ]
         for line in hunk_lines:
             assert line[0] in (" ", "-", "+"), f"Invalid hunk line prefix: {line!r}"
+
+
+class TestRichProgressCarriesContent:
+    """TextContentItem in ToolCallProgressEvent surfaces as tool output.
+
+    The emit_rich layer wraps viking read/search results in
+    ``TextContentItem``; the event_processor must append its text to the
+    tool's accumulated output so the OpenCode TUI renders the content.
+    """
+
+    @pytest.mark.asyncio
+    async def test_text_content_becomes_tool_output(
+        self,
+        server_state: object,
+    ) -> None:
+        """TextContentItem → appended to ctx.tool_outputs for the tool part."""
+        from wolfharness.agents.events import TextContentItem
+
+        processor = EventProcessor()
+        ctx = _make_ctx(server_state)
+
+        async def _feed(event: object) -> None:
+            async for _ in processor.process(event, ctx):  # type: ignore[arg-type]
+                pass
+
+        # Step 1: start (mirrors emit_rich pre-execution event)
+        await _feed(
+            ToolCallStartEvent(
+                tool_call_id="call_rich_001",
+                tool_name="viking_read",
+                raw_input={"uris": ["viking://test.md"]},
+                title="Read viking://test.md",
+                kind="read",
+            )
+        )
+
+        # Step 2: rich progress with content
+        await _feed(
+            ToolCallProgressEvent(
+                tool_call_id="call_rich_001",
+                tool_name="viking_read",
+                title="Read viking://test.md",
+                items=[TextContentItem(text="line 1\nline 2")],
+            )
+        )
+
+        # Step 3: complete
+        await _feed(
+            ToolCallCompleteEvent(
+                tool_call_id="call_rich_001",
+                tool_name="viking_read",
+                tool_input={"uris": ["viking://test.md"]},
+                tool_result="line 1\nline 2",
+                agent_name="test-agent",
+                message_id="msg_001",
+            )
+        )
+
+        output = ctx.get_tool_output("call_rich_001")
+        assert "line 1\nline 2" in output, f"Content not in tool output: {output!r}"

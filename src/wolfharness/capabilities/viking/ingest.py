@@ -11,6 +11,7 @@ synchronously in ``after_run()``.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING, Any
 
@@ -25,6 +26,14 @@ _RECALL_RE = re.compile(r"<openviking-recall>.*?</openviking-recall>", re.DOTALL
 _PROFILE_RE = re.compile(r"<openviking-profile>.*?</openviking-profile>", re.DOTALL)
 
 _REPLACEMENT = "[recalled context omitted]"
+
+# Template for the memory-intent marker appended to deferred remember
+# captures. The marker is the only channel through which the extraction
+# LLM can see the caller's intent (the server MemoryPolicy has no
+# dedicated intent field), so it must survive sanitization — it does,
+# since sanitization only strips ``<openviking-recall>`` /
+# ``<openviking-profile>`` blocks.
+_MEMORY_INTENT_TEMPLATE = "<memory-intent>{reason}</memory-intent>"
 
 
 def _sanitize_message(content: str, enabled: bool = True) -> str:
@@ -92,7 +101,7 @@ async def _ingest_conversation(
     session_id: str,
     source_type: str = "wolfharness",
     keep_recent_turns: int = 0,
-) -> None:
+) -> Any:
     """Write conversation messages to a Viking session.
 
     Creates a new session, adds each message, and commits with the
@@ -106,11 +115,69 @@ async def _ingest_conversation(
         source_type: Source type metadata for the session.
         keep_recent_turns: Number of recent turns to retain after commit.
             When 0, no retention parameter is passed to ``commit_session``.
+
+    Returns:
+        The commit response from ``commit_session`` (e.g.
+        ``{"archive_uri": ..., "task_id": ...}`` on SDK clients that
+        expose asynchronous extraction).
     """
     await client.create_session(session_id=session_id)
     for msg in messages:
         await client.add_message(session_id, msg["role"], msg["content"])
     commit_kwargs: dict[str, Any] = {}
     if keep_recent_turns > 0:
-        commit_kwargs["keep_recent_turn_count"] = keep_recent_turns
-    await client.commit_session(session_id, **commit_kwargs)
+        commit_kwargs["keep_recent_count"] = keep_recent_turns
+    return await client.commit_session(session_id, **commit_kwargs)
+
+
+async def read_memory_diff(client: Any, archive_uri: str) -> dict[str, Any]:
+    """Read and parse the extraction memory diff for a committed archive.
+
+    The server writes ``memory_diff.json`` under the archive after the
+    asynchronous Phase 2 extraction completes. Handles both structured
+    (dict) and serialized (str/bytes) ``read()`` responses.
+
+    Args:
+        client: The Viking SDK ``AsyncHTTPClient`` instance.
+        archive_uri: Archive URI returned by ``commit_session``.
+
+    Returns:
+        The parsed diff dict. Raises ``ValueError`` if the payload is
+        not valid JSON.
+    """
+    raw = await client.read(f"{archive_uri}/memory_diff.json")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, bytes):
+        raw = raw.decode()
+    if isinstance(raw, str):
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def format_memory_diff_summary(diff: dict[str, Any]) -> str:
+    """Format a memory diff into a single-line steer summary.
+
+    Recognizes ``added``/``updated``/``deleted`` keys in either plain
+    or ``*_uris`` form. Returns an empty string when the diff carries
+    no URIs (nothing worth notifying).
+
+    Args:
+        diff: Parsed memory diff dict.
+
+    Returns:
+        A one-line summary, or ``""`` when empty.
+    """
+    sections: list[str] = []
+    for label, keys in (
+        ("added", ("added", "added_uris")),
+        ("updated", ("updated", "updated_uris")),
+        ("deleted", ("deleted", "deleted_uris")),
+    ):
+        uris = next((diff.get(key) for key in keys if diff.get(key)), None)
+        if uris:
+            sections.append(f"{label}: {', '.join(str(uri) for uri in uris)}")
+    if not sections:
+        return ""
+    return f"[Viking memory updated] {'; '.join(sections)}"

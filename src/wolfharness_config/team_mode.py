@@ -26,7 +26,7 @@ Example YAML::
 from __future__ import annotations
 
 import tempfile
-from typing import Literal
+from typing import Any, Literal, cast
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from schemez import Schema
@@ -149,6 +149,9 @@ class MemberSpec(Schema):
         agent: Agent name to map to in the registry.
         instructions: Per-member instruction text injected into the member's
             system prompt as a ``## Your Assignment`` section.
+        skills: Optional skill names or ``skill://`` URIs (including reference
+            paths) injected as instruction text into the member's system
+            prompt when the team is created from these defaults.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -160,6 +163,13 @@ class MemberSpec(Schema):
         title="Per-member instructions",
         description="Per-member instruction text injected into the member's "
         "system prompt as a '## Your Assignment' section",
+    )
+    skills: list[str] = Field(
+        default_factory=list,
+        title="Per-member skills",
+        description="Optional skill names or skill:// URIs (including "
+        "reference paths) injected as instruction text into the member's "
+        "system prompt",
     )
 
 
@@ -340,6 +350,20 @@ def resolve_team_mode(
 
     if not overrides:
         return global_config
+
+    # ``model_copy(update=...)`` skips validation, so nested models that were
+    # overridden arrive as raw dicts. Re-hydrate them back into model
+    # instances so the merged config keeps typed nested fields
+    # (``defaults.members[].skills``, bounds, blackboard).
+    nested_models: dict[str, type[Schema]] = {
+        "defaults": TeamDefaultsConfig,
+        "bounds": TeamBounds,
+        "blackboard": BlackboardConfig,
+    }
+    for field_name, model_type in nested_models.items():
+        raw = overrides.get(field_name)
+        if isinstance(raw, dict):
+            overrides[field_name] = model_type(**cast(dict[str, Any], raw))
 
     return global_config.model_copy(update=overrides)
 

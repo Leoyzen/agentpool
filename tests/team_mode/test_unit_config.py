@@ -307,3 +307,48 @@ def test_protocol_template_has_no_guidelines_section() -> None:
     )
 
     assert "## Guidelines" not in rendered
+
+
+@pytest.mark.unit
+def test_member_spec_skills_serializes_and_accepts_uri() -> None:
+    """MemberSpec.skills validates as list[str], supports skill:// URIs."""
+    spec = MemberSpec(
+        name="translator", agent="translator", skills=["lodestone", "skill://foo/refs/g.md"]
+    )
+    assert spec.skills == ["lodestone", "skill://foo/refs/g.md"]
+
+
+@pytest.mark.unit
+def test_member_spec_skills_defaults_to_empty() -> None:
+    """MemberSpec.skills defaults to [] when omitted."""
+    spec = MemberSpec(name="translator", agent="translator")
+    assert spec.skills == []
+
+
+@pytest.mark.unit
+def test_resolve_team_mode_keeps_defaults_member_skills() -> None:
+    """Agent-level defaults.members[].skills survives the merge."""
+    global_config = TeamModeConfig(
+        enabled=True,
+        member_eligible=["a"],
+        defaults=TeamDefaultsConfig(
+            team_name="g",
+            members=[MemberSpec(name="a", agent="a")],
+        ),
+    )
+    agent_config = TeamModeConfig(
+        enabled=True,
+        member_eligible=["a"],
+        defaults=TeamDefaultsConfig(
+            team_name="g",
+            members=[
+                MemberSpec(name="a", agent="a", skills=["lodestone"]),
+            ],
+        ),
+    )
+
+    merged = resolve_team_mode(global_config, agent_config)
+
+    assert merged is not None
+    assert merged.defaults is not None
+    assert merged.defaults.members[0].skills == ["lodestone"]

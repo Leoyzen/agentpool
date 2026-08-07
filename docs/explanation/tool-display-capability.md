@@ -4,15 +4,29 @@
 
 模式对齐 `ToolInterceptCapability`(`src/wolfharness/agents/native_agent/tool_intercept.py`):独立 `AbstractCapability` 直接覆写 `get_wrapper_toolset()` 与 `wrap_tool_execute()`,作为全局中间件横切 agent 的全部工具 —— 不组合子能力、无 `capabilities` 字段。
 
-## 三个正交开关
+## 五个正交开关
 
 | 开关 | 默认 | 作用 |
 |---|---|---|
 | `rename_mode: bool` | `true` | 启用工具改名。经 `get_wrapper_toolset()` 返回 pydantic-ai 官方 `RenamedToolset(wrapped=toolset, name_map=...)`,按 `name_map` 重写 `tool_def.name`,执行时自动还原 `ctx.tool_name`。`name_map` 为空或 `rename_mode: false` 时不包装 |
 | `emit_diff: bool` | `true` | 启用 diff 事件注入。`wrap_tool_execute()` 在工具真实执行后,对命中的工具注入 `ToolCallProgressEvent.file_edit(...)`(携带 `DiffContentItem`) |
-| `emit_diff_for: set[str]` | `set()`(空=不注入) | 选择注入白名单,**按工具名精确过滤**。仅当 `emit_diff: true` 且工具名在名单内时注入 |
+| `emit_diff_for: set[str]` | `set()`(空=不注入) | diff 注入白名单,**按工具名精确过滤**。仅当 `emit_diff: true` 且工具名在名单内时注入 |
+| `emit_rich: bool` | `true` | 启用 rich 展示事件注入。对只读/查询类工具,执行前注入 `ToolCallStartEvent`(kind + locations),执行后注入携带内容项的 progress 事件 |
+| `emit_rich_for: set[str]` | `set()`(空=不注入) | rich 注入白名单,**按工具名精确过滤**。仅当 `emit_rich: true` 且工具名在名单内时注入 |
 
-`name_map` 与 `emit_diff_for` 都为空时,退化为**无操作装饰器**:`get_wrapper_toolset` 返回 `None`,`wrap_tool_execute` 直接透传。
+`name_map`、`emit_diff_for` 与 `emit_rich_for` 均为空时,退化为**无操作装饰器**:`get_wrapper_toolset` 返回 `None`,`wrap_tool_execute` 直接透传。
+
+## Rich 展示层(emit_rich)
+
+面向 **read/search/glob/find 类只读工具**,让协议客户端获得正确的工具分类、文件锚点与内容展示 —— 与 rename(ACP 场景 `rename_mode: false` 也需 rich)、emit_diff(read/query 工具不需 diff)完全正交。
+
+**数据来源(策略注册表)**:模块级 `_RICH_EXTRACTORS` 按**原始工具名**注册 extractor,接收真实执行结果产出内容项 + locations;未注册的工具退化到 `derive_rich_tool_info` 的 title/kind + 通用参数位置提取,不注入内容。新工具扩展:注册一条 extractor 即可。
+
+**执行前注入** `ToolCallStartEvent(kind, locations)` —— 给客户端正确的工具图标与文件锚点(ACP 转换器原生消费,零协议改动)。
+
+**执行后注入** progress 事件携带 `TextContentItem`(读取内容/搜索结果)—— 经 opencode `_process_tool_progress` 转成 tool output 文本。post 事件**沿用执行前 title**(search/glob 等共享 extractor 的工具不会被显示成通用的 "Read")。
+
+**防重复**:read/query 工具的内容走 rich 通道,不生成 `DiffContentItem`;write/edit 工具的 diff 走 emit_diff 通道 —— 两类工具由 `emit_rich_for`/`emit_diff_for` 白名单天然隔离。
 
 ## Diff 数据来源(执行后注入)
 
@@ -45,8 +59,8 @@ wrap_tool_execute → ctx.deps.events.tool_call_progress(title, items=[DiffConte
 
 | 场景 | 配置 | 说明 |
 |---|---|---|
-| **OpenCode TUI** | `rename_mode: true` + `emit_diff: true` | TUI 按工具名白名单渲染 —— 改名命中白名单(`viking_write`→`write`)+ diff 注入 |
-| **ACP (Zed)** | `rename_mode: false` + `emit_diff: true` | Zed 展示原名即可,`FileEditToolCallContent` 原生渲染差异 |
+| **OpenCode TUI** | `rename_mode: true` + `emit_diff: true` + `emit_rich: true` | 改名命中白名单(`viking_write`→`write`, `viking_read`→`read`)+ diff 注入 + rich 展示 |
+| **ACP (Zed)** | `rename_mode: false` + `emit_diff: true` + `emit_rich: true` | Zed 展示原名即可,`FileEditToolCallContent` 原生渲染差异、`ToolCallStartEvent` 渲染 kind/locations |
 | **子能力已自发射** (fsspec 模式) | `rename_mode: true` + `emit_diff: false` | 子能力已自行 emit `DiffContentItem`,装饰器仅改名,避免重复注入 |
 
 **防重复原则**:子 capability 已自行发射 diff 事件的场景,必须用 `emit_diff: false`,否则同一变更被注入两次。
@@ -62,12 +76,16 @@ capabilities:
       name_map:
         viking_write: write
         viking_edit: edit
+        viking_read: read
+        viking_search: grep
       emit_diff: true
       emit_diff_for: [viking_write, viking_edit]
+      emit_rich: true
+      emit_rich_for: [viking_read, viking_search, viking_find, viking_glob]
 ```
 
 - 注册:entry-point 组 `wolfharness.capabilities`,key `tool_display` → `wolfharness.capabilities.tool_display_capability:ToolDisplayCapability`(见 `pyproject.toml`),由 `registry.py` 发现
-- 构造:`EntryPointCapabilityConfig(type=..., args={...}).build()` 以 `cls(**args)` 实例化 —— dataclass 字段(`rename_mode`/`name_map`/`emit_diff`/`emit_diff_for`)+ `id` 天然兼容 YAML 装配
+- 构造:`EntryPointCapabilityConfig(type=..., args={...}).build()` 以 `cls(**args)` 实例化 —— dataclass 字段(`rename_mode`/`name_map`/`emit_diff`/`emit_diff_for`/`emit_rich`/`emit_rich_for`)+ `id` 天然兼容 YAML 装配;`emit_rich_for` 传入的 YAML 列表在 `__post_init__` 转为 `set`
 
 ## 已知约束
 
