@@ -21,6 +21,8 @@
 - [x] 3.6 Update `scripts/restart_opencode_server.sh` — `agentpool` → `wolfharness`
 - [x] 3.7 Update `src/wolfharness_server/opencode_server/.rules` — log paths → `wolfharness`
 - [x] 3.8 Verify no residual `agentpool` references remain (excluding `openspec/changes` archives and the third-party `agentpool` PyPI dependency in `uv.lock`)
+  - [x] 3.8.1 Rename `tests/agentpool_server/` → `tests/wolfharness_server/` (post-merge audit found the directory omitted from the original `src/*` rename list)
+  - [x] 3.8.2 Rename `agentpool-session-pool/` → `wolfharness-session-pool/` (same omission)
 
 ## 4. Fix lint issues from the longer name
 
@@ -39,10 +41,10 @@
 
 - [x] 6.1 `uv run ruff check src/ tests/` passes
 - [x] 6.2 `uv run ruff format src/ tests/ --check` passes
-- [ ] 6.3 `uv run pytest -m unit` results unchanged from `origin/main` baseline
+- [x] 6.3 `uv run pytest -m unit` results unchanged from `origin/main` baseline
 
 ## 7. Deliverable
 
 - [x] 7.1 Commit the rename as a single atomic commit
-- [ ] 7.2 Push branch and open PR against `origin/main`
-- [ ] 7.3 Link PR to issue #357 and milestone 2 ("Rebrand: AgentPool → WolfHarness")
+- [x] 7.2 Push branch and open PR against `origin/main`
+- [x] 7.3 Link PR to issue #357 and milestone 2 ("Rebrand: AgentPool → WolfHarness")
