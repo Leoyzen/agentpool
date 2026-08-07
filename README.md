@@ -5,12 +5,11 @@
 <h1 align="center">WolfHarness</h1>
 
 <p align="center">
-  <a href="https://github.com/wolf1069b/agentpool/actions"><img src="https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/ci.yml?branch=main&label=CI" alt="CI"></a>
-[![codecov](https://img.shields.io/codecov/c/github/wolf1069b/agentpool)](https://codecov.io/gh/wolf1069b/agentpool)
-[![Docs](https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/docs.yml?branch=main&label=Docs)](https://leoyzen.github.io/wolfharness/)
-[![PyPI](https://img.shields.io/pypi/v/wolfharness)](https://pypi.org/project/wolfharness/)
-[![Python](https://img.shields.io/pypi/pyversions/wolfharness)](https://pypi.org/project/wolfharness/)
-[![License](https://img.shields.io/pypi/l/wolfharness)](https://github.com/wolf1069b/agentpool/blob/main/LICENSE)
+  <a href="https://github.com/wolf1069b/agentpool/actions/workflows/pytest.yml"><img src="https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/pytest.yml?branch=main&label=Tests" alt="Tests"></a>
+  <a href="https://codecov.io/gh/wolf1069b/agentpool"><img src="https://img.shields.io/codecov/c/github/wolf1069b/agentpool" alt="codecov"></a>
+  <a href="https://leoyzen.github.io/wolfharness/"><img src="https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/documentation.yml?branch=main&label=Docs" alt="Docs"></a>
+  <a href="https://github.com/wolf1069b/agentpool/blob/main/LICENSE"><img src="https://img.shields.io/github/license/wolf1069b/agentpool" alt="License"></a>
+</p>
 
 > **PydanticAI-based multi-agent orchestration framework** — define heterogeneous agents in one YAML file, compose them into teams and workflows, and expose them through ACP, OpenCode, MCP, and AG-UI protocols.
 
@@ -101,28 +100,9 @@ agents:
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph WolfHarness
-        subgraph config[YAML Configuration]
-            native[Native Agents<br/>PydanticAI]
-            acp_agents[ACP Agents<br/>Goose, etc.]
-            workflows[Teams & Workflows]
-        end
-        subgraph interface[Unified Agent Interface]
-            delegation[Inter-agent delegation]
-            routing[Message routing]
-            context[Shared context]
-        end
-        config --> interface
-    end
-    interface --> acp_server[ACP Server]
-    interface --> opencode_server[OpenCode Server]
-    interface --> agui_server[AG-UI Server]
-    acp_server --> clients1[Zed, Toad, ACP Clients]
-    opencode_server --> clients2[OpenCode TUI/Desktop]
-    agui_server --> clients3[AG-UI Clients]
-```
+<p align="center">
+  <img src="assets/structure.png" alt="WolfHarness Architecture" width="700"/>
+</p>
 
 ## Key Features
 
