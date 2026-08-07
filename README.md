@@ -296,6 +296,23 @@ If you use WolfHarness in your research or project, please cite:
 }
 ```
 
+## Migrating from AgentPool
+
+This project was renamed from **AgentPool** to **WolfHarness** (v2.10+). Backward-compatible shims are in place to ease the transition:
+
+| Old | New | Status |
+|-----|-----|--------|
+| `import agentpool` | `import wolfharness` | ✅ Shim with deprecation warning |
+| `import agentpool_cli` | `import wolfharness_cli` | ✅ Shim with deprecation warning |
+| `import agentpool_config` | `import wolfharness_config` | ✅ Shim with deprecation warning |
+| `import agentpool_server` | `import wolfharness_server` | ✅ Shim with deprecation warning |
+| `import agentpool_storage` | `import wolfharness_storage` | ✅ Shim with deprecation warning |
+| `import agentpool_toolsets` | `import wolfharness_toolsets` | ✅ Shim with deprecation warning |
+| `agentpool run ...` | `wolfharness run ...` | ✅ CLI alias with deprecation warning |
+| `AGENTPOOL_CONFIG_DIR` env var | `WOLFHARNESS_CONFIG_DIR` | ⚠️ Still supported, migrate when convenient |
+
+The shims emit a `DeprecationWarning` and will be removed in a future release. Please update your imports and scripts accordingly.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
