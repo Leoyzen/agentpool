@@ -2,7 +2,7 @@
 
 [project]
 name = "wolfharness"
-version = "2.9.5"
+version = "4.0.0"
 description = "Pydantic-AI based Multi-Agent Framework with YAML-based Agents, Teams, Workflows & Extended ACP / AGUI integration"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
