@@ -1,83 +1,35 @@
-# AgentPool
+<p align="center">
+  <img src="assets/logo.png" alt="WolfHarness" width="200"/>
+</p>
 
-[![PyPI License](https://img.shields.io/pypi/l/wolfharness.svg)](https://pypi.org/project/wolfharness/)
-[![Package status](https://img.shields.io/pypi/status/wolfharness.svg)](https://pypi.org/project/wolfharness/)
-[![Monthly downloads](https://img.shields.io/pypi/dm/wolfharness.svg)](https://pypi.org/project/wolfharness/)
-[![Python version](https://img.shields.io/pypi/pyversions/wolfharness.svg)](https://pypi.org/project/wolfharness/)
-[![Github Stars](https://img.shields.io/github/stars/Leoyzen/wolfharness)](https://github.com/Leoyzen/wolfharness/stars)
+<h1 align="center">WolfHarness</h1>
 
-**A unified agent orchestration hub that lets you configure and manage heterogeneous AI agents via YAML and expose them through standardized protocols.**
+<p align="center">
+  <a href="https://github.com/wolf1069b/agentpool/actions"><img src="https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/ci.yml?branch=main&label=CI" alt="CI"></a>
+[![codecov](https://img.shields.io/codecov/c/github/wolf1069b/agentpool)](https://codecov.io/gh/wolf1069b/agentpool)
+[![Docs](https://img.shields.io/github/actions/workflow/status/wolf1069b/agentpool/docs.yml?branch=main&label=Docs)](https://leoyzen.github.io/wolfharness/)
+[![PyPI](https://img.shields.io/pypi/v/wolfharness)](https://pypi.org/project/wolfharness/)
+[![Python](https://img.shields.io/pypi/pyversions/wolfharness)](https://pypi.org/project/wolfharness/)
+[![License](https://img.shields.io/pypi/l/wolfharness)](https://github.com/wolf1069b/agentpool/blob/main/LICENSE)
 
-[Documentation](https://leoyzen.github.io/wolfharness/)
+> **PydanticAI-based multi-agent orchestration framework** — define heterogeneous agents in one YAML file, compose them into teams and workflows, and expose them through ACP, OpenCode, MCP, and AG-UI protocols.
 
-## The Problem
+[Documentation](https://leoyzen.github.io/wolfharness/) · [Getting Started](https://leoyzen.github.io/wolfharness/tutorials/) · [API Reference](https://leoyzen.github.io/wolfharness/reference/)
 
-You want to use multiple AI agents together - native PydanticAI agents for analysis, ACP-compatible agents like Goose for specific tasks, maybe a custom agent. But each has different APIs, protocols, and integration patterns. Coordinating them means writing glue code for each combination.
+---
 
-## The Solution
+## Why WolfHarness?
 
-AgentPool acts as a protocol bridge. Define all your agents in one YAML file - whether they're native (PydanticAI-based) or external ACP agents. Then expose them all through ACP or AG-UI protocols, letting them cooperate, delegate, and communicate through a unified interface. 
+> With raw frameworks, you write glue code for every agent pair — at 1× speed.  
+> With WolfHarness, you define agents once in YAML and use them everywhere — at 10×.
 
-```mermaid
-flowchart TB
-    subgraph AgentPool
-        subgraph config[YAML Configuration]
-            native[Native Agents<br/>PydanticAI]
-            acp_agents[ACP Agents<br/>Goose, etc.]
-            workflows[Teams & Workflows]
-        end
-        
-        subgraph interface[Unified Agent Interface]
-            delegation[Inter-agent delegation]
-            routing[Message routing]
-            context[Shared context]
-        end
-        
-        config --> interface
-    end
-    
-    interface --> acp_server[ACP Server]
-    interface --> opencode_server[OpenCode Server]
-    interface --> agui_server[AG-UI Server]
-    
-    acp_server --> clients1[Zed, Toad, ACP Clients]
-    opencode_server --> clients2[OpenCode TUI/Desktop]
-    agui_server --> clients3[AG-UI Clients]
-```
+### 1. 🔌 One config, many protocols
 
-## Quick Start
-
-```bash
-uv tool install wolfharness
-
-```
-
-### Minimal Configuration
+Define your agents once in YAML. Then expose them through any protocol — ACP for IDEs, OpenCode for agentic TUI, MCP for tool exposure, or AG-UI for web frontends. No glue code, no duplication.
 
 ```yaml
-# agents.yml
+# agents.yml — single source of truth
 agents:
-  assistant:
-    type: native
-    model: openai:gpt-4o
-    system_prompt: "You are a helpful assistant."
-```
-
-```bash
-# Run via CLI
-wolfharness run assistant "Hello!"
-
-# Or start as ACP server (for Zed, Toad, etc.)
-wolfharness serve-acp agents.yml
-```
-
-### Integrating External Agents
-
-The real power comes from mixing agent types:
-
-```yaml
-agents:
-  # Native PydanticAI-based agent
   coordinator:
     type: native
     model: openai:gpt-4o
@@ -85,20 +37,22 @@ agents:
       - type: subagent  # Can delegate to all other agents
     system_prompt: "Coordinate tasks between available agents."
 
-  # ACP protocol agents
   goose:
     type: acp
     provider: goose
     description: "Goose for file operations"
 ```
 
-Now `coordinator` can delegate work to any of these agents, and all are accessible through the same interface.
+```bash
+# Serve the same config through any protocol
+wolfharness serve-acp agents.yml      # Zed, Toad, ACP clients
+wolfharness serve-opencode agents.yml # OpenCode TUI/Desktop
+wolfharness serve-mcp agents.yml      # MCP tools for other agents
+```
 
-## Key Features
+### 2. 🧩 Multi-agent orchestration built in
 
-### Multi-Agent Coordination
-
-Agents can form teams (parallel) or chains (sequential):
+Agents form teams (parallel), chains (sequential), or complex workflows — all from YAML.
 
 ```yaml
 teams:
@@ -114,17 +68,14 @@ teams:
 ```python
 async with AgentPool("agents.yml") as pool:
     # Parallel execution
-    team = pool.get_agent("analyzer") & pool.get_agent("reviewer")
-    results = await team.run("Review this code")
-
+    results = await (analyzer & reviewer).run("Review this code")
     # Sequential pipeline
-    chain = analyzer | reviewer | formatter
-    result = await chain.run("Process this")
+    result = await (analyzer | reviewer | formatter).run("Process this")
 ```
 
-### Rich YAML Configuration
+### 3. 🎯 Rich YAML configuration
 
-Everything is configurable - models, tools, connections, triggers, storage:
+Everything is configurable — models, tools, MCP servers, knowledge sources, triggers, connections, storage:
 
 ```yaml
 agents:
@@ -148,46 +99,112 @@ agents:
           words: [error, warning]
 ```
 
-### Server Protocols
+## Architecture
 
-AgentPool can expose your agents through multiple server protocols:
-
-| Server | Command | Use Case |
-|--------|---------|----------|
-| **ACP** | `wolfharness serve-acp` | IDE integration (Zed, Toad) - bidirectional communication with tool confirmations |
-| **OpenCode** | `wolfharness serve-opencode` | OpenCode TUI/Desktop - supports remote filesystems via fsspec |
-| **MCP** | `wolfharness serve-mcp` | Expose tools to other agents |
-| AG-UI | `wolfharness serve-agui` | AG-UI compatible frontends |
-| OpenAI API | `wolfharness serve-api` | Drop-in OpenAI API replacement |
-
-The **ACP server** is ideal for IDE integration - it provides real-time tool confirmations and session management. The **OpenCode server** enables the OpenCode TUI to control AgentPool agents, including agents operating on remote environments (Docker, SSH, cloud sandboxes).
-
-### Additional Capabilities
-
-- **Skill Commands**: Expose SKILLS.md files as slash commands across ACP, AG-UI, and OpenCode protocols
-- **Structured Output**: Define response schemas inline or import Python types
-- **Storage & Analytics**: Track all interactions with configurable providers
-- **File Abstraction**: UPath-backed operations work on local and remote sources
-- **Triggers**: React to file changes, webhooks, or custom events
-- **Streaming TTS**: Voice output support for all agents
-
-## Usage Patterns
-
-### CLI
-
-```bash
-wolfharness run agent_name "prompt"           # Single run
-wolfharness serve-acp config.yml              # ACP server for IDEs
-wolfharness serve-opencode config.yml         # OpenCode TUI server
-wolfharness serve-mcp config.yml              # MCP server
-wolfharness watch --config agents.yml         # React to triggers
-wolfharness history stats --group-by model    # View analytics
+```mermaid
+flowchart TB
+    subgraph WolfHarness
+        subgraph config[YAML Configuration]
+            native[Native Agents<br/>PydanticAI]
+            acp_agents[ACP Agents<br/>Goose, etc.]
+            workflows[Teams & Workflows]
+        end
+        subgraph interface[Unified Agent Interface]
+            delegation[Inter-agent delegation]
+            routing[Message routing]
+            context[Shared context]
+        end
+        config --> interface
+    end
+    interface --> acp_server[ACP Server]
+    interface --> opencode_server[OpenCode Server]
+    interface --> agui_server[AG-UI Server]
+    acp_server --> clients1[Zed, Toad, ACP Clients]
+    opencode_server --> clients2[OpenCode TUI/Desktop]
+    agui_server --> clients3[AG-UI Clients]
 ```
 
-### Programmatic
+## Key Features
+
+| Category | Features |
+|----------|----------|
+| **Orchestration** | Teams (parallel), chains (sequential), inter-agent delegation, event-driven triggers |
+| **Protocols** | ACP, OpenCode, MCP, AG-UI, OpenAI API-compatible — one config, all protocols |
+| **Configuration** | YAML-based agent definition, fallback models, tool registration, MCP server integration |
+| **Skills** | Expose `SKILLS.md` files as slash commands across all protocols |
+| **Structured Output** | Inline Pydantic schemas or Python types for response validation |
+| **Storage & Analytics** | Configurable providers (SQLite, PostgreSQL) for interaction tracking and stats |
+| **File Abstraction** | UPath-backed operations on local, S3, SSH, Docker filesystems |
+| **Streaming TTS** | Voice output support for all agents |
+| **Observability** | Logfire instrumentation on critical paths (RunLoop, Turn, delegation, protocol entry points) |
+
+## Supported Models
+
+WolfHarness is built on **PydanticAI** and supports all its model providers:
+
+| Provider | Models |
+|----------|--------|
+| **OpenAI** | GPT-4o, GPT-4o-mini, o1, o3, etc. |
+| **Anthropic** | Claude Sonnet 4, Claude Opus 4, Claude Haiku 3.5, etc. |
+| **Google** | Gemini 2.5 Pro, Gemini 2.5 Flash, etc. |
+| **DeepSeek** | DeepSeek V4, DeepSeek R1, etc. |
+| **Mistral** | Mistral Large, Mistral Small, etc. |
+| **Groq** | Llama, Mixtral, etc. (fast inference) |
+| **OpenAI-compatible** | Any OpenAI-protocol endpoint (vLLM, Ollama, Azure, etc.) |
+
+All models support **fallback chains** — configure a primary and fallback, WolfHarness handles the failover:
+
+```yaml
+model:
+  type: fallback
+  models: [openai:gpt-4o, anthropic:claude-sonnet-4-0]
+```
+
+## Quick Start
+
+### Installation
+
+```bash
+# Recommended — uv
+uv tool install wolfharness
+
+# Or pip
+pip install wolfharness
+```
+
+### Minimal config & run
+
+```yaml
+# agents.yml
+agents:
+  assistant:
+    type: native
+    model: openai:gpt-4o
+    system_prompt: "You are a helpful assistant."
+```
+
+```bash
+wolfharness run assistant "Hello!"
+```
+
+### Start a server
+
+```bash
+# ACP server — for Zed, Toad, and other ACP clients
+wolfharness serve-acp agents.yml
+
+# OpenCode server — for OpenCode TUI/Desktop
+wolfharness serve-opencode agents.yml
+
+# MCP server — expose tools to other agents
+wolfharness serve-mcp agents.yml
+```
+
+## Programmatic Usage
 
 ```python
 from wolfharness import AgentPool
+from pathlib import Path
 
 async with AgentPool("agents.yml") as pool:
     agent = pool.get_agent("assistant")
@@ -203,8 +220,116 @@ async with AgentPool("agents.yml") as pool:
     result = await agent.run("Describe this", Path("image.jpg"))
 ```
 
+## CLI Reference
+
+```bash
+wolfharness run <name> "prompt"              # Single run
+wolfharness serve-acp <config.yml>           # ACP server
+wolfharness serve-opencode <config.yml>      # OpenCode server
+wolfharness serve-mcp <config.yml>           # MCP server
+wolfharness serve-agui <config.yml>          # AG-UI server
+wolfharness serve-api <config.yml>           # OpenAI-compatible API
+wolfharness watch --config <agents.yml>      # React to triggers
+wolfharness history stats --group-by model   # View analytics
+wolfharness task <agent_name> "description"  # Create a background task
+```
+
+## Roadmap
+
+| Status | Feature |
+|--------|---------|
+| ✅ | v2.9.5 — Multi-protocol server (ACP, OpenCode, MCP, AG-UI, OpenAI API) |
+| ✅ | YAML-based agent configuration with fallback models |
+| ✅ | Teams (parallel) & chains (sequential) orchestration |
+| ✅ | Skill commands across all protocols |
+| ✅ | Storage & analytics (SQLite, PostgreSQL) |
+| ✅ | MCP server integration for agents |
+| 🔄 | Enhanced tool confirmation UI in ACP |
+| 🔄 | Remote filesystem abstraction (UPath) |
+| 📋 | Team-mode (dynamic LLM-driven team formation) |
+| 📋 | Agent evaluation & benchmarking framework |
+| 📋 | Lifecycle hooks system (M2) |
+| 📋 | Capability discovery protocol (M3) |
+
+## Development
+
+### Setup
+
+```bash
+git clone https://github.com/wolf1069b/agentpool
+cd agentpool
+uv sync --all-extras
+```
+
+### Commands
+
+```bash
+uv run pytest                           # Run tests
+uv run pytest -m unit                   # Unit tests only
+uv run ruff check src/                  # Lint
+uv run ruff format src/                 # Format
+uv run --no-group docs mypy src/        # Type check
+duty lint                               # All checks
+```
+
+### Workflow
+
+This project uses **OpenSpec** for all significant changes:
+
+```
+/opsx:explore   → Investigate problems, map codebase
+/opsx:propose   → Create proposal with design + specs + tasks
+/opsx:apply     → Implement tasks
+/opsx:archive   → Archive completed change
+```
+
+See [`AGENTS.md`](AGENTS.md) for full development setup, code style, and testing conventions. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines.
+
 ## Documentation
 
-For complete documentation including advanced configuration, connection patterns, and API reference, visit [leoyzen.github.io/wolfharness](https://leoyzen.github.io/wolfharness/).
-# test
-# final test
+Full docs, tutorials, and API reference at **[leoyzen.github.io/wolfharness](https://leoyzen.github.io/wolfharness/)**.
+
+- [Getting Started](https://leoyzen.github.io/wolfharness/tutorials/)
+- [Configuration Guide](https://leoyzen.github.io/wolfharness/how-to/)
+- [Architecture](https://leoyzen.github.io/wolfharness/explanation/)
+- [API Reference](https://leoyzen.github.io/wolfharness/reference/)
+
+## Contributors
+
+Thanks to everyone who has contributed to WolfHarness!
+
+[![Contributors](https://contrib.rocks/image?repo=wolf1069b/agentpool)](https://github.com/wolf1069b/agentpool/graphs/contributors)
+
+**Key contributors:** [Philipp Temminghoff](https://github.com/phil65) (original author), [Leoyzen](https://github.com/Leoyzen) (maintainer), [Million](https://github.com/Million-mo), [yankaifeng](https://github.com/yankaifeng), [tasia](https://github.com/tasiawang), and the broader iroot-llm team.
+
+## Citation
+
+If you use WolfHarness in your research or project, please cite:
+
+```bibtex
+@software{wolfharness2025,
+  author  = {{WolfHarness Contributors}},
+  title   = {WolfHarness: PydanticAI-based Multi-Agent Orchestration Framework},
+  year    = {2025},
+  url     = {https://github.com/wolf1069b/agentpool},
+  license = {MIT}
+}
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+<p align="center">
+  <em>Built on</em> &nbsp;
+  <a href="https://github.com/pydantic/pydantic-ai">PydanticAI</a> ·
+  <a href="https://github.com/anthropics/anthropic-claude-protocol">ACP</a> ·
+  <a href="https://github.com/sst/opencode">OpenCode</a> ·
+  <a href="https://github.com/modelcontextprotocol">MCP</a>
+</p>
+
+<p align="center">
+  <em>WolfHarness is a fork of</em> <a href="https://github.com/phil65/agentpool">phil65/agentpool</a> <em>by Philipp Temminghoff. Grateful for the foundational work and ongoing inspiration from the upstream project.</em>
+</p>
