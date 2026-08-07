@@ -281,7 +281,7 @@ requires-dist = [
     { name = "yamling", specifier = ">=2.0.2" },
     { name = "zstandard", marker = "extra == 'zed'", specifier = ">=0.23.0" },
 ]
-provides-extras = ["a2a", "bot", "braintrust", "clipboard", "coding", "composio", "events", "langfuse", "markitdown", "mcp-discovery", "mcp-run", "notifications", "promptlayer", "tiktoken", "tts", "watchdog", "zed", "viking"]
+provides-extras = ["a2a", "bot", "braintrust", "clipboard", "coding", "composio", "events", "langfuse", "markitdown", "mcp-discovery", "mcp-run", "notifications", "promptlayer", "tiktoken", "tts", "viking", "watchdog", "zed"]
 
 [package.metadata.requires-dev]
 benchmark = [{ name = "pyinstrument" }]
@@ -3395,14 +3395,14 @@ wheels = [
 
 [[package]]
 name = "openviking-sdk"
-version = "0.1.5"
+version = "0.1.6"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 dependencies = [
     { name = "httpx" },
 ]
-sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e4/9c/b75da8d956bbfaf39288dd3cf7c734ba9225fba34e44362d02fbdb9a871d/openviking_sdk-0.1.5.tar.gz", hash = "sha256:f017dec938267aaea659122165f2872e189933a5604ba6d9ec0ae867b558ecaf", size = 33652, upload-time = "2026-07-23T06:18:56.211Z" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6b/65/021ba0a777750d536b70e7ca5c14888d9e906627b80a9332b2c644082480/openviking_sdk-0.1.6.tar.gz", hash = "sha256:7ecfdebdbe3538556584e4348f19f1c990831c739404ee4e06e251f3d8a6641d", size = 40041, upload-time = "2026-08-03T07:15:38.963Z" }
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/53/c0/481ec44e2f98cf1afd47d4c115756dd4b1fa674caa4b99b0f72723d6fc33/openviking_sdk-0.1.5-py3-none-any.whl", hash = "sha256:f29af1c56e1a4477c881d584fa5178b5a34600847926cfe21fddd333ccb576ec", size = 21740, upload-time = "2026-07-23T06:18:54.864Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6b/86/e0a9ff16d5b5eb38871450110b0ba64bff7a46020c617c482d4ce0ea3e7a/openviking_sdk-0.1.6-py3-none-any.whl", hash = "sha256:61e55f51f2733b80950488bb57299c5fd1bface388242ebff02c245ab6e04bd5", size = 25058, upload-time = "2026-08-03T07:15:37.776Z" },
 ]
 
 [[package]]
