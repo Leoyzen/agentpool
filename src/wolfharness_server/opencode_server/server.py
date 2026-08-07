@@ -572,15 +572,6 @@ def create_app(*, agent: BaseAgent[Any, Any], working_dir: str | None = None) ->
 
     if os.environ.get("LOGFIRE_DISABLE", "").lower() != "true":
         try:
-            from wolfharness_server.opencode_server.otel_fastapi_patch import (
-                patch_otel_fastapi_route_details,
-            )
-
-            # FastAPI >= 0.136 wraps included routers in _IncludedRouter nodes
-            # without a `.path` attribute; OTel's _get_route_details crashes on
-            # these for partial matches (e.g. /session/{id}/message), turning
-            # valid requests into 500s. Guard before instrumenting.
-            patch_otel_fastapi_route_details()
             logfire.instrument_fastapi(app)
         except Exception:
             logger.warning("Failed to instrument FastAPI app with Logfire", exc_info=True)

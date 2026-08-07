@@ -51,6 +51,7 @@ dependencies = [
   "keyring>=25.6.0",
   "logfire[fastapi]",
   "mcp>=1.2.0",
+  "opentelemetry-instrumentation-fastapi>=0.64b0",
   "pillow>=11.3.0",
   "platformdirs",
   "promptantic>=0.4.5",
@@ -553,6 +554,26 @@ requires-dist = [
     "upathtools[httpx]",
     "yamling",
     "zensical",
+]
+
+# Override mistralai's outdated opentelemetry-semantic-conventions pin
+# (>=0.60b1,<0.61). It only imports stable attr constants from
+# opentelemetry.semconv.attributes; the constraint blocks the OTel
+# instrumentation upgrade (>=0.64b0) that fixes the FastAPI _IncludedRouter
+# crash. The downgrade-name for the pin is metadata-only; the code is
+# compatible across 0.60-0.65 betas.
+[[tool.uv.dependency-metadata]]
+name = "mistralai"
+version = "2.7.2"
+requires-dist = [
+    "eval-type-backport",
+    "httpx",
+    "jsonpath-python",
+    "opentelemetry-api<2.0.0,>=1.33.1",
+    "opentelemetry-semantic-conventions>=0.60b1",
+    "pydantic",
+    "python-dateutil",
+    "typing-inspection",
 ]
 
 [tool.uv.build-backend]
